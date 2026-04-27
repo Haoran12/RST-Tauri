@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+
+# Frontend build output and caches
+dist/
+dist-ssr/
+.vite/
+.cache/
+coverage/
+*.tsbuildinfo
+
+# Rust / Tauri build output
+target/
+src-tauri/target/
+
+# Application runtime data
+data/
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.log
+logs/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Local editor / IDE files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local AI assistant / tooling state
+.claude/
+.codex/
+
+# Temporary files
+tmp/
+temp/
+*.tmp

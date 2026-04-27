@@ -5,10 +5,12 @@
 - 双模式总体架构图
 - 设计原则
 - 前/后端模块结构
-- LLM 与程序的职责边界总表 + 7 大铁律
+- 应用数据目录约束
+- 日志 / Trace 的系统边界
+- LLM 与程序的职责边界总表 + 8 大铁律
 - 数据形态铁律（自由文本三关口）
 
-数据契约与程序化派生公式见 [10_agent_data_and_simulation.md](10_agent_data_and_simulation.md)。运行时主循环与验证规则见 [11_agent_runtime.md](11_agent_runtime.md)。
+数据契约与程序化派生公式见 [10_agent_data_and_simulation.md](10_agent_data_and_simulation.md)。运行时主循环与验证规则见 [11_agent_runtime.md](11_agent_runtime.md)。日志与可观测性见 [30_logging_and_observability.md](30_logging_and_observability.md)。
 
 ---
 
@@ -47,7 +49,7 @@
 │  └──────────────────────────────────────────────────────────┘  │
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │                       Storage Layer                      │  │
-│  │   JSON (SillyTavern)   SQLite (Agent)   Trace Log        │  │
+│  │ JSON (ST)  SQLite (Agent)  Agent Trace  Runtime Logs     │  │
 │  └──────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -71,12 +73,13 @@
 - **Traceable Subjectivity** — 误判、过度反应可在系统层面解释。
 - **Truth ≠ Accessible Truth** — 客观真相只有编排器、仲裁、验证可读；角色 LLM 永远经过可见性过滤。
 - **Single Source of Visibility** — 所有可见性判断由 VisibilityResolver 集中处理；禁止散落在 prompt builder 或业务代码中。
+- **Logs Are Observations** — Agent Trace 与运行 Logs 只用于调试、审计、回放定位；不得作为业务判断来源或 LLM 输入来源。
 
 ---
 
 ## 3. 数据形态铁律
 
-**自由文本仅允许出现在三处**，所有中间数据节点必须是结构化 JSON。
+**自由文本作为顶层 I/O 仅允许出现在三处**，所有中间数据节点必须是严格 schema JSON；中间 JSON 内允许少量 LLM-readable 文本叶子字段，但这些字段不得参与程序判断、检索、可见性或规则匹配。
 
 | 位置 | 形态 | 说明 |
 |---|---|---|
@@ -84,7 +87,11 @@
 | SceneStateExtractor 输入 | 自由文本 | 用户/作者的自然语言叙事描述 |
 | SurfaceRealizer 输出 | 自由文本 | 给用户阅读的最终叙事 |
 
-**所有其他中间节点**（Layer 1 / Layer 2 / Layer 3 数据、CognitivePass 输入输出、仲裁输入输出、SurfaceRealizer 输入）**必须为严格 schema JSON**。
+**所有其他中间节点**（Layer 1 / Layer 2 / Layer 3 数据、CognitivePass 输入输出、仲裁输入输出、SurfaceRealizer 输入）**必须为严格 schema JSON**。若字段值是文本，必须显式标注用途：
+
+- `semantic`：程序可读，必须使用枚举、ID、数值、布尔、结构体等，不允许自然语言。
+- `llm_readable`：仅供 LLM 阅读理解，如 `summary_text` / `effect_hints` / `descriptors` / `notes`；禁止用于程序判断。
+- `trace_only`：仅调试回放，如 `raw_text`；禁止进入业务逻辑。
 
 ### 自由文本进出系统的关口
 
@@ -104,9 +111,9 @@ SurfaceRealizer (LLM)
 [自由文本叙事 → 用户]
 ```
 
-### 例外：作者配置中的描述性字段
+### 例外：LLM-readable 文本字段
 
-文风约束（StyleConstraints）等"作者预设、最终交给 LLM 阅读"的配置中，允许字段值含自由文本字符串。原则：**自由文本字段的值仅作为 LLM 的提示输入，不参与程序逻辑判断 / 检索 / 规则匹配**。
+文风约束（StyleConstraints）、KnowledgeEntry 的 `summary_text`、程序生成的 `effect_hints` / `descriptors` / `notes` 等字段允许包含自然语言。原则：**文本字段的值仅作为 LLM 的提示输入或 trace，不参与程序逻辑判断 / 检索 / 规则匹配**。
 
 ### KnowledgeEntry 内容的结构化要求
 
@@ -129,7 +136,7 @@ SurfaceRealizer (LLM)
 | EmbodimentResolver | 程序 | 公式化；含 environmental_strain 档位翻译 |
 | 物理量→档位翻译（风/温/能见度/地表/降水/呼吸） | 程序 | 严禁 LLM 从 raw m/s, ℃ 推断后果；档位针对该角色物种已校准；body 侧与 perception 侧共享阈值表 |
 | 灵力数值→档位翻译（个体/环境） | 程序 | LLM 不读 raw mana_power；档位边界来自世界配置（默认对 rp_cards 锚点校准） |
-| 灵力差距→感知档（Δ 桶） | 程序 | 阈值 200/500/1000/2500 共用同一份表；感知层用 displayed_mana_power |
+| 灵力差距→感知档（Δ 桶） | 程序 | 感知层阈值 150/300/1000/2000；仲裁层共享 150/300/1000，1000+ 即 Crushing；感知层用 displayed_mana_power |
 | 灵力压制/隐匿的"破绽"判定 | 程序 | concealment_suspected 由 (observer.effective vs target.effective − 200) + 灵觉敏锐度计算；不让 LLM 自行猜"他是不是在装弱" |
 | 灵力对抗仲裁 | 程序 | 仲裁用 effective_mana_power × 加算修正区 × soul_factor，桶映射到 outcome_tier；不读 displayed |
 | 仲裁→社会后果 | 不在仲裁层 | 物理后果写回 L1；恐惧/屈服/记仇由下游 LLM 解读 |
@@ -144,26 +151,81 @@ SurfaceRealizer (LLM)
 | 认知输出兜底解读 | **LLM**（仲裁层） | 修复失败时启用，输出严格 schema |
 | 社会层后果（被骗/被劝服） | 不在仲裁层处理；下游角色 LLM 自行解释 | - |
 | 叙事渲染 | **LLM**（SurfaceRealizer） | 输入严格结构化 + StyleConstraints；输出自由文本 |
-| NarrativeFactCheck | 程序 | 扫描叙事文本提及事实 ⊆ visible_facts |
+| NarrativeFactCheck | 程序 | 扫描叙事文本提及事实 ⊆ 当前 NarrationScope 的 visible_facts |
 | 验证规则 | 程序 | 全程结构化 |
 | 状态提交 | 程序 | 全程结构化 |
 | 用户扮演输入验证 | 程序（同样跑 Validator） | 一致性 |
+| Agent Trace 写入 | 程序 | 记录回合内判断数据；不得改变状态演化 |
+| 运行 Logs 写入 | 程序 | 记录 LLM 调用与异常事件；不得作为 LLM 输入 |
 
-### 7 大关键铁律
+### 8 大关键铁律
 
-1. **自由文本仅在三处出现**：用户输入、SceneStateExtractor 输入、SurfaceRealizer 输出。其他全部结构化。
+1. **自由文本顶层 I/O 仅在三处出现**：用户输入、SceneStateExtractor 输入、SurfaceRealizer 输出。其他中间节点必须为严格 schema JSON；LLM-readable 文本叶子字段只供阅读，不参与程序判断。
 2. **VisibilityResolver 永不调 LLM**：可见性判断必须确定性。
-3. **LLM 输出必须严格 schema**：依赖 Provider 的 JSON mode + prompt 模板 + 程序容错。
+3. **LLM 输出必须严格 schema**：优先依赖 Provider 的 structured output / tool schema；仅在无强 schema 能力时退化到 JSON mode + schema 校验 + 重试 / 程序容错。
 4. **数值字段不让 LLM 直出**：信念/情绪变化用离散级别，由程序映射为数值。
 5. **客观推理交给数据**：长链客观推理通过 Knowledge 预存事实实现，不让 LLM 即兴推理。
 6. **社会后果不在仲裁层**：下游角色的 LLM 自行解读社会信号（"我相信他了吗"）。
-7. **叙事不引入新事实**：SurfaceRealizer 受 visible_facts 白名单约束，由 NarrativeFactCheck 强制。
+7. **叙事不引入新事实**：SurfaceRealizer 受 NarrationScope 派生的 visible_facts 白名单约束，由 NarrativeFactCheck 强制。
+8. **日志不驱动业务**：Agent Trace 和运行 Logs 只用于观察、调试、审计、回放定位；不得参与程序判断、检索、可见性或 LLM prompt 组装。
 
 ---
 
-## 5. 模块结构
+## 5. 应用数据目录约束
 
-### 5.1 前端 (Vue 3)
+应用数据根目录固定为应用所在路径下的 `./data/`。默认不得写入 `AppData`、`Application Support`、`~/.config` 等系统用户数据目录，除非用户显式迁移或选择自定义数据目录。理由是让用户可以直接复制、备份、同步和检查完整数据。
+
+### 5.1 通用规则
+
+- 所有用户可迁移数据必须位于 `./data/` 或用户显式选择的数据根目录下。
+- API 配置、角色卡、世界书、聊天记录、Agent 世界数据库不得散落在程序目录外。
+- 应用启动时由存储层负责创建缺失目录；业务模块只通过 `storage::*` 访问路径。
+- 路径中的实体 ID 必须使用安全文件名，禁止 `..`、绝对路径和平台保留字符。
+- 日志存储位置见 [30_logging_and_observability.md](30_logging_and_observability.md)：全局运行 Logs 位于 `./data/logs/`，Agent Trace 随 World 位于 `./data/worlds/<world_id>/`。
+
+### 5.2 ST 模式数据布局
+
+ST 模式使用 JSON 文件存储，目录结构必须与 SillyTavern 兼容目标保持清晰分层：
+
+```
+./data/
+├── lores/          # 世界书
+├── presets/        # Prompt 预设
+├── chats/          # 聊天记录
+├── characters/     # 角色卡 V3
+└── api_configs/    # AI Provider 配置
+```
+
+ST 模式的聊天记录是文本会话数据，不承担 Agent 世界状态演化职责；删除 / 编辑消息不强制触发世界回滚约束。
+
+### 5.3 Agent 模式数据布局与故事线定位
+
+Agent 模式以 World 为顶层隔离单元。一个 World 不是普通聊天文件夹，而是一个持续演化的拟真故事世界；世界设定、人物状态、历史事件、聊天记录和回放 trace 必须共享同一条故事线。Agent 世界数据存放在应用数据目录的 `data/worlds/<world_id>/` 下，每个世界独立保存 SQLite 数据库、运行时快照、回放 trace 和必要资源；全局运行 Logs 作为应用观测数据存放在 `data/logs/`：
+
+```
+./data/
+├── logs/
+│   ├── app_logs.sqlite
+│   └── archives/
+└── worlds/
+    ├── <world_id>/
+    │   ├── world.sqlite
+    │   ├── traces/
+    │   └── assets/
+    └── <world_id>/
+```
+
+SQLite 内部表结构见 [10_agent_data_and_simulation.md](10_agent_data_and_simulation.md)。Layer 2 派生视图不持久化，每回合由 Layer 1 / Layer 3 重建。
+
+用户删除或回退 Agent 聊天记录时，不能只删除消息文本，也不能单独删除中间某一条消息。Agent 模式只允许从目标消息对应回合开始，连同其后的所有回合一起截断；系统必须同步回滚这些回合造成的人物数据、世界数据、知识揭示、主观状态和 trace 记录。因此每个已提交回合必须有 `scene_turn_id`、父回合关系、状态提交记录和可回滚快照；删除操作本质上是回到目标父回合的一致世界状态。
+
+Agent Trace 是世界调试与回放数据，随 World 保存；运行 Logs 是应用观测数据，用于记录 LLM 请求响应、Provider 错误与异常事件。回滚 Agent 回合时，世界状态与回合 trace 按故事线回退；运行 Logs 默认保留为审计记录，不随剧情回滚物理删除。
+
+---
+
+## 6. 模块结构
+
+### 6.1 前端 (Vue 3)
 
 ```
 src/
@@ -202,7 +264,7 @@ src/
 └── router/
 ```
 
-### 5.2 后端 (Rust)
+### 6.2 后端 (Rust)
 
 ```
 src-tauri/
@@ -267,23 +329,32 @@ src-tauri/
 │   ├── storage/
 │   │   ├── json_store.rs
 │   │   └── sqlite_store.rs
+│   ├── logging/             # 日志与可观测性
+│   │   ├── mod.rs
+│   │   ├── context.rs       # LogContext / request_id / trace_id
+│   │   ├── llm_logger.rs    # Provider logging wrapper
+│   │   ├── event_logger.rs  # app_event_logs
+│   │   └── retention.rs     # 1GB 默认清理策略
 │   └── models/
 └── Cargo.toml
 ```
 
-### 5.3 模块职责边界（避免屎山）
+### 6.3 模块职责边界（避免屎山）
 
 | 模块 | 唯一职责 | 禁止做的事 |
 |---|---|---|
 | `knowledge::store` | KnowledgeEntry 的 CRUD | 不做可见性判断，不读 Layer 3 |
 | `knowledge::visibility` | 给定 (entry, character, context) → bool | 严禁调 LLM；不读 Layer 3 belief；不修改任何状态 |
 | `knowledge::access` | 给定 character → AccessibleKnowledge | 不调 LLM，不修改 belief |
-| `knowledge::reveal` | 处理 KnowledgeRevealEvent | 仅追加新 known_by 与生成 Memory，不重写既有 content |
+| `knowledge::reveal` | 处理 KnowledgeRevealEvent | 追加 known_by 与生成 Memory；若原 scope 含 GodOnly，必须先由仲裁确认并解除 GodOnly 后才能追加知情者；不重写既有 content |
 | `simulation::scene_extractor` | 调 LLM 把用户自由文本解析为 UserInputDelta | 不写 Layer 1（写入由 runtime 协调）；不解析中间数据 |
 | `simulation::scene_filter` | 当下感官过滤 + 计算 visible_facets | 不读 Knowledge content，仅判断 facet 可见性 |
 | `simulation::input_assembly` | 拼装 CognitivePassInput | 不调 LLM，不做语义判断；输入禁止携带 Layer 1 原始对象 |
 | `simulation::arbitration` | 物理后果判定 + 认知输出兜底解读（混合层） | 物理判定纯程序；LLM 兜底仅用于解析失败时；不处理社会后果 |
 | `cognitive::cognitive_pass` | 调 LLM 输出严格 schema JSON | 不做验证，不直接修改 Layer 1/3 |
 | `validation::*` | 检查输入/输出对 | 不修改任何状态；不调 LLM |
-| `presentation::surface_realizer` | 调 LLM 渲染叙事 | 受 visible_facts 白名单约束；不引入新事实 |
+| `presentation::surface_realizer` | 调 LLM 渲染叙事 | 受 NarrationScope 派生的 visible_facts 白名单约束；不引入新事实 |
 | `agent::runtime` | 编排上述模块 | 不嵌入业务逻辑（仅做调度） |
+| `logging::llm_logger` | 包装 Provider 调用并记录请求 / 响应 / stream chunk | 不改写 Provider 结果；不参与 prompt 组装 |
+| `logging::event_logger` | 记录应用异常与运行事件 | 不吞异常；不改变业务分支 |
+| `logging::retention` | 清理全局运行 Logs | 不自动删除 Agent Trace 或仍被回合引用的记录 |

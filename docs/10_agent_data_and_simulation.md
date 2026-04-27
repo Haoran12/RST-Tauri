@@ -23,6 +23,7 @@ LLM 调用流程、主循环、验证规则见 [11_agent_runtime.md](11_agent_ru
 │  ├── KnowledgeEntry[*]       统一知识库（含世界/势力/角色档 │
 │  │                           案/记忆，带可见性谓词）         │
 │  └── 角色 baseline_body_profile（物种/感官基线/灵觉基线）    │
+│      + temporary_body_state  伤势/疲惫/痛感/灵力消耗等当前态 │
 │  约束：LLM 永远不直接读取此层；CognitivePassInput 不出现     │
 │        Layer 1 原始对象。                                    │
 └──────────────────────────────────────────────────────────────┘
@@ -47,8 +48,7 @@ LLM 调用流程、主循环、验证规则见 [11_agent_runtime.md](11_agent_ru
 │  ├── EmotionState            情绪                            │
 │  ├── RelationModels[*]       对他人的主观印象（trust/感知意 │
 │  │                           图/主观评价）                   │
-│  ├── CurrentGoals            目标（含 hidden）               │
-│  └── temporary_body_state    伤势/疲惫/痛感/灵力消耗          │
+│  └── CurrentGoals            目标（含 hidden）               │
 │  约束：本层是 LLM 的输出领地；任何关于"我相信 B 是好人"      │
 │        的命题进入 RelationModels 而非 BeliefState（避免重复）│
 └──────────────────────────────────────────────────────────────┘
@@ -226,7 +226,8 @@ pub enum CharacterFacetType {
 }
 
 pub struct VisibilityPredicate {
-    // 三谓词，OR 关系（任一为真即可见）
+    // 三谓词，OR 关系（任一为真即可见）。
+    // 例外：scope 含 GodOnly 时为 hard deny，优先级高于 known_by / scope / conditions。
     pub known_by: Vec<String>,                  // 名单制
     pub scope: Vec<VisibilityScope>,            // 标签制
     pub conditions: Vec<VisibilityCondition>,   // 条件制（运行时求值）
@@ -234,7 +235,7 @@ pub struct VisibilityPredicate {
 
 pub enum VisibilityScope {
     Public,                  // 所有原住民
-    GodOnly,                 // 仅编排器（无人可知）
+    GodOnly,                 // 仅编排器（无人可知；hard deny）
     Region(String),          // 在该地区的角色
     Faction(String),         // 该势力成员
     Realm(String),           // 修为门槛及以上
@@ -248,8 +249,17 @@ pub enum VisibilityCondition {
     RelationAtLeast { target: String, threshold: f64 },    // 与目标关系阈值
     HasSkill(String),                                      // 拥有特定技能
     CultivationAtLeast(String),                            // 修为达到
-    CustomExpression(String),                              // DSL 扩展点
+    CustomPredicate(VisibilityExpression),                 // 结构化 DSL AST 扩展点；禁止自然语言表达式
     // 可扩展
+}
+
+pub enum VisibilityExpression {
+    All(Vec<VisibilityExpression>),
+    Any(Vec<VisibilityExpression>),
+    Not(Box<VisibilityExpression>),
+    HasTag { subject_id: String, tag: String },
+    NumericAtLeast { path: String, value: f64 },
+    BooleanFlag { path: String, expected: bool },
 }
 
 pub enum SubjectAwareness {
@@ -277,9 +287,11 @@ pub struct KnowledgeMetadata {
 1. `content` 永远不进入 LLM，除非 `VisibilityResolver` 判定该角色对该 entry 完全可见。
 2. `subject == Character{id: A}` 且 `subject_awareness == Unaware{self_belief}` 时：A 的 accessible_knowledge 中只见 `self_belief`，看不到 `content`。
 3. `apparent_content` 存在时：观察者（非 subject）默认看到 `apparent_content`；只有满足"揭穿条件"或在 `known_by` 中的角色才看到 `content`。
-4. `visibility.scope` 含 `GodOnly` 表示仅编排器可读，对所有角色不可见。
-5. `MemoryEntry` 不再独立存在；历史事件以 `KnowledgeEntry { kind: Memory }` 形式统一存储。
-6. Layer 1 的 Knowledge 内容由编排器/作者/StateCommitter 写入；CognitivePass 不可写。
+4. `visibility.scope` 含 `GodOnly` 表示仅编排器可读，对所有角色不可见；`VisibilityResolver` 必须先检查 `GodOnly`，命中后直接拒绝，不再计算 `known_by` / 其他 scope / conditions。
+5. `GodOnly` 启用态下 `visibility.known_by` 必须为空；Validator / StateCommitter 自动检查并拒绝 `GodOnly + known_by 非空` 的状态。
+6. 若故事推进后仲裁确认某条 `GodOnly` 知识可被角色获知，必须通过 `KnowledgeRevealEvent` 先移除 `GodOnly` 或降级为其他 scope，再追加 `known_by`；禁止在 `GodOnly` 仍存在时直接写入 `known_by`。
+7. `MemoryEntry` 不再独立存在；历史事件以 `KnowledgeEntry { kind: Memory }` 形式统一存储。
+8. Layer 1 的 Knowledge 内容由编排器/作者/StateCommitter 写入；CognitivePass 不可写。
 
 ### 2.5 Content Schema 约定（核心字段 + extensions 兜底）
 
@@ -366,12 +378,19 @@ pub struct KnowledgeRevealEvent {
     pub knowledge_id: String,
     pub newly_known_by: Vec<String>,   // 此次新增的知情者
     pub trigger: RevealTrigger,        // 何种触发：witnessed / told / inferred / awakened
+    pub scope_change: Option<VisibilityScopeChange>, // GodOnly 揭示时必须先降级/移除 GodOnly
     pub scene_turn_id: String,
+}
+
+pub enum VisibilityScopeChange {
+    RemoveGodOnly,                     // 仲裁确认该知识已可进入角色可知范围
+    ReplaceScopes(Vec<VisibilityScope>),
 }
 ```
 
 由 StateCommitter 处理：
-- 更新 `KnowledgeEntry.visibility.known_by`。
+- 若原 entry 含 `GodOnly`，必须先验证 `scope_change` 已移除/替换 `GodOnly`，否则拒绝追加 `newly_known_by`。
+- 更新 `KnowledgeEntry.visibility.scope` 与 `visibility.known_by`。
 - 在 event_stream 追加事件。
 - 创建一条 `KnowledgeEntry { kind: Memory }` 记录"X 何时如何获知 Y"。
 
@@ -379,13 +398,14 @@ pub struct KnowledgeRevealEvent {
 
 角色不再有大而全的"static_profile" blob。所有"客观属于该角色的事实"都拆为多条 `KnowledgeEntry { kind: CharacterFacet, subject: Character{id, facet} }`，按需查询。
 
-仅以下两项作为非 Knowledge 的角色基本数据保留在 Layer 1：
+以下三项作为非 Knowledge 的角色基本数据保留在 Layer 1：
 
 ```rust
 pub struct CharacterRecord {
     pub character_id: String,
     pub baseline_body_profile: BaselineBodyProfile,    // 物种/感官基线/灵觉基线/灵力数值（用于 EmbodimentResolver 与 SceneFilter）
     pub mind_model_card: MindModelCard,                // 自我形象/世界观/恐惧触发/防御模式（属于 subject 自我认知，默认 Aware）
+    pub temporary_body_state: TemporaryBodyState,       // 当前客观身体/资源状态；每回合由机械演化、仲裁、BodyReactionDelta 更新
     pub schema_version: String,
 }
 
@@ -408,6 +428,7 @@ pub struct ManaSenseBaseline {
 注意：
 
 - `MindModelCard` 在 Layer 1 也以 `KnowledgeEntry` 形式存在（subject 自我认知层），这里只是冗余索引以便 EmbodimentResolver 直接读取，**不允许它脱离 Knowledge 入口被外部读取**。
+- `temporary_body_state` 主要归入 Layer 1：伤势、疲惫、痛感、灵力消耗、冷却、毒素、短暂身体反应等都属于当前客观/半客观运行态。CognitivePass 只能通过 Layer 2 的 `EmbodimentState` 看到其派生结果，不直接读取原始状态。
 - `base_mana_power` 是 raw 数值；当前**有效灵力**还需叠加 L1 中的伤势/压制/突破修正后再喂给 `ManaPotencyTier::from_power`。raw 永远不进入 CognitivePass。
 - `comfort_temperature_range` 与 `base_mana_power` 的默认值在角色卡解析时从对应种族卡（如 `humanbeing.yaml` / `yaoguai.yaml`）读取并可被角色级覆盖。
 
@@ -530,17 +551,17 @@ pub enum SurfaceImpactTier {
 
 pub enum VisibilityTier {
     Clear,        // > 100 m
-    Hazy,         // 30-100 m
-    Limited,      // 5-30 m       仅近距离辨识
+    Hazy,         // 20-100 m
+    Limited,      // 5-20 m       仅近距离辨识
     Blind,        // < 5 m        几乎瞎走
 }
 
 pub enum PrecipitationIntensityTier {
     None,         // 无降水
     Light,        // 细雨/小雪/零星冰雹
-    Moderate,     // 中雨/中雪
-    Heavy,        // 大雨/大雪/能见度受影响
-    Torrential,   // 暴雨/暴雪/沙暴/能影响行动与视野
+    Moderate,     // 中雨/中雪 行动与能见度略受影响
+    Heavy,        // 大雨/大雪/冰雹 行动与能见度明显受影响，持续暴露有伤害风险
+    Torrential,   // 暴雨/暴雪/沙暴/ 对于Transcendent以下的人物来说行动能力与视野能见度几乎归零，持续暴露有伤害风险
 }
 
 pub enum RespirationImpactTier {
@@ -622,12 +643,12 @@ pub enum PrecipitationKind {
 ```rust
 pub enum ManaPotencyTier {
     // 单个角色 / 法器 / 法术 / 灵脉的灵力强度档位（默认边界，可由世界配置覆盖）
-    Mundane,        // [0, 200)         凡人 / 无修行（锚: 人类无修行 100）
-    Awakened,       // [200, 1000)      初醒 / 入门（锚: 妖精入门 500, 人类入门 700, 仙灵诞生 800）
-    Adept,          // [1000, 1700)     成熟修士（锚: 妖精瓶颈 1400, 人类瓶颈 1300, 齐松 1450）
-    Master,         // [1700, 2500)     大成（锚: 仙灵不修行成型 1800, 人妖大成 2400）
-    Transcendent,   // [2500, 5400)     超凡（锚: 仙灵修行瓶颈 5000）
-    Legendary,      // [5400, +∞)       传说 / 神祇 / 法则化（锚: 苍角 8800, 高阶仙灵 NaN）
+    Mundane,       // [0, 200)         凡人 / 无修行（锚: 人类无修行 100）
+    Awakened,      // [200, 1000)      入门（锚: 妖精入门 500, 人类入门 700, 仙灵诞生 800）
+    Adept,         // [1000, 1800)     成熟/精英（锚: 妖精瓶颈 1400, 人类瓶颈 1300, 齐松 1450）
+    Master,        // [1800, 2600)     大成（锚: 仙灵不修行成型 1800, 人妖大成 2400）
+    Ascendant,     // [2600, 5600)     高阶（锚: 仙灵修行瓶颈 5000）
+    Transcendent,  // [5600, +∞)       超越/超凡（锚: 苍角 7200, 高阶仙灵 NaN）
 }
 
 pub enum AmbientManaDensityTier {
@@ -643,15 +664,15 @@ pub enum AmbientManaDensityTier {
 pub enum ManaPerceptionDelta {
     // Δ = target.displayed_mana_power - observer.effective_mana_power
     // 用于"感觉差距多大"，与档位识别正交（同档可有显著差，跨档也可被技巧/状态拉平）
-    Indistinguishable,       // |Δ| < 200          相若, 难分高下
-    SlightlyBelow,           // Δ ∈ [-500, -200)   略弱
-    NotablyBelow,            // Δ ∈ [-1000, -500)  显著弱
-    FarBelow,                // Δ ∈ [-2500, -1000) 远不及, 基本无力应对（仲裁=Crushing）
-    Crushed,                 // Δ < -2500          蝼蚁差距, 无法测度（仲裁=Crushing）
-    SlightlyAbove,           // Δ ∈ [200, 500)     略胜
-    NotablyAbove,            // Δ ∈ [500, 1000)    显著强
-    FarAbove,                // Δ ∈ [1000, 2500)   远胜, 守方基本无力应对（仲裁=Crushing）
-    Overwhelming,            // Δ ≥ 2500           压顶, 无法测度（仲裁=Crushing）
+    Indistinguishable,       // |Δ| < 150          相若, 难分高下
+    SlightlyBelow,           // Δ ∈ [-300, -150)   略弱
+    NotablyBelow,            // Δ ∈ [-1000, -300)  显著弱
+    FarBelow,                // Δ ∈ [-2000, -1000) 远不及, 基本无力应对（仲裁=Crushing）
+    Crushed,                 // Δ < -2000          蝼蚁差距, 无法测度（仲裁=Crushing）
+    SlightlyAbove,           // Δ ∈ [150, 300)     略胜
+    NotablyAbove,            // Δ ∈ [300, 1000)    显著强
+    FarAbove,                // Δ ∈ [1000, 2000)   远胜, 守方基本无力应对（仲裁=Crushing）
+    Overwhelming,            // Δ ≥ 2000           压顶, 无法测度（仲裁=Crushing）
 }
 
 pub struct PerceivedManaProfile {
@@ -690,8 +711,8 @@ pub struct ManaEnvironmentSense {
 3. **Δ = target.displayed_mana_power − observer.effective_mana_power**，按上述 9 档桶映射到 `ManaPerceptionDelta`。
 4. **档位识别**：
    - `|Δ| < 1000`：可识别 `tier_assessment = ManaPotencyTier::from_power(displayed)` 与 `attribute_assessment`，`confidence ≥ 0.7`。
-   - `|Δ| ∈ [1000, 2500)`：可识别 tier，但 attribute 不稳；descriptors 偏向"远胜 / 远不及"。
-   - `|Δ| ≥ 2500`：`tier_assessment = None`，descriptors 偏向"无法测度 / 如同蝼蚁"。
+   - `|Δ| ∈ [1000, 2000)`：可识别 tier，但 attribute 不稳；descriptors 偏向"远胜 / 远不及"。
+   - `|Δ| ≥ 2000`：`tier_assessment = None`，descriptors 偏向"无法测度 / 如同蝼蚁"。
 5. **Mundane (Tier0) 观察者**：仅能将 `effective_mana_power ≥ 1000` 的存在感知为"超出常理"，无具体档位；环境灵气仅给"格外厚重 / 压抑"等体感。
 6. **零灵觉**（`SensoryCapabilities.mana.acuity == 0`）：`mana_signals = []`，`mana_environment.density_tier` 由间接体感（呼吸/温度异常）回填，`dominant_attribute = None`。
 7. **隐匿 / 压制**：
@@ -731,11 +752,11 @@ pub struct ManaCombatResolution {
 }
 
 pub enum CombatOutcomeTier {
-    // 由 |combat_delta| 桶映射；与感知层 ManaPerceptionDelta 共享 200/500/1000 三个阈值
-    // 仲裁层不再细分 1000 以上：到了"基本无力应对"就够用了，差距更大也只是逃命姿态不同
-    Indistinguishable,       // |Δ| < 200       势均力敌, 胜负看技巧/运气
-    SlightEdge,              // Δ ∈ [200, 500)  攻方略占上风
-    MarkedEdge,              // Δ ∈ [500, 1000) 攻方明显优势
+    // 由 |combat_delta| 桶映射；与感知层 ManaPerceptionDelta 共享 150/300/1000 三个阈值
+    // 仲裁层不再细分 1000 以上：到了"无力应对"就够用了
+    Indistinguishable,       // |Δ| < 150       势均力敌, 胜负看临场发挥/技巧
+    SlightEdge,              // Δ ∈ [150, 300)  攻方略占上风
+    MarkedEdge,              // Δ ∈ [300, 1000) 攻方明显优势
     Crushing,                // Δ ≥ 1000        守方基本无力应对, 仅能逃避或求饶
     // 负向（攻方反吃亏）对称展开
 }
@@ -753,24 +774,24 @@ combat_power = effective_mana_power × max(0.1, 1 + Σ_modifiers) × soul_factor
 2. **加算修正区** `Σ_modifiers`（同区内所有修正以加和方式叠加）：
 
    **技能**：
-   - 本命法术：**+0.10 ~ +0.20**
-   - 克制属性：+0.10 ~ +0.30
-   - 受克制：-0.10 ~ -0.30
-   - mastery_rank：novice -0.10 ~ master +0.15
+   - 本命法术：**+0.10 ~ +0.15**
+   - 克制属性：+0.10 ~ +0.20
+   - 受克制：-0.10 ~ -0.20
+   - mastery_rank：novice -0.15 ~ master +0.15
 
    **身体**：
-   - 轻伤：-0.10
-   - **显著疲惫：-0.20**
+   - 轻伤：-0.05 ~ -0.15
+   - **严重疲惫：-0.25**
    - **身体重伤 / 灵力枯竭：-0.20 ~ -0.50**（按伤势严重度落区间）
    - `EnvironmentalStrain.disrupted_actions` 按 disrupted 程度：-0.10 ~ -0.40
 
    **心境**（来自 Layer 3 EmotionState 与 L1 突发情绪事件，按已有情绪标签程序化映射，不让 LLM 在仲裁时即兴选择）：
-   - **亢奋 / 愤怒：+0.05 ~ +0.10**
+   - **自信 / 愤怒：+0.05 ~ +0.10**
    - 恐惧 / 迟疑：-0.05 ~ -0.15
-   - 崩溃：-0.30 ~ -0.50
+   - 崩溃：-0.20 ~ -0.40
 
    **环境**：
-   - 本属性 `Rich/Dense`：**通常 +0.05 ~ +0.15**
+   - 本属性 `Rich/Dense`：**通常 +0.1 ~ +0.15**
    - 本属性 `Saturated`：至 +0.20
    - `mana_haze`：-0.10
    - **明确设定的例外**（特定阵法 / 上古遗迹 / 神祇坐镇地脉等）：由 L1 `KnowledgeEntry { kind: RegionFact / FactionFact }` 的 `content.combat_modifiers` 字段显式给出非常规修正值，直接加入 `Σ_modifiers`，可超出上述区间。
@@ -781,14 +802,14 @@ combat_power = effective_mana_power × max(0.1, 1 + Σ_modifiers) × soul_factor
 
 4. **下限保护**：加算系数以 `max(0.1, 1 + Σ_modifiers)` 截下限，避免修正过深导致 combat_power 趋零或为负而引发除零 / 碾压判定异常。
 
-5. **outcome_tier** 按 `combat_delta = actor_combat_power − target_combat_power` 落桶（200 / 500 / 1000，1000 以上即 Crushing）；细化由 `disrupting_factors` 列出（程序生成的具体说明，例 ["攻方显著疲惫 -0.20", "守方身体重伤 -0.40 + 恐惧 -0.10 + 灵魂破损 ×0.5"]）。
+5. **outcome_tier** 按 `combat_delta = actor_combat_power − target_combat_power` 落桶（150 / 300 / 1000，1000 以上即 Crushing）；细化由 `disrupting_factors` 列出（程序生成的具体说明，例 ["攻方显著疲惫 -0.20", "守方身体重伤 -0.40 + 恐惧 -0.10 + 灵魂破损 ×0.5"]）。
 
 6. 仲裁结果只决定**物理后果**（伤势 / 法力消耗 / 位置变化）写回 L1；**社会层后果**（恐惧 / 屈服 / 记仇）由下游角色 LLM 自行解读。
 
 ### 6.2 关键不变量
 
 1. 仲裁公式只读 L1 的 `effective_mana_power`、L1 的身体状态、L1 的技能/属性数据；**不读 displayed_mana_power**（压制是认知层的事，不影响真实对抗）。
-2. `combat_delta` 与 `ManaPerceptionDelta` 共享 200/500/1000 三个阈值，保证"我感觉略胜"与"实际略胜"在同一刻度上。仲裁层在 1000 以上不再细分（结果都是 Crushing）；感知层仍区分 `FarAbove(1000-2500)` 与 `Overwhelming(≥2500)`，但两者**对应的对抗结论一致**（皆为"基本无力应对"），区别只在体感（"远胜，难敌" vs "无法测度，压顶之势"）与是否可识别 tier。
+2. `combat_delta` 与 `ManaPerceptionDelta` 共享 150/300/1000 三个阈值，保证"我感觉略胜"与"实际略胜"在同一刻度上。仲裁层在 1000 以上不再细分（结果都是 Crushing）；感知层仍区分 `FarAbove(1000-2000)` 与 `Overwhelming(≥2000)`，但两者**对应的对抗结论一致**（皆为"基本无力应对"），区别只在体感（"远胜，难敌" vs "无法测度，压顶之势"）与是否可识别 tier。
 3. 当 `disrupting_factors` 与 `outcome_tier` 出现"违和"（例如攻方 base_mana_power 高但身体状态极差导致 combat_delta 反而为负），SurfaceRealizer 必须在叙事中体现这种反差，而不是按"谁灵力高谁赢"硬写。
 4. **以弱胜强**在该框架下要求**多个加算修正叠加 + 可能的灵魂状态打击**：守方若同时陷入"显著疲惫 (-0.20) + 身体重伤 (-0.40) + 恐惧 (-0.10) = Σ = -0.70"，加算系数 = max(0.1, 0.30) = 0.30；再叠加灵魂破损 soul_factor = 0.5，总系数 0.15，足以让基础灵力差 1500 的弱者翻盘。"算计 / 偷袭 / 中毒 / 惊扰魂魄"必须落到具体的 L1 状态字段上，由公式自然得出，不允许 LLM 在仲裁口径上手抹平差距。
 
@@ -805,13 +826,13 @@ pub struct CharacterSubjectiveState {
     pub emotion_state: EmotionState,
     pub relation_models: HashMap<String, RelationModel>,          // 对他人的主观印象
     pub current_goals: CurrentGoals,                              // 含 short_term / medium_term / hidden
-    pub temporary_body_state: TemporaryBodyState,                 // 伤势/疲惫/痛感/灵力消耗
 }
 ```
 
 **职责边界**：
 - "我相信 B 在撒谎" → `relation_models["B"].perceived_intent` 或类似字段。
 - "我相信门外有刺客" → `belief_state` 中的命题信念。
+- 伤势、疲惫、痛感、灵力消耗等当前身体状态 → Layer 1 `CharacterRecord.temporary_body_state`；L3 只保存角色对此状态的信念、情绪和目标反应。
 - 不允许同一命题既写入 `belief_state` 又写入 `relation_models`。
 
 ---
@@ -865,7 +886,7 @@ pub struct BeliefUpdate {
 
 **LLM 永远只接触上述输入。** 任何尝试把 Layer 1 原始对象塞进 prompt 都被 InputAssembly 拒绝。
 
-CognitivePassOutput **必须为严格 JSON**，由 prompt 模板与 Provider JSON mode 共同保证。容错路径详见 [11_agent_runtime.md](11_agent_runtime.md)。
+CognitivePassOutput **必须为严格 schema JSON**，优先由 Provider structured output / tool schema 保证；JSON mode 仅作为降级路径，且必须在返回后通过 schema 校验。容错路径详见 [11_agent_runtime.md](11_agent_runtime.md)。
 
 ---
 
@@ -914,7 +935,7 @@ pub struct StyleConstraints {
     pub detail_level: DetailLevel,         // sparse / moderate / rich
     pub atmosphere: Atmosphere,            // tense / serene / ominous / melancholic / ...
     pub pacing: Pacing,                    // fast / measured / slow
-    pub pov: PointOfView,                  // omniscient / character_focused(id) / objective
+    pub pov: PointOfView,                  // omniscient / character_focused(id) / objective；不得覆盖 narration_scope 的可见性上限
 
     /// 自由文本字段：作者用自然语言书写的硬约束、参考文风、禁忌事项等。
     /// 仅供 LLM 阅读，不参与程序逻辑。
@@ -927,11 +948,14 @@ pub struct StyleConstraints {
 
 ## 11. SurfaceRealizerInput（叙事层输入）
 
-叙事层 LLM 仅接受以下三类结构化输入，**不再读取角色档案 / 世界设定 / 角色心智**（它们已体现在情景与认知结果中）。
+叙事层 LLM 仅接受以下四类结构化输入，**不再读取角色档案 / 世界设定 / 角色心智**（它们已体现在情景与认知结果中）。
 
 ```rust
 pub struct SurfaceRealizerInput {
     pub scene_turn_id: String,
+
+    /// 0. 叙事可见性边界：决定 SceneNarrativeView 与 visible_facts 的生成范围。
+    pub narration_scope: NarrationScope,
 
     /// 1. 情景提取结果：本回合场景的客观状态视图（叙事层视角下的"舞台"）。
     pub scene_view: SceneNarrativeView,
@@ -945,10 +969,21 @@ pub struct SurfaceRealizerInput {
     /// 文风约束（含自由文本指引）。
     pub style: StyleConstraints,
 }
+
+pub enum NarrationScope {
+    /// 仅允许叙述指定角色可观察 / 可推断的事实；用于角色聚焦 POV。
+    CharacterFocused { character_id: String },
+
+    /// 仅允许叙述场上外显事实，不进入任何角色内心，不暴露隐藏 Knowledge。
+    ObjectiveCamera,
+
+    /// 作者/编排器视角；仍不得包含 GodOnly，除非该输出明确标记为调试/作者私有视图。
+    DirectorView,
+}
 ```
 
-`SceneNarrativeView` 是 SceneModel 面向叙事的精简视图（去除 GodOnly 真相、保留可观察事件）。
-`ArbitrationResult` 包含：每个角色的 outward_action（已发生的事）、resulting_state_changes（伤势/位置/资源等）、visible_facts（可被叙事提及的事实白名单）。
+`SceneNarrativeView` 是 SceneModel 按 `narration_scope` 派生的叙事视图：`CharacterFocused` 只能使用该角色的 Layer 2 可见事实；`ObjectiveCamera` 只能使用外显事实；`DirectorView` 可使用编排器可见事实但默认仍剔除 `GodOnly`。
+`ArbitrationResult` 包含：每个角色的 outward_action（已发生的事）、resulting_state_changes（伤势/位置/资源等）、visible_facts（按 `narration_scope` 生成的叙事事实白名单）。
 
 ---
 
@@ -999,9 +1034,39 @@ pub struct CharacterSkillUseProfile {
 
 ## 14. SQLite 表结构
 
-按三层语义组织。Layer 2 不持久化（每回合重建）；Layer 1 / Layer 3 / Trace 各自独立。
+按三层语义组织。Layer 2 不持久化（每回合重建）；Layer 1 / Layer 3 / Trace 各自独立。Agent 模式以 World 为故事连续性单元，聊天记录删除 / 回退必须从目标回合开始截断后续全部回合，并回滚到一致的世界状态，因此每个回合提交都必须有可追溯记录。
 
 ```sql
+-- ===== Turn Commit（故事线与回滚锚点） =====
+
+-- 世界故事线回合链；删除聊天时只能按 parent_turn_id 截断后续回合，不能单删中间消息
+CREATE TABLE world_turns (
+    scene_turn_id TEXT PRIMARY KEY,
+    parent_turn_id TEXT,
+    user_message TEXT NOT NULL,             -- JSON: 用户输入/扮演输入
+    rendered_output TEXT,                   -- SurfaceRealizer 输出
+    status TEXT NOT NULL DEFAULT 'active',  -- active / rolled_back
+    created_at TEXT NOT NULL,
+    rolled_back_at TEXT,
+    FOREIGN KEY (parent_turn_id) REFERENCES world_turns(scene_turn_id)
+);
+
+-- 每回合状态提交记录；用于定位需要回滚的人物、世界、知识和 trace 变化
+CREATE TABLE state_commit_records (
+    commit_id TEXT PRIMARY KEY,
+    scene_turn_id TEXT NOT NULL,
+    changed_scene_snapshot_ids TEXT NOT NULL,       -- JSON array
+    changed_knowledge_ids TEXT NOT NULL,            -- JSON array
+    changed_character_ids TEXT NOT NULL,            -- JSON array
+    changed_subjective_snapshot_ids TEXT NOT NULL,  -- JSON array
+    trace_ids TEXT NOT NULL,                        -- JSON array
+    rollback_patch TEXT NOT NULL,                   -- JSON: 反向补丁或变更前镜像
+    created_at TEXT NOT NULL,
+    rolled_back_at TEXT,
+    rollback_reason TEXT,
+    FOREIGN KEY (scene_turn_id) REFERENCES world_turns(scene_turn_id)
+);
+
 -- ===== Layer 1: Truth Store =====
 
 -- 场景快照（客观场景状态）
@@ -1046,6 +1111,7 @@ CREATE TABLE character_records (
     character_id TEXT PRIMARY KEY,
     baseline_body_profile TEXT NOT NULL,   -- JSON
     mind_model_card TEXT NOT NULL,         -- JSON（同时在 knowledge_entries 有冗余条目）
+    temporary_body_state TEXT NOT NULL,    -- JSON: Layer 1 当前身体/资源状态
     schema_version TEXT NOT NULL DEFAULT '0.1',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -1062,32 +1128,124 @@ CREATE TABLE character_subjective_snapshots (
     emotion_state TEXT NOT NULL,           -- JSON
     relation_models TEXT NOT NULL,         -- JSON
     current_goals TEXT NOT NULL,           -- JSON
-    temporary_body_state TEXT NOT NULL,    -- JSON
     created_at TEXT NOT NULL
 );
 
--- ===== Trace（调试与回放） =====
+-- ===== Trace / Logs（调试、回放与运行观测） =====
 
 CREATE TABLE turn_traces (
     trace_id TEXT PRIMARY KEY,
     scene_turn_id TEXT NOT NULL,
+    trace_kind TEXT NOT NULL,              -- turn / character / presentation / rollback
     character_id TEXT,                     -- NULL 表示全局回合 trace
-    cognitive_pass_input TEXT,             -- JSON（含 Layer 2 派生视图）
-    cognitive_pass_output TEXT,            -- JSON
-    rendered_output TEXT,
-    validation_results TEXT,
+    summary TEXT NOT NULL,                 -- JSON: 回合级关键产物索引与摘要
+    linked_request_ids TEXT NOT NULL,       -- JSON array: 关联 llm_call_logs.request_id
+    linked_event_ids TEXT NOT NULL,         -- JSON array: 关联 app_event_logs.event_id
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (scene_turn_id) REFERENCES world_turns(scene_turn_id)
+);
+
+CREATE TABLE agent_step_traces (
+    step_trace_id TEXT PRIMARY KEY,
+    trace_id TEXT NOT NULL,
+    scene_turn_id TEXT NOT NULL,
+    character_id TEXT,                     -- NULL 表示全局步骤
+    step_name TEXT NOT NULL,               -- active_set / dirty_flags / scene_filter / cognitive_pass / validation / arbitration / state_commit 等
+    step_status TEXT NOT NULL,             -- started / skipped / succeeded / failed / fallback_used
+    input_summary TEXT,                    -- JSON: 结构化输入摘要
+    output_summary TEXT,                   -- JSON: 结构化输出摘要
+    decision_json TEXT,                    -- JSON: 关键判定值、跳过原因、验证失败项
+    linked_request_id TEXT,                -- 对应 llm_call_logs.request_id
+    error_event_id TEXT,                   -- 对应 app_event_logs.event_id
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (trace_id) REFERENCES turn_traces(trace_id),
+    FOREIGN KEY (scene_turn_id) REFERENCES world_turns(scene_turn_id)
+);
+
+CREATE TABLE llm_call_logs (
+    request_id TEXT PRIMARY KEY,
+    mode TEXT NOT NULL,                    -- st / agent
+    world_id TEXT,
+    scene_turn_id TEXT,
+    trace_id TEXT,
+    character_id TEXT,
+    llm_node TEXT NOT NULL,                -- STChat / SceneStateExtractor / CharacterCognitivePass / ArbitrationFallback / SurfaceRealizer
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    call_type TEXT NOT NULL,               -- chat / chat_structured / chat_stream
+    request_json TEXT NOT NULL,            -- JSON: 写入前必须脱敏
+    schema_json TEXT,                      -- JSON Schema，仅 structured 调用有值
+    response_json TEXT,                    -- JSON: 原始响应或结构化结果
+    assembled_text TEXT,                   -- stream chunk 直接拼接文本
+    readable_text TEXT,                    -- 仅展示用的段落化文本
+    status TEXT NOT NULL,                  -- started / succeeded / failed / cancelled
+    latency_ms INTEGER,
+    token_usage TEXT,                      -- JSON
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    error_summary TEXT,
+    redaction_applied INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    FOREIGN KEY (scene_turn_id) REFERENCES world_turns(scene_turn_id),
+    FOREIGN KEY (trace_id) REFERENCES turn_traces(trace_id)
+);
+
+CREATE TABLE llm_stream_chunks (
+    chunk_id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    raw_chunk TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    FOREIGN KEY (request_id) REFERENCES llm_call_logs(request_id)
+);
+
+CREATE TABLE app_event_logs (
+    event_id TEXT PRIMARY KEY,
+    level TEXT NOT NULL,                   -- debug / info / warn / error / fatal
+    event_type TEXT NOT NULL,
+    message TEXT NOT NULL,
+    source_module TEXT NOT NULL,
+    request_id TEXT,
+    world_id TEXT,
+    scene_turn_id TEXT,
+    trace_id TEXT,
+    character_id TEXT,
+    detail_json TEXT,                      -- JSON: 异常上下文，写入前必须脱敏
     created_at TEXT NOT NULL
+);
+
+CREATE TABLE log_retention_state (
+    retention_id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL,                   -- global / world
+    world_id TEXT,
+    size_limit_bytes INTEGER NOT NULL DEFAULT 1073741824,
+    current_size_bytes INTEGER,
+    last_checked_at TEXT,
+    last_cleanup_at TEXT,
+    cleanup_needed INTEGER NOT NULL DEFAULT 0,
+    user_prompt_required INTEGER NOT NULL DEFAULT 0,
+    detail_json TEXT
 );
 
 -- ===== 索引 =====
 
 CREATE INDEX idx_scene_snapshots_scene ON scene_snapshots(scene_id);
+CREATE INDEX idx_world_turns_parent ON world_turns(parent_turn_id);
+CREATE INDEX idx_commit_records_turn ON state_commit_records(scene_turn_id);
 CREATE INDEX idx_knowledge_kind ON knowledge_entries(kind);
 CREATE INDEX idx_knowledge_subject ON knowledge_entries(subject_type, subject_id);
 CREATE INDEX idx_knowledge_facet ON knowledge_entries(subject_id, facet_type) WHERE kind = 'character_facet';
 CREATE INDEX idx_reveal_knowledge ON knowledge_reveal_events(knowledge_id);
 CREATE INDEX idx_subjective_char ON character_subjective_snapshots(character_id, scene_turn_id);
 CREATE INDEX idx_traces_turn ON turn_traces(scene_turn_id);
+CREATE INDEX idx_step_traces_turn ON agent_step_traces(scene_turn_id);
+CREATE INDEX idx_step_traces_trace ON agent_step_traces(trace_id);
+CREATE INDEX idx_llm_logs_turn ON llm_call_logs(scene_turn_id);
+CREATE INDEX idx_llm_logs_trace ON llm_call_logs(trace_id);
+CREATE INDEX idx_llm_logs_created ON llm_call_logs(created_at);
+CREATE INDEX idx_stream_chunks_request ON llm_stream_chunks(request_id, chunk_index);
+CREATE INDEX idx_app_events_context ON app_event_logs(world_id, scene_turn_id, trace_id);
+CREATE INDEX idx_app_events_created ON app_event_logs(created_at);
 ```
 
 **说明**：
@@ -1096,3 +1254,8 @@ CREATE INDEX idx_traces_turn ON turn_traces(scene_turn_id);
 - `subject_id + facet_type` 联合索引服务"取角色 X 的所有 facets"这一最高频查询。
 - `character_subjective_snapshots` 的最新一条即角色当前心智状态；历史快照保留用于回放与一致性验证。
 - 没有"memory_records"表，记忆作为 `knowledge_entries.kind = 'memory'` 统一存储。
+- `world_turns.parent_turn_id` 定义故事线顺序；用户删除某条 Agent 聊天记录时，必须将该回合及其后续全部回合标记为 `rolled_back`，禁止单独删除中间消息，并按 `state_commit_records.rollback_patch` 恢复到目标父回合的一致 Layer 1 / Layer 3 状态。
+- Agent Trace 以 `scene_turn_id` 为主轴，解释回合如何演化；运行 Logs 以 `request_id` / `event_id` 为主轴，解释应用运行时发生了什么。两者可互相关联，但日志不得作为 Agent 判断或 LLM 输入来源。
+- `llm_call_logs.request_json`、`response_json`、`llm_stream_chunks.raw_chunk` 尽量还原 Provider 原貌；`readable_text` 仅用于流式响应的段落化查看，不替代原始响应。
+- `app_event_logs` 同表结构可用于 `./data/logs/app_logs.sqlite`。ST 模式只写全局运行 Logs；Agent 模式与回合相关的记录写入对应 `world.sqlite`，同时可在全局异常日志中保留带 `world_id` / `scene_turn_id` 的索引事件。
+- 默认清理上限为 1GB。自动清理只处理全局运行 Logs；Agent Trace 和仍被 `state_commit_records.trace_ids` 引用的记录不自动删除。30 天以上未更新且日志体积较大的 World 只产生提示事件，等待用户确认。

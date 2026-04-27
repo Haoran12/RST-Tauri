@@ -6,10 +6,11 @@
 - 融合调用 + 角色分级
 - Active Set + Dirty Flags（脏标志触发规则）
 - 主循环（Per Turn / Per Active Character / Per Turn Global）
+- Agent Trace 记录点
 - 调用预算
 - 9 条验证规则 + 验证时机
 
-数据契约见 [10_agent_data_and_simulation.md](10_agent_data_and_simulation.md)。LLM/程序边界铁律见 [01_architecture.md](01_architecture.md)。
+数据契约见 [10_agent_data_and_simulation.md](10_agent_data_and_simulation.md)。LLM/程序边界铁律见 [01_architecture.md](01_architecture.md)。日志与 Trace 边界见 [30_logging_and_observability.md](30_logging_and_observability.md)。
 
 ---
 
@@ -84,24 +85,52 @@
 13. ActionArbitration（混合层）：
     a. 仲裁层 LLM 兜底：处理 step 11/12 中标记失败的角色，推断可用 IntentPlan
     b. 物理仲裁（程序）：读 Layer 1 真相，对所有角色 IntentPlan 做命中/资源/位置/技能判定
-    c. 输出 ArbitrationResult（含 visible_facts 白名单）
-14. SurfaceRealizer(LLM) ← {SceneNarrativeView, CharacterCognitivePassOutput[], ArbitrationResult, StyleConstraints}
+    c. 按 NarrationScope 输出 ArbitrationResult（含 visible_facts 白名单）
+14. SurfaceRealizer(LLM) ← {NarrationScope, SceneNarrativeView, CharacterCognitivePassOutput[], ArbitrationResult, StyleConstraints}
     → 自由文本叙事
-15. NarrativeFactCheck：扫描叙事文本提及的事实是否 ⊆ visible_facts
+15. NarrativeFactCheck：扫描叙事文本提及的事实是否 ⊆ 当前 NarrationScope 的 visible_facts
 16. StateCommitter:
     - 更新 SceneModel (Layer 1)
     - 处理 KnowledgeRevealEvent（扩展 known_by + 生成对应 Memory）
     - 追加新 KnowledgeEntry { kind: Memory }
-    - 应用 BodyReactionDelta 到 temporary_body_state
+    - 应用 BodyReactionDelta 到 Layer 1 的 temporary_body_state
     - 写入 character_subjective_snapshots（Layer 3）
-    - 写入 turn_traces（调试）
+    - 写入 turn_traces / agent_step_traces（调试与回放）
 ```
+
+---
+
+### 5.1 Trace / Logs 写入点
+
+运行时必须区分 Agent Trace 与运行 Logs：
+
+- Agent Trace 写入 `world.sqlite`，记录回合内程序判断与模型节点产物。
+- 运行 Logs 写入全局 `app_logs.sqlite` 或 Agent 世界内的 `llm_call_logs` / `app_event_logs`，记录 LLM 原始请求响应、异常与 Provider 运行状态。
+- 两者通过 `scene_turn_id` / `trace_id` / `request_id` 关联，但不得作为后续业务判断或 LLM 输入。
+
+主循环写入规则：
+
+| 步骤 | Agent Trace | 运行 Logs |
+|---|---|---|
+| 1 | 记录原始用户输入摘要与回合起点 | 输入采集异常 |
+| 2 | 记录 SceneStateExtractor 输出、解析状态、修复状态 | LLM request / response / schema / retry / error |
+| 3 | 记录 UserInputDelta 应用摘要 | 状态应用异常 |
+| 4-5 | 记录机械演化与事件 delta 摘要 | 状态演化异常 |
+| 6 | 记录 Active Set、Dirty Flags、跳过原因 | - |
+| 7-10 | 记录 Layer 2 派生摘要与 InputAssembly 结构检查 | 派生或类型检查异常 |
+| 11 | 记录 CognitivePass 输出、schema 校验、修复结果 | LLM request / response / schema / retry / error |
+| 12 | 记录每条 Validator 结果与失败项 | 验证异常事件 |
+| 13a | 记录仲裁层 LLM 兜底输入输出与启用原因 | LLM request / response / error |
+| 13b-13c | 记录物理仲裁摘要、资源消耗、命中、visible_facts | 仲裁异常 |
+| 14 | 记录 SurfaceRealizer 输入摘要与最终叙事 | LLM request / response；stream chunk 与 readable_text |
+| 15 | 记录 NarrativeFactCheck 结果 | fact check 失败事件 |
+| 16 | 记录提交索引、rollback patch、trace_ids | SQLite 事务异常、回滚事件 |
 
 ---
 
 ## 6. CognitivePass 输出容错
 
-CognitivePassOutput **必须为严格 JSON**，由 prompt 模板与 Provider JSON mode 共同保证。三层容错：
+CognitivePassOutput **必须为严格 schema JSON**，优先由 Provider structured output / tool schema 保证；JSON mode 仅作为降级路径，且必须在返回后通过 schema 校验。三层容错：
 
 1. **第一层（程序）**：JSON 解析失败时尝试常见修复（缺逗号、未转义引号、缺失非必需字段补默认值、字段名拼写偏差）。
 2. **第二层（仲裁层 LLM 兜底）**：程序修复失败时，将原始残缺输出 + 上下文交给仲裁层 LLM，由其推断该角色"实际想做什么"，输出可用的 IntentPlan 替代。
@@ -128,7 +157,7 @@ CognitivePassOutput **必须为严格 JSON**，由 prompt 模板与 Provider JSO
 1. **Omniscience Leakage Rule** - CognitivePass 输出引用的所有 entity_id / knowledge_id 必须出现在该回合该角色的 `accessible_knowledge` 或 `filtered_scene_view.visible_entities` 中。
 2. **Embodiment Ignored Rule** - 感官失能时，输出不应描述对应感知（如失明却看见）。
 3. **Self Awareness Rule** - 当某 `KnowledgeEntry` 的 `subject_awareness == Unaware{self_belief}` 且 subject 是当前角色时：该角色的认知输出**只能**引用 `self_belief`，不可引用 `content` 中独有的事实。
-4. **God Only Rule** - `visibility.scope` 含 `GodOnly` 的 KnowledgeEntry 在任何角色输出中均不应出现。
+4. **God Only Rule** - `visibility.scope` 含 `GodOnly` 的 KnowledgeEntry 在任何角色输出中均不应出现；`GodOnly` 启用态下 `known_by` 必须为空，故事揭示时必须先通过 `KnowledgeRevealEvent` 解除 `GodOnly` 再追加知情者。
 5. **Mana Sense Rule** - 凡人（低灵觉敏锐度）不应清晰感知修士气息。
 6. **Consistency Rule** - 跨回合连续性（受伤、关系、目标不应无缘由跳变）。
 7. **Apparent vs True Rule** - 当观察者通过 `apparent_content` 看到某 facet 时，输出引用该信息应与 `apparent_content` 一致；引用 `content` 独有信息视为泄露。

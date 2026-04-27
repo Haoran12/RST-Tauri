@@ -13,12 +13,13 @@
 
 | 坑点 | 风险 | 应对策略 |
 |---|---|---|
-| 模型输出非结构化 | 解析失败 | JSON / YAML 约束 + 重试 + schema 验证 |
-| LLM 输出非结构化 JSON | 解析失败 / 主循环中断 | Provider 强制 JSON mode + 程序容错修复 + 仲裁层 LLM 兜底 + 最终 Tier B 模板降级 |
+| 模型输出非结构化 | 解析失败 | structured output / tool schema + 重试 + schema 验证 |
+| LLM 输出不符合 schema | 解析失败 / 主循环中断 | 优先使用 Provider structured output / tool schema；JSON mode 仅作降级，并必须配合 schema 校验 + 重试 + 程序容错修复 + 仲裁层 LLM 兜底 |
 | LLM 数值不稳定 | belief/emotion 数值跳变 | LLM 输出离散级别（ConfidenceShift），程序映射为数值 |
 | Prompt 漂移 | 模型行为变化 | 固定 prompt 版本 + A/B 测试 + 监控 |
-| 中间数据混入自由文本 | 屎山起点；规则匹配失效 | 数据形态铁律 + 类型隔离（中间结构禁止 String content 字段；summary_text 仅供阅读不参与判断） |
+| 中间数据混入可判定自由文本 | 屎山起点；规则匹配失效 | 数据形态铁律 + 类型隔离；允许 `summary_text` / `effect_hints` 等 LLM-readable 文本叶子字段，但禁止参与程序判断 |
 | SurfaceRealizer 私自添加事实 | 误导用户 / 后续状态不一致 | NarrativeFactCheck 强制扫描；visible_facts 白名单约束 |
+| 叙事 POV 泄露隐藏事实 | 角色聚焦叙事写出该角色不可知信息 | `NarrationScope` 先决定 `SceneNarrativeView` 与 `visible_facts`，StyleConstraints.pov 不得提升可见性 |
 | 仲裁层 LLM 兜底范围扩大 | 演变成"什么都让 LLM 仲裁" | 仲裁层 LLM 仅在认知输出失败时启用；物理判定永远走程序 |
 | 用户输入 LLM 解析失败 | 用户操作丢失 | 显示原始输入 + 提示重写；保留 raw_text 供 trace |
 
@@ -65,6 +66,18 @@
 |---|---|---|
 | 多角色调用成本 | Token 消耗大 | Dirty Flags + 意图复用 + Tier 分级 |
 
+### 1.6 日志与 Trace
+
+| 坑点 | 风险 | 应对策略 |
+|---|---|---|
+| Agent Trace 与运行 Logs 混用 | 回放、审计、清理边界不清 | Agent Trace 以 `scene_turn_id` 为主轴；运行 Logs 以 `request_id` / `event_id` 为主轴，只通过 ID 关联 |
+| 日志反向进入 prompt | 调试信息污染角色认知 | 架构铁律：日志只观察，不参与业务判断或 LLM 输入 |
+| LLM 原始响应丢失 | 难以定位 Provider / prompt 问题 | 保存 request / response / schema / stream chunk；额外生成 readable_text |
+| 流式输出只保存最终文本 | 无法复现分片、断流、重复 chunk | `llm_stream_chunks` 按序保存原始 chunk |
+| 凭证写入日志 | API Key 泄露 | 写入前脱敏，测试覆盖 Authorization / x-api-key / Provider secret |
+| 自动清理误删 Agent Trace | 旧回合无法复盘或定位回滚 | 默认只清理全局运行 Logs；Agent Trace 随 World 保留 |
+| 长期未更新 World 体积膨胀 | 用户磁盘压力 | 30 天未更新且体积较大时提示用户，不自动删除 |
+
 ---
 
 ## 2. 测试用例 / 验证方案
@@ -91,17 +104,35 @@
 
 - [ ] **私密 Knowledge 仅 known_by 中的角色能访问。**
 - [ ] **GodOnly 知识不出现在任何角色的 accessible_knowledge 中。**
+- [ ] **GodOnly 启用态下 known_by 必须为空；若故事揭示，KnowledgeRevealEvent 必须先解除 GodOnly 再追加知情者。**
 - [ ] **subject_awareness=Unaware 时，subject 自我描述只能引用 self_belief**（如被封印记忆的狐狸精仍自称人类）。
 - [ ] **观察者通过 apparent_content 看到的伪装信息与 content 真相一致地分流**（伪装方与揭穿方分别得到不同 visible_content）。
 - [ ] **scope:faction:玄天宗 的 KnowledgeEntry 仅对该势力成员可见。**
 - [ ] **同场景观察可获得他人 Appearance facet，但获取不到 TrueName facet**（无关系阈值）。
 - [ ] **KnowledgeRevealEvent 触发后**，被揭示者的下一回合输入包含新可见 Knowledge。
+- [ ] **CustomPredicate 可见性条件只能使用结构化 VisibilityExpression AST，不接受自然语言表达式。**
 
 #### 状态与运行时
 
 - [ ] 受伤状态跨回合保持。
+- [ ] `temporary_body_state` 存储在 Layer 1，并只能通过 `EmbodimentState` 派生进入 CognitivePass。
+- [ ] `CharacterFocused` 叙事只能引用该角色可见事实；`ObjectiveCamera` 叙事不能进入任何角色内心；`DirectorView` 默认仍剔除 GodOnly。
 - [ ] Dirty Flags 正确过滤无变化角色。
 - [ ] 调用预算控制在每场景 0-2 次。
+
+#### 日志与 Trace
+
+- [ ] ST 模式 LLM 调用只写全局 `./data/logs/app_logs.sqlite`。
+- [ ] Agent 模式任意 `scene_turn_id` 能查到完整 `turn_traces` / `agent_step_traces`。
+- [ ] Agent Trace 能通过 `request_id` 跳转到对应 LLM request / response。
+- [ ] SceneStateExtractor / CognitivePass / ArbitrationFallback / SurfaceRealizer 的 request、response、schema、状态、耗时都被记录。
+- [ ] 流式输出保存原始 chunk 顺序，并生成 `assembled_text` / `readable_text`。
+- [ ] API Key、Authorization header、Provider secret、代理认证不会进入 SQLite。
+- [ ] CognitivePass schema 失败、程序修复、仲裁兜底都有 Trace 与异常事件。
+- [ ] Agent 回滚后世界状态回退，运行 Logs 保留为审计记录。
+- [ ] 全局 Logs 超过 1GB 后后台清理旧运行日志。
+- [ ] 普通清理任务不会删除 Agent Trace 或仍被 `state_commit_records.trace_ids` 引用的记录。
+- [ ] 30 天未更新且日志较大的 World 只产生提示事件，不自动删除。
 
 ### 阶段七：用户角色扮演
 
