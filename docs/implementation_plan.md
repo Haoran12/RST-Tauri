@@ -268,7 +268,8 @@ pub struct SceneModel {
     pub lighting: LightingState,               // 光照/光源/阴影/逆光
     pub acoustics: AcousticsState,             // 环境噪声/反射特性
     pub olfactory_field: OlfactoryField,       // 气味场/气流/气味源
-    pub physical_atmosphere: PhysicalAtmosphere, // 温湿度/表面状态
+    pub scene_mood: SceneMood,                 // 场景基调/氛围（紧张/肃穆/欢庆/敌对/亲密/诡异...），可被角色主观感知
+    pub physical_conditions: PhysicalConditions, // 物理环境：气温/地表/空气颗粒/降水/风
     pub mana_field: ManaField,                 // 灵力场（玄幻扩展）
     pub entities: Vec<SceneEntity>,            // 在场实体（id + 位置 + 姿态）
     pub observable_signals: ObservableSignals,
@@ -276,6 +277,69 @@ pub struct SceneModel {
     pub uncertainty_notes: Vec<String>,
 }
 ```
+
+##### Physical Conditions（物理环境）
+
+承载客观、可量化、直接影响行动与感知的物理量。属于 Layer 1 真相，由 `SceneStateExtractor` 与仲裁层维护，凡人/修士均可被影响。
+
+```rust
+pub struct PhysicalConditions {
+    pub temperature: Temperature,                  // 气温（含灵力/法术修正）
+    pub surface_state: SurfaceState,               // 地面状态：湿滑/积水/积雪/碎石/血迹
+    pub airborne: AirborneEffects,                 // 空气中的颗粒与能见度：雾/烟/扬尘/灵雾
+    pub precipitation: Option<Precipitation>,      // 降水：雨/雪/雹/沙暴/灵雨
+    pub wind: WindState,                           // 风向/风力（影响声/味传播、远程命中、火势蔓延）
+}
+
+pub struct Temperature {
+    pub ambient_celsius: f64,                      // 环境基准温度
+    pub felt_celsius: f64,                         // 最终感受温度（含修正后的值；EmbodimentResolver 据此计算冷暖耐受）
+    pub modifiers: Vec<TemperatureModifier>,       // 局部温变叠加项
+}
+
+pub struct TemperatureModifier {
+    pub source_id: String,                         // 来源：角色/法术/灵脉/阵法/物品
+    pub delta_celsius: f64,                        // 正为升温，负为降温
+    pub radius_m: f64,                             // 影响半径
+    pub kind: TemperatureModifierKind,             // 物理热源 / 灵力升温 / 灵力冰寒 / 法术屏障
+}
+
+pub struct SurfaceState {
+    pub slipperiness: f64,                         // 0.0-1.0，影响平衡与移动力
+    pub wetness: f64,                              // 0.0-1.0
+    pub debris: Vec<String>,                       // 碎石/积雪/灰烬/血迹/法器残骸
+    pub notes: String,
+}
+
+pub struct AirborneEffects {
+    pub fog_density: f64,                          // 0.0-1.0
+    pub dust_density: f64,
+    pub smoke_density: f64,
+    pub visibility_range_m: f64,                   // 综合能见度（米），SceneFilter 据此衰减视觉
+    pub mana_haze: Option<ManaHaze>,               // 灵雾：影响灵觉而非视觉，属性继承自 ManaField
+}
+
+pub enum Precipitation {
+    Rain { intensity: f64 },                       // intensity 0.0-1.0
+    Snow { intensity: f64 },
+    Hail { intensity: f64 },
+    Sandstorm { intensity: f64 },                  // 扬尘/沙暴
+    SpiritRain { attribute: ManaAttribute, intensity: f64 },  // 灵雨（带属性，可与 ManaField 联动）
+}
+
+pub struct WindState {
+    pub direction_deg: f64,                        // 0-360，正北为 0
+    pub speed_ms: f64,                             // 米/秒
+    pub gust: bool,                                // 是否阵风
+}
+```
+
+**与其他场景字段的耦合**（由各派生层处理，不在此结构中冗余）：
+
+- `airborne.visibility_range_m` 由 `SceneFilter` 取与 `lighting` 较小者作为最终视觉距离。
+- `wind` 影响 `acoustics`（声音传播方向/衰减）与 `olfactory_field`（气味扩散方向）。
+- `temperature.modifiers` 中 `kind == 灵力*` 的项必须能在 `ManaField.mana_sources` 或事件流中找到对应来源（一致性由 Validator 检查）。
+- `precipitation::SpiritRain` 与 `airborne.mana_haze` 的属性应与 `ManaField.ambient_attribute` 兼容。
 
 ##### Mana Field（玄幻扩展）
 
@@ -504,7 +568,7 @@ pub struct EmbodimentState {
     pub character_id: String,
     pub scene_turn_id: String,
     pub sensory_capabilities: SensoryCapabilities,  // vision/hearing/smell/touch/proprioception/mana
-    pub body_constraints: BodyConstraints,          // 移动力/平衡/痛苦负载/疲惫/认知清晰度
+    pub body_constraints: BodyConstraints,          // 移动力/平衡/痛苦负载/疲惫/认知清晰度 + environmental_strain（环境档位+惩罚）
     pub salience_modifiers: SalienceModifiers,      // 注意力吸引/厌恶触发/过载风险
     pub reasoning_modifiers: ReasoningModifiers,    // 痛苦偏倚/威胁偏倚/过载偏倚
     pub action_feasibility: ActionFeasibility,      // 物理执行/社交耐心/精细控制/持续注意
@@ -530,6 +594,7 @@ pub struct FilteredSceneView {
     pub tactile_signals: Vec<TactileSignal>,
     pub mana_signals: Vec<ManaSignal>,
     pub mana_environment: ManaEnvironmentSense,
+    pub weather_perception: WeatherPerception,    // 风/温/能见度/降水的档位翻译 + 程序生成的具体描述
     pub spatial_context: SpatialContext,
 }
 
@@ -543,6 +608,300 @@ pub struct VisibleEntity {
 ```
 
 `visible_facets` 由 `SceneFilter` 与 `VisibilityResolver` 共同决定：感官可达 + facet 可见性谓词通过。
+
+##### Environmental Impact（程序化档位翻译）
+
+LLM 不擅长把 raw 数值（`50.0 m/s`、`-30.0 ℃`、`视距 8 m`）翻译成行为后果。这一步在程序里做：`EmbodimentResolver` 与 `SceneFilter` 协同把 Layer 1 `physical_conditions` 的原始量映射为**档位 + 具体后果**，分别写入 `EmbodimentState.body_constraints.environmental_strain`（影响该角色行动）和 `FilteredSceneView.weather_perception`（角色对天气的主观感受）。
+
+```rust
+pub enum WindImpactTier {
+    Calm,         // < 0.5 m/s
+    Breeze,       // 0.5-5 m/s
+    Moderate,     // 5-10 m/s
+    Strong,       // 10-17 m/s    远程命中失准, 头发衣物明显被吹动
+    Gale,         // 17-25 m/s    行动困难, 小型投射物偏移严重
+    Storm,        // 25-32 m/s    站立困难, 小物件被吹飞, 树枝折断
+    Hurricane,    // > 32 m/s     无法稳定站立, 大物件被卷起, 强行移动会被推走
+}
+
+pub enum TemperatureFeelTier {
+    // 档位是相对该角色 BaselineBodyProfile.comfort_temperature_range 的偏离量映射
+    // 同样 -30℃: 对人类是 SevereCold, 对厚毛皮的狐狸精可能只是 Cold
+    Sweltering,   // 极易中暑
+    Hot,
+    Warm,
+    Comfortable,
+    Cool,
+    Cold,         // 需保暖措施, 不耐久暴露
+    SevereCold,   // 长时间暴露失温, 暴露皮肤受冻伤
+    Lethal,       // 短时间致命
+}
+
+pub enum SurfaceImpactTier {
+    Stable,
+    Slippery,     // 跑动失败概率显著, 急停难
+    Treacherous,  // 几乎无法稳定行动
+}
+
+pub enum VisibilityTier {
+    Clear,        // > 100 m
+    Hazy,         // 30-100 m
+    Limited,      // 5-30 m       仅近距离辨识
+    Blind,        // < 5 m        几乎瞎走
+}
+
+pub enum PrecipitationIntensityTier {
+    None,         // 无降水
+    Light,        // 细雨/小雪/零星冰雹
+    Moderate,     // 中雨/中雪
+    Heavy,        // 大雨/大雪/能见度受影响
+    Torrential,   // 暴雨/暴雪/沙暴/能影响行动与视野
+}
+
+pub enum RespirationImpactTier {
+    // 由 airborne (烟/尘/雾) + precipitation (沙暴) + mana_haze 综合给出
+    Free,         // 呼吸顺畅
+    Irritating,   // 刺激, 偶尔咳嗽, 长时间暴露不适
+    Choking,      // 持续咳嗽, 呼吸吃力, 持续动作受影响
+    Suffocating,  // 短时间致命, 必须捂口鼻或脱离
+}
+
+pub enum SurfaceVisualState {
+    // 给 LLM 的"地面长什么样"; 可叠加（既积雪又结冰）
+    Dry,
+    Damp,
+    Wet,          // 湿润但无积水
+    Puddled,      // 积水
+    Snowy,        // 积雪
+    Icy,          // 结冰
+    Bloody,
+    Cluttered,    // 碎屑/法器残骸/瓦砾
+}
+
+pub struct EnvironmentalStrain {
+    // 写入 EmbodimentState.body_constraints；驱动 action_feasibility 与跨回合身体状态
+    pub wind_tier: WindImpactTier,
+    pub temperature_tier: TemperatureFeelTier,
+    pub surface_tier: SurfaceImpactTier,
+    pub respiration_tier: RespirationImpactTier,
+    pub movement_penalty: f64,           // 0.0-1.0
+    pub balance_penalty: f64,            // 0.0-1.0
+    pub cold_strain: f64,                // 累积冷损耗（按时间累加，到阈值由仲裁层生成冻伤事件）
+    pub heat_strain: f64,
+    pub respiration_strain: f64,         // 累积呼吸损耗（沙暴/浓烟久留触发咳嗽/缺氧伤害）
+    pub disrupted_actions: Vec<String>,  // 具体限制说明，例 "无法施展持续吟唱的法术"、"远程瞄准命中-40%"
+}
+
+pub struct WeatherPerception {
+    // 写入 FilteredSceneView；这是 LLM 在 CognitivePass 中读取的版本
+    pub wind_tier: WindImpactTier,
+    pub temperature_tier: TemperatureFeelTier,
+    pub visibility_tier: VisibilityTier,
+    pub respiration_tier: RespirationImpactTier,
+    pub surface_visual: Vec<SurfaceVisualState>,    // 同时多种状态: 例 [Snowy, Icy]
+    pub surface_tier: SurfaceImpactTier,            // 实际打滑程度（与 EnvironmentalStrain 同源）
+    pub precipitation: Option<PrecipitationDescriptor>,
+    pub effect_hints: Vec<String>,                  // 程序生成的具体后果描述: ["呼气结成白霜", "细小石子被风卷起拍在脸上", "脚下青苔湿滑"]
+}
+
+pub struct PrecipitationDescriptor {
+    pub kind: PrecipitationKind,                    // 雨/雪/冰雹/沙暴/灵雨
+    pub intensity_tier: PrecipitationIntensityTier,
+    pub mana_attribute: Option<ManaAttribute>,      // 仅 SpiritRain 有
+}
+
+pub enum PrecipitationKind {
+    Rain, Snow, Hail, Sandstorm, SpiritRain,
+}
+```
+
+**关键不变量**：
+
+1. CognitivePass 的 LLM **只读 tier + effect_hints**，不应从 raw 数值推断后果。`FilteredSceneView` 中不放 raw 数值。
+2. 物种差异在档位翻译时已校准（用 `BaselineBodyProfile.comfort_temperature_range`），下游不用再判断"对该角色冷不冷"。
+3. 灵力升温/冰寒（`TemperatureModifier.kind = 灵力*`）已在 `Temperature.felt_celsius` 中合并；档位只看最终 felt 值。
+4. `cold_strain` / `heat_strain` 跨回合累积；到阈值由 `Arbitration` 生成具体伤势事件（冻伤/中暑），写回 Layer 1。
+5. `disrupted_actions` 是 LLM 选择行动时的硬约束（在 IntentPlan 验证阶段比对），不是建议。
+6. SurfaceRealizer 如需在叙事中提到风速/温度的具体数字，应通过 `SurfaceRealizerInput` 单独传入 raw 值（叙事用），不经 `FilteredSceneView`。
+7. **L1 字段须保持自洽**：`physical_conditions` 各子字段间存在因果（暴雨 → wetness↑ → slipperiness↑；沙暴 → dust_density↑ → visibility↓ + respiration 受影响）。`SceneStateExtractor` 在产出 L1 时由 prompt 模板要求一并填齐；档位翻译层只负责把 L1 翻译成档位，不补全 L1 缺失。
+8. 翻译公式集中在 `EmbodimentResolver::translate_environment(...)` 与 `SceneFilter::derive_weather_perception(...)`，两者共享同一份阈值表（避免两侧档位不一致）。
+
+##### Mana Perception（灵力档位翻译）
+
+灵力的"档位"用于身份识别（"是凡人/修士/超凡/传说"），灵力的"数值差"用于实力对比（感知层是体感强弱，仲裁层是实际胜负）。两者都不让 LLM 自己估算 raw 数值。
+
+档位边界数值参考 `D:\AI\rp_cards\` 锚点（凡人 100 / 入门 500–800 / 瓶颈 1300–1450 / 大成 2400 / 仙灵修行瓶颈 5000 / 神祇 苍角 8800 / 高阶仙灵 NaN），可在 `world_base.yaml` 中按世界重写。
+
+```rust
+pub enum ManaPotencyTier {
+    // 单个角色 / 法器 / 法术 / 灵脉的灵力强度档位（默认边界，可由世界配置覆盖）
+    Mundane,        // [0, 200)         凡人 / 无修行（锚: 人类无修行 100）
+    Awakened,       // [200, 1000)      初醒 / 入门（锚: 妖精入门 500, 人类入门 700, 仙灵诞生 800）
+    Adept,          // [1000, 1700)     成熟修士（锚: 妖精瓶颈 1400, 人类瓶颈 1300, 齐松 1450）
+    Master,         // [1700, 2500)     大成（锚: 仙灵不修行成型 1800, 人妖大成 2400）
+    Transcendent,   // [2500, 5400)     超凡（锚: 仙灵修行瓶颈 5000）
+    Legendary,      // [5400, +∞)       传说 / 神祇 / 法则化（锚: 苍角 8800, 高阶仙灵 NaN）
+}
+
+pub enum AmbientManaDensityTier {
+    // 环境灵气浓度档位（ManaField.ambient_density 的翻译）
+    Barren,         // 几近无灵气，普通修士难以汲取
+    Sparse,         // 寻常人间街市
+    Normal,         // 山林荒野默认水平
+    Rich,           // 灵山福地，修行加成
+    Dense,          // 灵脉所在 / 仙府 / 阵法核心，凡人会有压迫感
+    Saturated,      // 神祇驻地 / 上古遗迹，弱者会过载乃至昏厥
+}
+
+pub enum ManaPerceptionDelta {
+    // Δ = target.displayed_mana_power - observer.effective_mana_power
+    // 用于"感觉差距多大"，与档位识别正交（同档可有显著差，跨档也可被技巧/状态拉平）
+    Indistinguishable,       // |Δ| < 200          相若, 难分高下
+    SlightlyBelow,           // Δ ∈ [-500, -200)   略弱
+    NotablyBelow,            // Δ ∈ [-1000, -500)  显著弱
+    FarBelow,                // Δ ∈ [-2500, -1000) 远不及, 基本无力应对（仲裁=Crushing）
+    Crushed,                 // Δ < -2500          蝼蚁差距, 无法测度（仲裁=Crushing）
+    SlightlyAbove,           // Δ ∈ [200, 500)     略胜
+    NotablyAbove,            // Δ ∈ [500, 1000)    显著强
+    FarAbove,                // Δ ∈ [1000, 2500)   远胜, 守方基本无力应对（仲裁=Crushing）
+    Overwhelming,            // Δ ≥ 2500           压顶, 无法测度（仲裁=Crushing）
+}
+
+pub struct PerceivedManaProfile {
+    pub source_id: String,                            // 被感知者 / 来源
+    pub tier_assessment: Option<ManaPotencyTier>,     // 对方档位识别（被压制时为压制后的档）
+    pub delta: ManaPerceptionDelta,                   // 感知差距档位
+    pub attribute_assessment: Option<ManaAttribute>,  // 仅 |Δ| < 1000 且未被严重干扰时较准
+    pub confidence: f64,                              // 0.0-1.0
+    pub concealment_suspected: bool,                  // 感觉对方在压制气息
+    pub descriptors: Vec<String>,                     // 程序生成: ["气息浩瀚如海", "似有若无, 形迹诡异"]
+}
+
+pub struct ManaSignal {
+    // FilteredSceneView.mana_signals 中的单个气息：源于具体实体 / 法术 / 灵脉
+    pub source_kind: ManaSourceKind,                  // Character / Artifact / SpellResidue / Formation / SpiritVein
+    pub direction_hint: Option<String>,               // 方位与距离的粗化描述（不给精确坐标）
+    pub perceived: PerceivedManaProfile,
+}
+
+pub struct ManaEnvironmentSense {
+    // 整体环境灵气感知（区别于针对单一来源的 ManaSignal）
+    pub density_tier: AmbientManaDensityTier,
+    pub dominant_attribute: Option<ManaAttribute>,
+    pub interferences: Vec<String>,                   // "屏蔽阵法残留", "灵雾阻隔感知"
+    pub overload_risk: bool,                          // 灵觉过载风险（高敏锐度撞 Saturated 环境）
+    pub descriptors: Vec<String>,                     // ["灵气浓郁如蜜, 呼吸间满是清甜"]
+}
+```
+
+**感知规则（认知层）**——由 `SceneFilter::derive_mana_perception(...)` 程序化实施：
+
+1. **观察者灵力** = `observer.effective_mana_power`（已含 L1 伤势 / 疲惫 / 突破修正）。
+2. **目标显示灵力** `target.displayed_mana_power`：
+   - 默认 = `target.effective_mana_power`。
+   - 若目标具备压制能力且本回合启用：`displayed = effective - suppression_amount`（压制量来自 L1 状态，不让 LLM 自己定）。
+3. **Δ = target.displayed_mana_power − observer.effective_mana_power**，按上述 9 档桶映射到 `ManaPerceptionDelta`。
+4. **档位识别**：
+   - `|Δ| < 1000`：可识别 `tier_assessment = ManaPotencyTier::from_power(displayed)` 与 `attribute_assessment`，`confidence ≥ 0.7`。
+   - `|Δ| ∈ [1000, 2500)`：可识别 tier，但 attribute 不稳；descriptors 偏向"远胜 / 远不及"。
+   - `|Δ| ≥ 2500`：`tier_assessment = None`，descriptors 偏向"无法测度 / 如同蝼蚁"。
+5. **Mundane (Tier0) 观察者**：仅能将 `effective_mana_power ≥ 1000` 的存在感知为"超出常理"，无具体档位；环境灵气仅给"格外厚重 / 压抑"等体感。
+6. **零灵觉**（`SensoryCapabilities.mana.acuity == 0`）：`mana_signals = []`，`mana_environment.density_tier` 由间接体感（呼吸/温度异常）回填，`dominant_attribute = None`。
+7. **隐匿 / 压制**：
+   - 压制后档位 `displayed_tier = ManaPotencyTier::from_power(displayed)` 直接落在 tier_assessment 上。
+   - **破绽判定**（`concealment_suspected`）：当 `observer.effective_mana_power ≥ target.effective_mana_power − 200` 时（即观察者实力已能"接近"压制前的目标），置 true（"似有若无的违和感"）。否则压制看起来天衣无缝，false。
+   - 灵觉敏锐度可作为额外破绽来源：`acuity ≥ 0.85` 且 `target.suppression_amount ≥ 1000` 时也强制 `concealment_suspected = true`（高灵觉天然能闻到压制痕迹）。
+8. **环境干扰**：`ManaField.interferences` 中的 jam/scramble 按强度降低 `confidence`；`mana_haze` 让该回合所有 mana_signals 的 |Δ| 视为额外 +500（拉远感知，便于隐匿者进出）。
+9. **属性相生相克**：观察者擅长属性与目标属性相同 → confidence +；相克 → 易识别（descriptors 含"违逆 / 刺骨"），同时影响 `attribute_assessment` 准确度与 descriptors 色彩。
+
+**关键不变量**：
+
+1. CognitivePass 永远不读 raw `mana_power`，只读 tier / delta / descriptors。`FilteredSceneView` 中不暴露 raw 数值。
+2. 档位边界、Δ 桶边界、压制破绽阈值都是**世界配置项**（默认值同上，对 rp_cards 锚点校准），改边界需同时更新角色卡解析与单元测试。
+3. 感知层只写**事实级感受**（"远胜 / 难测 / 似有压制"），**不写信念**（"他一定是神祇 / 他在装弱 / 他没安好心"）。这些信念由 CognitivePass 的 LLM 基于感受 + `prior_subjective_state` 自行生成。
+4. ManaPotencyTier 同时为 `KnowledgeEntry { facet: CultivationRealm }` 的内部表征：visibility 决定"谁能看到这一档", 跨档感知精度决定"看到的是真档还是被压制的档"。
+5. SurfaceRealizer 如需在叙事中提到"修为相差一筹/远胜/碾压"等具体差距文字，从 `ManaSignal.perceived.delta` 与 `tier_assessment` 取，不回查 raw mana_power。
+
+##### Mana Combat Resolution（仲裁层灵力对抗解算）
+
+仲裁层与感知层用的是**不同**输入：
+
+- 感知层：`displayed_mana_power`（含压制）→ 角色"觉得"对方多强。
+- 仲裁层：`effective_mana_power`（不含压制；压制只是没主动用全力）→ 实际对抗按真实底力 + 技能 + 身体状态计算。
+
+```rust
+pub struct ManaCombatResolution {
+    // 仲裁层使用，不进入 CognitivePass
+    pub actor_id: String,
+    pub target_id: String,
+    pub actor_combat_power: f64,         // = effective_mana_power × max(0.1, 1 + Σ_modifiers) × soul_factor
+    pub target_combat_power: f64,
+    pub combat_delta: f64,               // actor_combat_power − target_combat_power
+    pub outcome_tier: CombatOutcomeTier,
+    pub disrupting_factors: Vec<String>, // 程序生成: ["攻方处于深度疲惫, 输出折半", "守方擅长水属性, 克制对手火属性"]
+}
+
+pub enum CombatOutcomeTier {
+    // 由 |combat_delta| 桶映射；与感知层 ManaPerceptionDelta 共享 200/500/1000 三个阈值
+    // 仲裁层不再细分 1000 以上：到了"基本无力应对"就够用了，差距更大也只是逃命姿态不同
+    Indistinguishable,       // |Δ| < 200       势均力敌, 胜负看技巧/运气
+    SlightEdge,              // Δ ∈ [200, 500)  攻方略占上风
+    MarkedEdge,              // Δ ∈ [500, 1000) 攻方明显优势
+    Crushing,                // Δ ≥ 1000        守方基本无力应对, 仅能逃避或求饶
+    // 负向（攻方反吃亏）对称展开
+}
+```
+
+**仲裁公式（程序化）**：
+
+```
+combat_power = effective_mana_power × max(0.1, 1 + Σ_modifiers) × soul_factor
+```
+
+仅有**两个独立乘区**：加算修正区（多数因子在此叠加），与灵魂状态乘区（单独成区）。其余因子全部以**加和**方式落到 `Σ_modifiers` 内，不互乘。
+
+1. **基础有效灵力** `effective_mana_power = base_mana_power + L1 状态修正`（突破/中毒/压制解除等，皆为 L1 真相，不含伤势疲惫——后者落入加算修正区）。
+2. **加算修正区** `Σ_modifiers`（同区内所有修正以加和方式叠加）：
+
+   **技能**：
+   - 本命法术：**+0.10 ~ +0.20**
+   - 克制属性：+0.10 ~ +0.30
+   - 受克制：-0.10 ~ -0.30
+   - mastery_rank：novice -0.10 ~ master +0.15
+
+   **身体**：
+   - 轻伤：-0.10
+   - **显著疲惫：-0.20**
+   - **身体重伤 / 灵力枯竭：-0.20 ~ -0.50**（按伤势严重度落区间）
+   - `EnvironmentalStrain.disrupted_actions` 按 disrupted 程度：-0.10 ~ -0.40
+
+   **心境**（来自 Layer 3 EmotionState 与 L1 突发情绪事件，按已有情绪标签程序化映射，不让 LLM 在仲裁时即兴选择）：
+   - **亢奋 / 愤怒：+0.05 ~ +0.10**
+   - 恐惧 / 迟疑：-0.05 ~ -0.15
+   - 崩溃：-0.30 ~ -0.50
+
+   **环境**：
+   - 本属性 `Rich/Dense`：**通常 +0.05 ~ +0.15**
+   - 本属性 `Saturated`：至 +0.20
+   - `mana_haze`：-0.10
+   - **明确设定的例外**（特定阵法 / 上古遗迹 / 神祇坐镇地脉等）：由 L1 `KnowledgeEntry { kind: RegionFact / FactionFact }` 的 `content.combat_modifiers` 字段显式给出非常规修正值，直接加入 `Σ_modifiers`，可超出上述区间。
+
+3. **灵魂状态乘区** `soul_factor`（独立乘区，是除加算区外唯一的乘子）：
+   - 灵魂完整：1.0
+   - **灵魂破损 / 抽离：0.2 ~ 0.7**（按程度落区间，下限对应"魂飞魄散"级）
+
+4. **下限保护**：加算系数以 `max(0.1, 1 + Σ_modifiers)` 截下限，避免修正过深导致 combat_power 趋零或为负而引发除零 / 碾压判定异常。
+
+5. **outcome_tier** 按 `combat_delta = actor_combat_power − target_combat_power` 落桶（200 / 500 / 1000，1000 以上即 Crushing）；细化由 `disrupting_factors` 列出（程序生成的具体说明，例 ["攻方显著疲惫 -0.20", "守方身体重伤 -0.40 + 恐惧 -0.10 + 灵魂破损 ×0.5"]）。
+
+6. 仲裁结果只决定**物理后果**（伤势 / 法力消耗 / 位置变化）写回 L1；**社会层后果**（恐惧 / 屈服 / 记仇）由下游角色 LLM 自行解读。
+
+**关键不变量**：
+
+1. 仲裁公式只读 L1 的 `effective_mana_power`、L1 的身体状态、L1 的技能/属性数据；**不读 displayed_mana_power**（压制是认知层的事，不影响真实对抗）。
+2. `combat_delta` 与 `ManaPerceptionDelta` 共享 200/500/1000 三个阈值，保证"我感觉略胜"与"实际略胜"在同一刻度上。仲裁层在 1000 以上不再细分（结果都是 Crushing）；感知层仍区分 `FarAbove(1000-2500)` 与 `Overwhelming(≥2500)`，但两者**对应的对抗结论一致**（皆为"基本无力应对"），区别只在体感（"远胜，难敌" vs "无法测度，压顶之势"）与是否可识别 tier。
+3. 当 `disrupting_factors` 与 `outcome_tier` 出现"违和"（例如攻方 base_mana_power 高但身体状态极差导致 combat_delta 反而为负），SurfaceRealizer 必须在叙事中体现这种反差，而不是按"谁灵力高谁赢"硬写。
+4. **以弱胜强**在该框架下要求**多个加算修正叠加 + 可能的灵魂状态打击**：守方若同时陷入"显著疲惫 (-0.20) + 身体重伤 (-0.40) + 恐惧 (-0.10) = Σ = -0.70"，加算系数 = max(0.1, 0.30) = 0.30；再叠加灵魂破损 soul_factor = 0.5，总系数 0.15，足以让基础灵力差 1500 的弱者翻盘。"算计 / 偷袭 / 中毒 / 惊扰魂魄"必须落到具体的 L1 状态字段上，由公式自然得出，不允许 LLM 在仲裁口径上手抹平差距。
 
 ##### AccessibleKnowledge
 
@@ -602,13 +961,32 @@ pub struct CharacterSubjectiveState {
 ```rust
 pub struct CharacterRecord {
     pub character_id: String,
-    pub baseline_body_profile: BaselineBodyProfile,    // 物种/感官基线/灵觉基线（用于 EmbodimentResolver）
+    pub baseline_body_profile: BaselineBodyProfile,    // 物种/感官基线/灵觉基线/灵力数值（用于 EmbodimentResolver 与 SceneFilter）
     pub mind_model_card: MindModelCard,                // 自我形象/世界观/恐惧触发/防御模式（属于 subject 自我认知，默认 Aware）
     pub schema_version: String,
 }
+
+pub struct BaselineBodyProfile {
+    pub species: String,                           // "人类" / "妖精-狐" / "仙灵-龙" / ...
+    pub comfort_temperature_range: (f64, f64),     // 物种舒适带（℃），用于 TemperatureFeelTier 校准
+    pub mana_sense_baseline: ManaSenseBaseline,    // 灵觉基线（acuity / overload_threshold / 属性偏向）
+    pub base_mana_power: f64,                      // 灵力数值（参考 rp_cards）；无修行凡人 ~100
+    pub mana_attribute_affinity: Vec<ManaAttribute>,  // 擅长属性（影响感知 confidence 与施法效率）
+    pub size_class: String,                        // "humanoid" / "small_beast" / "kaiju" 等（影响平衡/移动公式）
+}
+
+pub struct ManaSenseBaseline {
+    pub acuity: f64,                               // 0.0-1.0；凡人 0.0；普通修士 0.4-0.6；高阶仙灵 ~1.0
+    pub overload_threshold: f64,                   // 触发感知过载的环境密度阈值（与档位相关）
+    pub attribute_bias: Option<ManaAttribute>,     // 天生敏感的属性
+}
 ```
 
-注意：`MindModelCard` 在 Layer 1 也以 `KnowledgeEntry` 形式存在（subject 自我认知层），这里只是冗余索引以便 EmbodimentResolver 直接读取，**不允许它脱离 Knowledge 入口被外部读取**。
+注意：
+
+- `MindModelCard` 在 Layer 1 也以 `KnowledgeEntry` 形式存在（subject 自我认知层），这里只是冗余索引以便 EmbodimentResolver 直接读取，**不允许它脱离 Knowledge 入口被外部读取**。
+- `base_mana_power` 是 raw 数值；当前**有效灵力**还需叠加 L1 中的伤势/压制/突破修正后再喂给 `ManaPotencyTier::from_power`。raw 永远不进入 CognitivePass。
+- `comfort_temperature_range` 与 `base_mana_power` 的默认值在角色卡解析时从对应种族卡（如 `humanbeing.yaml` / `yaoguai.yaml`）读取并可被角色级覆盖。
 
 #### 4.2.5 Cognitive Pass I/O
 
@@ -1116,7 +1494,13 @@ src-tauri/
 | 事件 delta 计算 | 程序 | 全程结构化 |
 | 脏标志（客观子集） | 程序 | 仅以下 5 项触发 cognitive pass：directly_addressed / under_threat / reaction_window_open / scene_changed / body_changed |
 | 脏标志（主观显著性） | 不作触发条件，仅 prompt hint | - |
-| EmbodimentResolver | 程序 | 公式化 |
+| EmbodimentResolver | 程序 | 公式化；含 environmental_strain 档位翻译 |
+| 物理量→档位翻译（风/温/能见度/地表/降水/呼吸） | 程序 | 严禁 LLM 从 raw m/s, ℃ 推断后果；档位针对该角色物种已校准；body 侧与 perception 侧共享阈值表 |
+| 灵力数值→档位翻译（个体/环境） | 程序 | LLM 不读 raw mana_power；档位边界来自世界配置（默认对 rp_cards 锚点校准） |
+| 灵力差距→感知档（Δ 桶） | 程序 | 阈值 200/500/1000/2500 共用同一份表；感知层用 displayed_mana_power |
+| 灵力压制/隐匿的"破绽"判定 | 程序 | concealment_suspected 由 (observer.effective vs target.effective − 200) + 灵觉敏锐度计算；不让 LLM 自行猜"他是不是在装弱" |
+| 灵力对抗仲裁 | 程序 | 仲裁用 effective_mana_power × technique × body_state_factor，桶映射到 outcome_tier；不读 displayed |
+| 仲裁→社会后果 | 不在仲裁层 | 物理后果写回 L1；恐惧/屈服/记仇由下游 LLM 解读 |
 | 可见性判断（VisibilityResolver） | 程序 | 严格禁止 LLM 介入 |
 | 场景过滤 + visible_facets | 程序 | 全程结构化 |
 | KnowledgeAccess | 程序 | 全程结构化 |
@@ -1331,7 +1715,7 @@ pub trait AIProvider: Send + Sync {
 ### 阶段三-六（参考 `rp_agent_filtering_example.md`）
 
 - [ ] 失明角色 `visible_entities` 为空。
-- [ ] 狐狸精能闻到血腥味，普通人闻不到。
+- [ ] 狐狸精能闻到细微血腥味，普通人闻不到。
 - [ ] 凡人无法清晰感知修士气息。
 - [ ] **私密 Knowledge 仅 known_by 中的角色能访问。**
 - [ ] **GodOnly 知识不出现在任何角色的 accessible_knowledge 中。**
@@ -1374,3 +1758,14 @@ pub trait AIProvider: Send + Sync {
 | SurfaceRealizer 私自添加事实 | 误导用户 / 后续状态不一致 | NarrativeFactCheck 强制扫描；visible_facts 白名单约束 |
 | 仲裁层 LLM 兜底范围扩大 | 演变成"什么都让 LLM 仲裁" | 仲裁层 LLM 仅在认知输出失败时启用；物理判定永远走程序 |
 | 用户输入 LLM 解析失败 | 用户操作丢失 | 显示原始输入 + 提示重写；保留 raw_text 供 trace |
+| LLM 误读物理量数值 | 50m/s 当成微风、-30℃ 当成凉爽 | 程序在 EmbodimentResolver/SceneFilter 把 raw → tier + effect_hints；FilteredSceneView 不暴露 raw 值给 CognitivePass |
+| 物种舒适带未校准 | 同样温度对不同种族应不同感受 | BaselineBodyProfile 含 comfort_temperature_range；档位是相对该范围偏离量计算 |
+| 环境压力跨回合丢失 | 长期暴露不发生冻伤 | EnvironmentalStrain.cold_strain/heat_strain/respiration_strain 在 EmbodimentResolver 累加，仲裁层到阈值生成伤势事件 |
+| L1 物理子字段不自洽 | 暴雨却地面不湿、沙暴但能见度 100m | SceneStateExtractor prompt 模板强制一并填齐；额外 ConsistencyRule 检查（暴雨时 wetness>=阈值，沙暴时 dust_density>=阈值） |
+| 档位阈值在两侧不一致 | body 已 Storm 但 perception 仍 Strong | 阈值表集中常量化（一份表两侧共享）；改阈值需同时跑两侧单元测试 |
+| LLM 误读灵力数值 | 8800 当成"高了点"、Δ=3000 当作"略胜" | SceneFilter 把 mana_power → ManaPotencyTier + ManaPerceptionDelta；FilteredSceneView 不暴露 raw 数值给 CognitivePass |
+| 凡人感知修士细节 | T0 观察者却给出 attribute / 具体档位 | 规则 5/6: T0 灵觉为 0 时 mana_signals 为空; T0 仅能感知 effective ≥ 1000 为"超出常理"，无具体档位 |
+| 隐匿气息被识破或装太死 | 一律识破 / 一律不识破 | concealment_suspected 由 (observer.effective vs target.effective − 200) + 灵觉敏锐度公式定 |
+| 仲裁层与感知层用同一 mana_power | 压制就直接弱化对方仲裁 | 仲裁读 effective（不含压制），感知读 displayed（含压制）；两层显式分离 |
+| 大佬硬吃小弟 | 完全无视技巧/状态导致碾压式叙事 | technique_multiplier × body_state_factor 可制造以弱胜强；以毒/偷袭/算计实现而非抹平 mana_power |
+| 不同世界灵力数值无法兼容 | 某些世界无修真 / 数值范围迥异 | ManaPotencyTier 边界与 Δ 桶阈值存于 world_base.yaml; 不同世界各自一份阈值表; 角色卡解析与档位翻译共用 |
