@@ -3,7 +3,7 @@
 需支持三种调用模式：
 
 - **自由对话**（SillyTavern 模式 / SurfaceRealizer）
-- **严格 JSON 输出**（Agent 模式各 LLM 节点）
+- **严格 JSON 输出**（Agent 模式的部分 LLM 节点）
 - **流式输出**（聊天 UI 体验）
 
 所有调用必须经过日志包装层记录请求、响应、流式 chunk 与异常。日志结构与清理规则见 [30_logging_and_observability.md](30_logging_and_observability.md)。
@@ -80,6 +80,14 @@ Wrapper 的后置条件：
 
 `chat_structured` 的统一后置条件：返回值必须通过传入的 JSON Schema 校验；未通过时由 Provider 层执行有限重试，仍失败则向上返回错误并触发运行时容错路径。JSON mode 只能保证 JSON 可解析，不能替代 schema adherence。
 
+Agent 模式的调用方不得手写散落 prompt。所有 Agent LLM 调用必须先由 `PromptBuilder` 生成 [13_agent_llm_io.md](13_agent_llm_io.md) 定义的 `AgentPromptBundle`：
+
+- system：静态节点契约。
+- developer / system追加：本次任务说明；Provider 无 developer role 时合并进 system。
+- user：单个 JSON 对象 `{ "input": <TInput> }`。
+- `chat_structured`：额外传入输出 JSON Schema。
+
+Provider 适配层只能做消息格式映射、schema 能力映射和降级处理；不得改变节点权限、追加世界事实、读取日志或绕过 `PromptBuilder`。
 
 ---
 

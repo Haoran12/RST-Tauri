@@ -10,7 +10,7 @@
 - 调用预算
 - 10 条验证规则 + 验证时机
 
-数据契约见 [10_agent_data_and_simulation.md](10_agent_data_and_simulation.md)。LLM/程序边界铁律见 [01_architecture.md](01_architecture.md)。日志与 Trace 边界见 [30_logging_and_observability.md](30_logging_and_observability.md)。
+数据契约见 [10_agent_data_model.md](10_agent_data_model.md)。程序化派生与硬规则解算见 [12_agent_simulation.md](12_agent_simulation.md)。LLM 节点 I/O 契约见 [13_agent_llm_io.md](13_agent_llm_io.md)。LLM/程序边界铁律见 [01_architecture.md](01_architecture.md)。日志与 Trace 边界见 [30_logging_and_observability.md](30_logging_and_observability.md)。
 
 ---
 
@@ -116,7 +116,7 @@ OutcomePlanner 每回合仍默认最多 1 次：它接收原行动、所有 `Rea
 
 7. EmbodimentResolver → embodiment_state（Layer 2）
 8. SceneFilter (含 visible_facets 计算) → filtered_scene_view（Layer 2）
-9. KnowledgeAccess → accessible_knowledge（Layer 2，全部经可见性过滤）
+9. KnowledgeAccess → accessible_knowledge（Layer 2；SQLite 索引预筛候选后由 VisibilityResolver 最终过滤）
 10. InputAssembly → CognitivePassInput（保证不含 Layer 1 原始对象）
 11. CharacterCognitivePass(LLM) → 严格 schema JSON
     - 解析失败 → 程序容错（修复常见 JSON 错误）
@@ -157,7 +157,26 @@ OutcomePlanner 每回合仍默认最多 1 次：它接收原行动、所有 `Rea
 
 ---
 
-### 6.1 Trace / Logs 写入点
+### 6.1 并行 CognitivePass 调度
+
+`Per Active & Dirty Character` 阶段允许并行执行，以降低用户等待时间。并行的边界是**读固定快照、产出候选、不写状态**：
+
+1. step 3-6 完成后，运行时固定本回合 `scene_turn_id`、SceneModel、角色记录、Knowledge 版本与 prior L3 快照。
+2. 对每个 active + dirty 且非用户扮演的角色，可并行执行 EmbodimentResolver、SceneFilter、KnowledgeAccess、InputAssembly。
+3. 多个 `CharacterCognitivePass` 可并行调用不同或相同 Provider；每个调用只读取自己的 `CharacterCognitivePassInput`，只产出 `CharacterCognitivePassOutput` 候选。
+4. 并行阶段不得写入 Layer 1、Layer 3、Knowledge、Trace 决策结果或提交记录；LLM 调用日志可以通过异步日志队列或短事务写入。
+5. 所有认知输出收集完毕后，按 `character_id` / `request_id` 稳定排序并统一进入 Validator；输出到达顺序不得影响最终结果。
+6. 认知冲突、同时攻击、互相打断、社会后果统一交给同一次 OutcomePlanner 结算。
+7. StateCommitter 是本回合唯一状态提交点，使用单个 SQLite 写事务写入 L1 / L3 / KnowledgeRevealEvent / Trace 索引。
+
+SQLite 并发策略：
+
+- 使用 WAL 模式，读连接池服务快照读取和 L2 派生，单写连接或写队列服务提交。
+- 不在等待远程 LLM、流式响应或重试期间持有写事务。
+- `KnowledgeEntry.visibility` JSON 与可见性派生索引表必须在同一写事务内更新。
+- 不需要为并行人物 Agent 更换数据库；除非未来引入多进程远程协作或跨设备实时多人编辑，再重新评估服务端数据库。
+
+### 6.2 Trace / Logs 写入点
 
 运行时必须区分 Agent Trace 与运行 Logs：
 
@@ -174,7 +193,7 @@ OutcomePlanner 每回合仍默认最多 1 次：它接收原行动、所有 `Rea
 | 3 | 记录 UserInputDelta 应用摘要 | 状态应用异常 |
 | 4-5 | 记录机械演化与事件 delta 摘要 | 状态演化异常 |
 | 6 | 记录 Active Set、Dirty Flags、跳过原因 | - |
-| 7-10 | 记录 Layer 2 派生摘要与 InputAssembly 结构检查 | 派生或类型检查异常 |
+| 7-10 | 记录 Layer 2 派生摘要、KnowledgeAccess 候选索引命中、VisibilityResolver 裁剪摘要与 InputAssembly 结构检查 | 派生、索引漂移或类型检查异常 |
 | 11 | 记录 CognitivePass 输出、schema 校验、修复结果、api_config_id | LLM request / response / schema / retry / error |
 | 12 | 记录每条 Validator 结果与失败项 | 验证异常事件 |
 | 13a-13c | 记录 OutcomePlanner 输入域、God-read 使用范围、输出 plan、兜底原因、api_config_id | LLM request / response / error |

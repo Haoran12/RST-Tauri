@@ -3,12 +3,12 @@
 Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 
 > 本文仅承载**项目路线图**：阶段、里程碑、技术栈选型、关键决策。
-> 数据模型、架构细节、运行时主循环等 spec 内容已拆分到独立文档，见 [README.md](README.md) 索引。
+> 数据模型、架构细节、运行时主循环等 spec 内容已拆分到独立文档，见 [README.md](../README.md) 索引。
 
 ## 项目概述
 
 - **SillyTavern 模式**：复刻 SillyTavern 体验，支持角色卡 V3 + 世界书 + 预设 + API 配置，JSON 文件存储。详见 [02_st_mode.md](02_st_mode.md)。
-- **Agent 模式**：基于 RP Agent 架构的高级角色扮演系统，分层"客观世界 / 人物具身状态 / 主观认知与意图 / 结果规划与状态更新 / 叙事输出"，SQLite 存储。详见 [10_agent_data_and_simulation.md](10_agent_data_and_simulation.md) + [11_agent_runtime.md](11_agent_runtime.md)。
+- **Agent 模式**：基于 RP Agent 架构的高级角色扮演系统，分层"客观世界 / 人物具身状态 / 主观认知与意图 / 结果规划与状态更新 / 叙事输出"，SQLite 存储。数据模型见 [10_agent_data_model.md](10_agent_data_model.md)，运行时见 [11_agent_runtime.md](11_agent_runtime.md)，程序化解算见 [12_agent_simulation.md](12_agent_simulation.md)，LLM I/O 契约见 [13_agent_llm_io.md](13_agent_llm_io.md)，持久化见 [14_agent_persistence.md](14_agent_persistence.md)。
 
 > **架构基础**：参考 `D:\Projects\RST-flutter\docs\rp_agent_*` 系列文档（成熟的角色扮演 Agent 架构），本项目在其基础上为 Tauri + Rust + Vue 3 技术栈做适配。
 
@@ -53,7 +53,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 
 1. SQLite 表结构 + 三层语义隔离（Layer 1 / Layer 3 / Trace）。
 2. SceneModel + ManaField + PhysicalConditions 完整定义（Layer 1）。
-3. KnowledgeEntry 体系（kind / subject / visibility / subject_awareness / apparent_content）。
+3. KnowledgeEntry 体系（kind / subject / visibility / subject_awareness / apparent_content）+ 可见性派生索引表。
 4. KnowledgeEntry content sub-schemas（每种 facet/fact 类型的核心字段 + extensions 兜底）。
 5. CharacterRecord（baseline_body_profile + mind_model_card + temporary_body_state）。
 6. CharacterSubjectiveState（Layer 3）。
@@ -66,8 +66,8 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 ### 阶段四：Agent 模式 — 程序化核心
 
 1. KnowledgeStore（Layer 1 CRUD）。
-2. VisibilityResolver（统一可见性判断，三谓词合并）。
-3. KnowledgeAccessProtocol（构建 AccessibleKnowledge）。
+2. VisibilityResolver（统一可见性最终判定，三谓词合并）。
+3. KnowledgeAccessProtocol（SQLite 派生索引预筛 + VisibilityResolver 裁剪，构建 AccessibleKnowledge）。
 4. EmbodimentResolver（含灵觉 + 环境档位翻译）。
 5. SceneFilter（含 visible_facets 计算 + WeatherPerception + ManaSignal）。
 6. InputAssembly（拒绝 Layer 1 原始对象）。
@@ -76,7 +76,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 
 ### 阶段五：Agent 模式 — 认知与叙事层
 
-1. PromptBuilder（结构化 prompt + JSON schema 注入）。
+1. PromptBuilder（`AgentPromptBundle`、四类节点静态提示词、动态 JSON 输入、JSON schema 注入、prompt version/hash）。
 2. SceneStateExtractor（最近自由文本 + 当前 Scene JSON → SceneStateExtractorOutput，严格 schema）。
 3. CharacterCognitivePass（融合调用，严格 schema 输出）。
 4. JSON 输出容错修复器（缺字段补默认 / 修复常见结构错误）。
@@ -89,7 +89,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 ### 阶段六：Agent 模式 — 验证与运行时
 
 1. 10 大验证规则（含 SelfAwareness / GodOnly / ApparentVsTrue / ReactionWindow / NarrativeFactCheck / SchemaConformance）。
-2. AgentRuntime 主循环。
+2. AgentRuntime 主循环（固定快照、并行 CognitivePass、统一验证、单写提交）。
 3. Dirty Flags + Active Set。
 4. 角色 Tier 分级。
 5. 调用预算监控。
@@ -161,12 +161,13 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 |---|---|---|
 | 数据形态铁律 | 自由文本仅在三处出现：用户输入、SceneStateExtractor 输入、SurfaceRealizer 输出。其他全程结构化 JSON | 避免规则匹配失效与"屎山"起点 |
 | 三层数据语义 | Layer 1 (Truth) / Layer 2 (Per-Character Access) / Layer 3 (Subjective)，强制隔离 | 受限 LLM 不接触 Layer 1 原始对象；God-read 节点只产出候选更新，防止全知泄露与直接写状态 |
-| 知识统一模型 | KnowledgeEntry 统一承载世界/势力/角色档案/记忆，按 visibility 谓词控制 | 单一可见性入口（VisibilityResolver），避免散落 |
+| 知识统一模型 | KnowledgeEntry 统一承载世界/势力/角色档案/记忆，按 visibility 谓词控制，并维护 SQLite 可见性派生索引 | 单一可见性入口（VisibilityResolver），索引只做候选预筛 |
 | 灵力档位 | 6 档（Mundane / Awakened / Adept / Master / Ascendant / Transcendent），边界对 `D:\AI\rp_cards\` 锚点校准 | 用档位识别身份，用数值差识别实力 |
 | 感知 vs 对抗解算分离 | 感知用 `displayed_mana_power`（含压制），对抗解算用 `effective_mana_power`（不含压制） | 压制是认知层欺骗手段，不影响真实对抗 |
 | 对抗解算公式 | `combat_power = effective × max(0.1, 1 + Σ_modifiers) × soul_factor`，加算修正区 + 灵魂独立乘区 | 多因子加和可控，灵魂破损保留乘性凸显质变打击 |
 | 跨档差阈值 | 感知层 150 / 300 / 1000 / 2000；对抗解算共享 150 / 300 / 1000，1000+ 即 Crushing | 150 起感觉差距、1000+ 基本无力应对，2000+ 进入无法测度的体感描述 |
 | LLM 数值字段 | 用 ConfidenceShift 等离散级别，由程序映射为数值 | LLM 直出浮点不稳定 |
+| Agent Prompt 契约 | 静态节点提示词版本化；动态输入只传对应 schema JSON；Trace 记录 prompt_template_id/version/hash | 防止提示词漂移、隐藏事实混入 prompt、回放无法定位 |
 | 反应窗口 | 主动威胁打开有限 ReactionWindow；合格目标/伙伴/守护者各最多提交一个 ReactionIntent；默认 reaction 不再触发 reaction | 支持即时援护与反击，同时避免无限递归和调用成本失控 |
 | Agent LLM API 配置 | 四类 Agent LLM 节点可分别绑定 `api_configs/` 中的配置，未配置时继承默认 Agent 配置 | 不同节点对成本、速度、结构化输出能力、叙事质量要求不同 |
 | OutcomePlanner 权限 | 可 God-read 并输出实际言行、交互结果和 StateUpdatePlan 候选；EffectValidator 裁剪非法硬效果后才提交 | 支持复杂技能与叙事结果规划，同时避免 LLM 直接改写世界状态 |

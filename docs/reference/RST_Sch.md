@@ -32,8 +32,8 @@
 ```
 
 ### ST模式-Lore注入
-ST模式的Lore注入追求复刻SiilyTavern的效果.
-[ST_mode注入流程说明](ST_mode_lore_injection.md)
+ST模式的Lore注入追求复刻SillyTavern的效果.
+[ST_mode注入流程说明](SillyTavernLorebook.md)
 
 
 ## Agent模式

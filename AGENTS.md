@@ -8,9 +8,13 @@ This is currently a documentation-first Tauri project for Ran's SmartTavern (RST
 - `docs/implementation_plan.md`: roadmap, milestones, and key decisions.
 - `docs/01_architecture.md`: architecture, invariants, and LLM/program boundaries.
 - `docs/02_st_mode.md`: SillyTavern-compatible character card, worldbook, and injection behavior.
-- `docs/10_agent_data_and_simulation.md`: Agent data model, derived state, outcome planning, skill contracts, and SQLite.
+- `docs/10_agent_data_model.md`: Agent data model, three-layer semantics, KnowledgeEntry, and CharacterRecord.
 - `docs/11_agent_runtime.md`: runtime loop, cognitive pass, active set, dirty flags, and validation rules.
+- `docs/12_agent_simulation.md`: deterministic derived state, environment/mana tiers, combat resolution, and skill contracts.
+- `docs/13_agent_llm_io.md`: structured I/O contracts for Agent LLM nodes.
+- `docs/14_agent_persistence.md`: Agent SQLite tables, indexes, and persistence boundaries.
 - `docs/20_backend_contracts.md`: backend AI provider contracts.
+- `docs/30_logging_and_observability.md`: Agent Trace, runtime logs, retention, and observability rules.
 - `docs/90_pitfalls_and_tests.md`: risk register and verification plans.
 - `docs/reference/`: external or historical reference notes; do not treat these as primary specs.
 

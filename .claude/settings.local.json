@@ -6,7 +6,11 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:tauri.app)",
-      "WebFetch(domain:v2.tauri.app)"
+      "WebFetch(domain:v2.tauri.app)",
+      "WebFetch(domain:www.volcengine.com)",
+      "WebFetch(domain:cloud.tencent.com)",
+      "WebFetch(domain:api-docs.deepseek.com)",
+      "WebFetch(domain:docs.anthropic.com)"
     ]
   }
 }

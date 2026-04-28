@@ -65,3 +65,8 @@ interface TavernCardV3 {
 7. 递归与 MIN_ACTIVATIONS 决定是否再扫一轮。
 8. 按 `entry.position` 分流到 `worldInfoBefore / After / Depth / AN / EM / outlet`。
 9. 落入最终 Prompt（OpenAI 路径在 `openai.js` 把 before/after 作为 system prompt 片段）。
+
+## 4. 预设
+预设是SillyTavern模式Prompt Builder的核心功能. Prompt将按照预设条目的顺序和内容要求, 组建提示词准备发送给LLM.
+
+### 预设条目的字段

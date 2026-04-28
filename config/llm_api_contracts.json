@@ -68,6 +68,11 @@
       "id": "xfyun_astron_coding_plan",
       "title": "讯飞星辰 MaaS Astron Coding Plan 使用文档",
       "url": "https://www.xfyun.cn/doc/spark/CodingPlan.html"
+    },
+    {
+      "id": "claude_code_request_format",
+      "title": "LLM Request Format Replication Guide",
+      "url": "docs/CLUADE_CODE_REQUEST_FORMAT.md"
     }
   ],
   "contracts": {
@@ -551,7 +556,7 @@
         "coerce_developer_role_to_system": true,
         "coerce_max_completion_tokens_to_max_tokens": true,
         "prefer_streaming_probe": true,
-        "prefer_claude_code_anthropic_profile_when_available": true,
+        "prefer_claude_code_interface_when_available": true,
         "notes": "Coding Plan is a coding-tool package, not the general Model Studio pay-as-you-go API. Treat OpenAI compatibility as a narrow tool-facing subset unless a selected tool/model explicitly documents more fields."
       },
       "recommended_minimal_probe": {
@@ -562,6 +567,7 @@
         "stream": true
       },
       "suspect_or_forbidden_request_fields": [
+        {"path": "system", "status": "forbidden", "reason": "OpenAI-compatible Coding Plan uses system messages, not Anthropic top-level system blocks."},
         {"path": "messages[].role=developer", "status": "forbidden", "reason": "Coding Plan OpenAI-compatible tool endpoints may reject newer OpenAI roles. Merge developer content into system."},
         {"path": "messages[].role=tool", "status": "suspect", "reason": "Tool round-trips depend on the coding tool and selected model; do not send until verified."},
         {"path": "messages[].role=function", "status": "forbidden", "reason": "Legacy OpenAI function role is not part of the safe Coding Plan subset."},
@@ -570,6 +576,11 @@
         {"path": "response_format", "status": "suspect", "reason": "Structured output support is not documented for the Coding Plan package endpoint; validate before enabling."},
         {"path": "tools", "status": "suspect", "reason": "Function calling support is tool/model dependent; omit until verified."},
         {"path": "tool_choice", "status": "suspect", "reason": "Only meaningful if tools are verified as supported."},
+        {"path": "betas", "status": "forbidden", "reason": "Anthropic/Claude Code beta field; not part of OpenAI-compatible Chat Completions."},
+        {"path": "thinking", "status": "forbidden", "reason": "Anthropic Messages field; not part of the safe Coding Plan OpenAI subset."},
+        {"path": "context_management", "status": "forbidden", "reason": "Claude Code Anthropic extension; not part of OpenAI-compatible Chat Completions."},
+        {"path": "output_config", "status": "forbidden", "reason": "Claude Code Anthropic extension; not part of OpenAI-compatible Chat Completions."},
+        {"path": "speed", "status": "forbidden", "reason": "Claude Code Anthropic extension; not part of OpenAI-compatible Chat Completions."},
         {"path": "parallel_tool_calls", "status": "forbidden", "reason": "OpenAI-specific extension; not part of the safe Coding Plan subset."},
         {"path": "stream_options", "status": "suspect", "reason": "Start without stream_options even when stream=true; add only after provider verification."},
         {"path": "reasoning_effort", "status": "forbidden", "reason": "OpenAI reasoning-model field; not documented for Coding Plan OpenAI endpoint."},
@@ -593,32 +604,139 @@
         {"path": "non-interactive automated/batch backend use", "reason": "Explicitly forbidden by Coding Plan usage docs."},
         {"path": "full OpenAI Chat Completions parameter passthrough", "reason": "This contract deliberately narrows the inherited OpenAI Chat surface; adapters must apply strict_request_whitelist before sending requests."}
       ],
-      "compatibility_notes": "Do not treat inherits=openai_chat_completions as permission to forward every OpenAI field. Prefer aliyun_coding_plan_anthropic with the claude_code_anthropic profile when integrating through a Claude Code-like tool surface."
+      "compatibility_notes": "Do not treat inherits=openai_chat_completions as permission to forward every OpenAI field. Prefer claude_code_interface when integrating through a Claude Code-like tool surface."
     },
-    "aliyun_coding_plan_anthropic": {
-      "provider": "aliyun_coding_plan",
+    "claude_code_interface": {
+      "provider": "claude_code_interface",
+      "display_name": "Claude Code Interface",
       "wire_api": "anthropic_messages",
       "inherits": "anthropic_messages",
-      "compatibility_level": "claude_code_anthropic_compatible",
-      "endpoint": {
-        "method": "POST",
-        "path": "/v1/messages",
-        "base_urls_for_anthropic_client": {
-          "intl_current": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
-          "cn_current": "https://coding.dashscope.aliyuncs.com/apps/anthropic"
-        },
-        "final_url_pattern": "{base_url_for_anthropic_client}/v1/messages",
-        "do_not_append_apps_anthropic_twice": true
-      },
+      "compatibility_level": "coding_plan_claude_code_interface",
+      "purpose": "Single Claude Code-compatible interface for Coding Plan packages. Provider variants only define endpoint, model, and environment differences.",
+      "selection_rule": "Expose this as one provider/interface in RST. Select a provider_variant such as aliyun_coding_plan or xfyun_astron_coding_plan from account/package settings.",
       "headers": {
-        "required": ["x-api-key or Authorization bearer as required by the client/tool", "anthropic-version when client sends native Anthropic requests"],
-        "optional": []
+        "required": ["ANTHROPIC_AUTH_TOKEN / x-api-key / Authorization bearer carrying the Coding Plan API Key", "Content-Type: application/json"],
+        "optional": ["anthropic-version when sent by the client/tool"]
       },
+      "allowed_request_fields": [
+        {"path": "model", "status": "required", "type": "string", "notes": "Use the selected provider_variant model policy."},
+        {"path": "max_tokens", "status": "required", "type": "integer", "notes": "Claude Code-style Anthropic Messages requests send explicit max_tokens."},
+        {"path": "system", "status": "required", "type": "array<object>", "notes": "Claude Code sends top-level system text blocks; do not use messages[].role=system."},
+        {"path": "system[].type", "status": "required", "type": "string", "allowed_values": ["text"]},
+        {"path": "system[].text", "status": "required", "type": "string"},
+        {"path": "system[].cache_control", "status": "optional", "type": "object", "notes": "Prompt cache marker when the endpoint accepts Anthropic cache controls."},
+        {"path": "messages", "status": "required", "type": "array<object>"},
+        {"path": "messages[].role", "status": "required", "type": "string", "allowed_values": ["user", "assistant"]},
+        {"path": "messages[].content", "status": "required", "type": "string | array<object>"},
+        {"path": "messages[].content[].type", "status": "conditional", "type": "string", "allowed_values": ["text", "tool_use", "tool_result", "image", "document", "thinking", "redacted_thinking"], "notes": "Minimum Claude Code-compatible loop needs text/tool_use/tool_result."},
+        {"path": "tools", "status": "optional", "type": "array<object>", "notes": "Anthropic tool schema array used by Claude Code local tools."},
+        {"path": "tool_choice", "status": "optional", "type": "object", "notes": "Usually {\"type\":\"auto\"} for Claude Code-style agent loops."},
+        {"path": "metadata", "status": "optional", "type": "object", "notes": "Claude Code commonly sends metadata.user_id as a JSON string containing device/account/session IDs."},
+        {"path": "stream", "status": "optional", "type": "boolean", "recommended": true},
+        {"path": "temperature", "status": "conditional", "type": "number", "notes": "Send only when thinking is disabled or omitted; Claude Code normally omits temperature when thinking is enabled."},
+        {"path": "thinking", "status": "conditional", "type": "object", "notes": "Use {\"type\":\"adaptive\"} or budgeted thinking only for models/endpoints that accept it."},
+        {"path": "betas", "status": "conditional", "type": "array<string>", "notes": "Only send beta names required by enabled Claude Code features and accepted by the endpoint."},
+        {"path": "context_management", "status": "conditional", "type": "object", "notes": "Claude Code extension field; send only with a verified compatible beta/profile."},
+        {"path": "output_config", "status": "conditional", "type": "object", "notes": "Claude Code extension field for effort, structured output, or task budget; send only when accepted."},
+        {"path": "speed", "status": "conditional", "type": "string", "allowed_values": ["fast"], "notes": "Claude Code fast mode extension; omit unless the endpoint accepts it."}
+      ],
+      "conditional_request_fields": [
+        {"path": "tools[].name", "status": "required", "when": "tools are present"},
+        {"path": "tools[].description", "status": "optional", "when": "tools are present"},
+        {"path": "tools[].input_schema", "status": "required", "when": "tools are present"},
+        {"path": "tools[].cache_control", "status": "conditional", "when": "prompt caching is enabled and accepted by the endpoint"},
+        {"path": "tools[].defer_loading", "status": "conditional", "when": "tool search/deferred loading beta is enabled and accepted by the endpoint"},
+        {"path": "tools[].eager_input_streaming", "status": "conditional", "when": "the endpoint accepts Claude Code eager tool input streaming"},
+        {"path": "messages[].content[].text", "status": "required", "when": "content block type is text"},
+        {"path": "messages[].content[].id", "status": "required", "when": "assistant content block type is tool_use"},
+        {"path": "messages[].content[].name", "status": "required", "when": "assistant content block type is tool_use"},
+        {"path": "messages[].content[].input", "status": "required", "when": "assistant content block type is tool_use"},
+        {"path": "messages[].content[].tool_use_id", "status": "required", "when": "user content block type is tool_result"},
+        {"path": "messages[].content[].content", "status": "required", "when": "user content block type is tool_result"}
+      ],
+      "forbidden_request_fields": [
+        {"path": "messages[].role=system", "reason": "Anthropic protocol uses top-level system blocks."},
+        {"path": "messages[].role=tool", "reason": "Claude Code sends tool results as user content blocks with type=tool_result."},
+        {"path": "messages[].role=developer", "reason": "Anthropic protocol has no developer role; merge into top-level system."},
+        {"path": "response_format", "reason": "OpenAI Chat field; use Anthropic tool schema or local schema validation."},
+        {"path": "functions", "reason": "OpenAI legacy field."},
+        {"path": "function_call", "reason": "OpenAI legacy field."},
+        {"path": "max_completion_tokens", "reason": "Anthropic Messages uses max_tokens."},
+        {"path": "parallel_tool_calls", "reason": "OpenAI-specific extension; not part of Claude Code Anthropic request shape."},
+        {"path": "stream_options", "reason": "OpenAI Chat field; Anthropic streaming is selected by stream=true."},
+        {"path": "store", "reason": "OpenAI storage field."},
+        {"path": "service_tier", "reason": "General Anthropic field, but not part of the replicated Claude Code Coding Plan profile unless provider verifies it."},
+        {"path": "prediction", "reason": "OpenAI predicted output field."},
+        {"path": "modalities", "reason": "OpenAI multimodal output field."},
+        {"path": "audio", "reason": "OpenAI audio output field."},
+        {"path": "logprobs", "reason": "OpenAI token logprob field."},
+        {"path": "top_logprobs", "reason": "OpenAI token logprob field."},
+        {"path": "seed", "reason": "OpenAI determinism field."},
+        {"path": "user", "reason": "OpenAI abuse-monitoring field; Claude Code-compatible metadata belongs under metadata.user_id."}
+      ],
       "client_compatibility_profiles": {
-        "claude_code_anthropic": {
-          "purpose": "Emit Anthropic Messages-compatible requests in the same shape used by Claude Code configuration documented by the provider.",
+        "claude_code": {
+          "purpose": "Emit Anthropic Messages-compatible requests in the same shape used by Claude Code configuration documented by Coding Plan providers.",
           "identity_spoofing": false,
           "do_not_set_fake_user_agent": true,
+          "request_shape": {
+            "model": "Use the selected provider_variant model policy.",
+            "max_tokens": "required",
+            "system": "top-level array of text blocks; do not send messages[].role=system",
+            "messages": "array of user/assistant turns only; merge consecutive user turns and keep tool_use/tool_result pairing valid",
+            "tools": "optional Anthropic tool schema array with name, description, and input_schema",
+            "tool_choice": "optional; usually {\"type\":\"auto\"}",
+            "metadata": "optional Claude Code metadata object, typically metadata.user_id JSON string",
+            "thinking": "conditional; omit temperature when enabled",
+            "betas": "conditional; only provider-accepted Claude Code beta features",
+            "context_management": "conditional provider-gated Claude Code extension",
+            "output_config": "conditional provider-gated Claude Code extension",
+            "speed": "conditional provider-gated Claude Code fast mode",
+            "stream": "optional boolean"
+          },
+          "recommended_minimal_probe": {
+            "model": "<variant model>",
+            "max_tokens": 128,
+            "system": [
+              {"type": "text", "text": "You are a concise coding assistant."}
+            ],
+            "messages": [
+              {"role": "user", "content": "Say hello."}
+            ],
+            "metadata": {
+              "user_id": "{\"device_id\":\"local-dev\",\"account_uuid\":\"\",\"session_id\":\"session-local\"}"
+            },
+            "stream": true
+          },
+          "notes": "This means Anthropic Messages wire format and documented Claude Code environment variables, not falsifying client identity."
+        }
+      },
+      "adapter_policy": {
+        "prefer_for_claude_code_like_tools": true,
+        "default_to_anthropic_messages_rules": true,
+        "default_to_claude_code_request_shape": true,
+        "coerce_system_messages_to_top_level_system": true,
+        "coerce_system_to_text_block_array": true,
+        "merge_consecutive_user_messages": true,
+        "validate_tool_use_tool_result_pairing": true,
+        "omit_temperature_when_thinking_enabled": true,
+        "gate_claude_code_extension_fields_by_provider_support": ["betas", "thinking", "context_management", "output_config", "speed", "tools[].defer_loading", "tools[].eager_input_streaming", "cache_control"],
+        "drop_openai_only_fields": true,
+        "notes": "This is the canonical Coding Plan interface for Claude Code-like integrations. OpenAI-compatible Coding Plan contracts are fallback compatibility surfaces, not separate first-class providers."
+      },
+      "provider_variants": {
+        "aliyun_coding_plan": {
+          "display_name": "Alibaba Cloud Model Studio Coding Plan",
+          "endpoint": {
+            "method": "POST",
+            "path": "/v1/messages",
+            "base_urls_for_anthropic_client": {
+              "intl_current": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
+              "cn_current": "https://coding.dashscope.aliyuncs.com/apps/anthropic"
+            },
+            "final_url_pattern": "{base_url_for_anthropic_client}/v1/messages",
+            "do_not_append_apps_anthropic_twice": true
+          },
           "env": {
             "ANTHROPIC_AUTH_TOKEN": "<Coding Plan API Key>",
             "ANTHROPIC_BASE_URL": {
@@ -632,37 +750,72 @@
             "ANTHROPIC_DEFAULT_OPUS_MODEL": "<optional Coding Plan supported model>",
             "CLAUDE_CODE_SUBAGENT_MODEL": "<optional Coding Plan supported model>"
           },
-          "request_shape": {
-            "model": "Use ANTHROPIC_MODEL or the selected Coding Plan model.",
-            "max_tokens": "required",
-            "system": "top-level system field; do not send messages[].role=system",
-            "messages": "array of user/assistant turns only",
-            "stream": "optional boolean"
+          "model_policy": {
+            "source": "Coding Plan console/package docs",
+            "examples": ["qwen3.6-plus", "qwen3.5-plus", "qwen3-coder-plus", "qwen3-coder-next", "glm-5", "kimi-k2.5", "MiniMax-M2.5"],
+            "notes": "Available model list depends on the subscribed Coding Plan package and region."
           },
           "recommended_minimal_probe": {
             "model": "qwen3.6-plus",
             "max_tokens": 128,
-            "system": "You are a concise coding assistant.",
+            "system": [
+              {"type": "text", "text": "You are a concise coding assistant."}
+            ],
             "messages": [
               {"role": "user", "content": "Say hello."}
             ],
+            "metadata": {
+              "user_id": "{\"device_id\":\"local-dev\",\"account_uuid\":\"\",\"session_id\":\"session-local\"}"
+            },
             "stream": true
           },
-          "notes": "Use this profile when an integration needs Claude Code-compatible behavior. This means Anthropic Messages wire format and documented Claude Code environment variables, not falsifying client identity."
+          "usage_constraints": [
+            "Same Coding Plan restrictions as aliyun_coding_plan_openai.",
+            "Some tools may append /v1; use the exact base URL required by the client/tool."
+          ]
+        },
+        "xfyun_astron_coding_plan": {
+          "display_name": "讯飞星辰 MaaS Astron Coding Plan",
+          "endpoint": {
+            "method": "POST",
+            "path": "/v1/messages",
+            "default_base_url_for_anthropic_client": "https://maas-coding-api.cn-huabei-1.xf-yun.com/anthropic",
+            "final_url_pattern": "{default_base_url_for_anthropic_client}/v1/messages",
+            "do_not_append_anthropic_twice": true
+          },
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "<Coding Plan API Key>",
+            "ANTHROPIC_BASE_URL": "https://maas-coding-api.cn-huabei-1.xf-yun.com/anthropic",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": 1,
+            "API_TIMEOUT_MS": 600000,
+            "ANTHROPIC_MODEL": "astron-code-latest",
+            "ANTHROPIC_SMALL_FAST_MODEL": "astron-code-latest"
+          },
+          "model_policy": {
+            "required_model": "astron-code-latest",
+            "small_fast_model": "astron-code-latest"
+          },
+          "recommended_minimal_probe": {
+            "model": "astron-code-latest",
+            "max_tokens": 128,
+            "system": [
+              {"type": "text", "text": "You are a concise coding assistant."}
+            ],
+            "messages": [
+              {"role": "user", "content": "Say hello."}
+            ],
+            "metadata": {
+              "user_id": "{\"device_id\":\"local-dev\",\"account_uuid\":\"\",\"session_id\":\"session-local\"}"
+            },
+            "stream": true
+          },
+          "forbidden_request_fields": [
+            {"path": "model values other than astron-code-latest", "reason": "Official Coding Plan doc declares a unified model ID."},
+            {"path": "regular MaaS API base URL", "reason": "Coding Plan uses maas-coding-api only."}
+          ]
         }
       },
-      "adapter_policy": {
-        "prefer_for_claude_code_like_tools": true,
-        "default_to_anthropic_messages_rules": true,
-        "coerce_system_messages_to_top_level_system": true,
-        "drop_openai_only_fields": true,
-        "notes": "If an OpenAI-compatible request is rejected by Coding Plan, retrying through this Anthropic-compatible profile is the safer tool-facing path when the user has configured a Claude Code-like integration."
-      },
-      "usage_constraints": [
-        "Same Coding Plan restrictions as aliyun_coding_plan_openai.",
-        "Some tools may append /v1; use the exact base URL required by the client/tool."
-      ],
-      "compatibility_notes": "Use Anthropic Messages field rules when the client emits native Anthropic requests."
+      "compatibility_notes": "Use Claude Code Interface as the single Coding Plan provider surface. Provider variants share Anthropic Messages field rules and differ only in endpoint, model policy, environment mapping, and package restrictions."
     },
     "xfyun_astron_coding_plan_openai": {
       "provider": "xfyun_astron_coding_plan",
@@ -701,6 +854,7 @@
         "coerce_developer_role_to_system": true,
         "coerce_max_completion_tokens_to_max_tokens": true,
         "prefer_streaming_probe": true,
+        "prefer_claude_code_interface_when_available": true,
         "notes": "Although this endpoint is documented as OpenAI protocol, observed compatibility should be treated as a narrow Chat Completions subset. Start from the whitelist and add fields only after provider-specific verification."
       },
       "recommended_minimal_probe": {
@@ -711,6 +865,7 @@
         "stream": true
       },
       "suspect_or_forbidden_request_fields": [
+        {"path": "system", "status": "forbidden", "reason": "OpenAI-compatible Coding Plan uses system messages, not Anthropic top-level system blocks."},
         {"path": "messages[].role=developer", "status": "forbidden", "reason": "Many OpenAI-compatible coding-plan endpoints only accept system/user/assistant roles. Merge developer content into a system message."},
         {"path": "messages[].role=tool", "status": "suspect", "reason": "Tool round-trips are not documented in Astron Coding Plan; do not send until verified."},
         {"path": "messages[].role=function", "status": "forbidden", "reason": "Legacy OpenAI function role is not documented for this endpoint."},
@@ -719,6 +874,11 @@
         {"path": "response_format", "status": "suspect", "reason": "Structured output support is not documented for Astron Coding Plan OpenAI endpoint."},
         {"path": "tools", "status": "suspect", "reason": "Function calling support is not documented for Astron Coding Plan; omit until verified."},
         {"path": "tool_choice", "status": "suspect", "reason": "Only meaningful if tools are verified as supported."},
+        {"path": "betas", "status": "forbidden", "reason": "Anthropic/Claude Code beta field; not part of OpenAI-compatible Chat Completions."},
+        {"path": "thinking", "status": "forbidden", "reason": "Anthropic Messages field; not part of the safe Astron OpenAI subset."},
+        {"path": "context_management", "status": "forbidden", "reason": "Claude Code Anthropic extension; not part of OpenAI-compatible Chat Completions."},
+        {"path": "output_config", "status": "forbidden", "reason": "Claude Code Anthropic extension; not part of OpenAI-compatible Chat Completions."},
+        {"path": "speed", "status": "forbidden", "reason": "Claude Code Anthropic extension; not part of OpenAI-compatible Chat Completions."},
         {"path": "parallel_tool_calls", "status": "forbidden", "reason": "OpenAI-specific extension; not documented for Astron Coding Plan."},
         {"path": "stream_options", "status": "suspect", "reason": "Start without stream_options even when stream=true; add only after provider verification."},
         {"path": "reasoning_effort", "status": "forbidden", "reason": "OpenAI reasoning-model field; not documented for Astron Coding Plan."},
@@ -740,73 +900,7 @@
         {"path": "base URL for non-Coding MaaS inference", "reason": "Coding Plan uses maas-coding-api; do not mix with regular MaaS API endpoints."},
         {"path": "full OpenAI Chat Completions parameter passthrough", "reason": "This contract deliberately narrows the inherited OpenAI Chat surface; adapters must apply strict_request_whitelist before sending requests."}
       ],
-      "compatibility_notes": "Do not treat inherits=openai_chat_completions as permission to forward every OpenAI field. For this provider, strict_request_whitelist and suspect_or_forbidden_request_fields override the inherited contract."
-    },
-    "xfyun_astron_coding_plan_anthropic": {
-      "provider": "xfyun_astron_coding_plan",
-      "wire_api": "anthropic_messages",
-      "inherits": "anthropic_messages",
-      "compatibility_level": "claude_code_anthropic_compatible",
-      "endpoint": {
-        "method": "POST",
-        "path": "/v1/messages",
-        "default_base_url_for_anthropic_client": "https://maas-coding-api.cn-huabei-1.xf-yun.com/anthropic",
-        "final_url_pattern": "{default_base_url_for_anthropic_client}/v1/messages",
-        "do_not_append_anthropic_twice": true
-      },
-      "headers": {
-        "required": ["ANTHROPIC_AUTH_TOKEN / x-api-key equivalent carrying the Coding Plan API Key", "Content-Type: application/json"],
-        "optional": ["anthropic-version if sent by the client/tool"]
-      },
-      "client_compatibility_profiles": {
-        "claude_code_anthropic": {
-          "purpose": "Emit Anthropic Messages-compatible requests in the same shape used by Claude Code configuration documented by the provider.",
-          "identity_spoofing": false,
-          "do_not_set_fake_user_agent": true,
-          "env": {
-            "ANTHROPIC_AUTH_TOKEN": "<Coding Plan API Key>",
-            "ANTHROPIC_BASE_URL": "https://maas-coding-api.cn-huabei-1.xf-yun.com/anthropic",
-            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": 1,
-            "API_TIMEOUT_MS": 600000,
-            "ANTHROPIC_MODEL": "astron-code-latest",
-            "ANTHROPIC_SMALL_FAST_MODEL": "astron-code-latest"
-          },
-          "request_shape": {
-            "model": "astron-code-latest",
-            "max_tokens": "required",
-            "system": "top-level system field; do not send messages[].role=system",
-            "messages": "array of user/assistant turns only",
-            "stream": "optional boolean"
-          },
-          "recommended_minimal_probe": {
-            "model": "astron-code-latest",
-            "max_tokens": 128,
-            "system": "You are a concise coding assistant.",
-            "messages": [
-              {"role": "user", "content": "Say hello."}
-            ],
-            "stream": true
-          },
-          "notes": "Use this profile when an integration needs Claude Code-compatible behavior. This means Anthropic Messages wire format and documented Claude Code environment variables, not falsifying client identity."
-        }
-      },
-      "adapter_policy": {
-        "prefer_for_claude_code_like_tools": true,
-        "default_to_anthropic_messages_rules": true,
-        "coerce_system_messages_to_top_level_system": true,
-        "drop_openai_only_fields": true,
-        "notes": "For Claude Code-like integrations, use the /anthropic endpoint and Astron's documented Claude Code env shape instead of the OpenAI-compatible /v2 endpoint."
-      },
-      "model_policy": {
-        "required_model": "astron-code-latest",
-        "small_fast_model": "astron-code-latest"
-      },
-      "forbidden_request_fields": [
-        {"path": "messages[].role=system", "reason": "When using Anthropic protocol, system prompt must be top-level system."},
-        {"path": "model values other than astron-code-latest", "reason": "Official Coding Plan doc declares a unified model ID."},
-        {"path": "regular MaaS API base URL", "reason": "Coding Plan uses maas-coding-api only."}
-      ],
-      "compatibility_notes": "Use Anthropic Messages field rules when the client emits native Anthropic requests."
+      "compatibility_notes": "Do not treat inherits=openai_chat_completions as permission to forward every OpenAI field. Prefer claude_code_interface for Claude Code-like integrations; this contract remains a narrow OpenAI-compatible fallback."
     }
   },
   "adapter_defaults": {
@@ -817,12 +911,12 @@
       "gemini_generate_content": "Use generationConfig.responseMimeType=application/json and generationConfig.responseSchema when supported.",
       "deepseek_chat": "Use response_format.type=json_object plus prompt instruction and local schema validation.",
       "aliyun_qwen_openai_chat": "Use response_format.type=json_object or documented structured output support, then validate locally.",
-      "coding_plan": "Prefer the protocol emitted by the coding tool. For Claude Code-like integrations, prefer the provider's Anthropic-compatible Coding Plan endpoint and its claude_code_anthropic profile. Validate responses locally because Coding Plan docs specify compatibility endpoints rather than full per-field schema."
+      "coding_plan": "Prefer claude_code_interface for Claude Code-like integrations. Use OpenAI-compatible Coding Plan contracts only as narrow fallback surfaces. Validate responses locally because Coding Plan docs specify compatibility endpoints rather than full per-field schema."
     },
     "coding_plan_protocol_selection": {
       "default_rule": "Do not use general-purpose OpenAI/Anthropic adapters unchanged against Coding Plan endpoints.",
       "openai_compatible": "Use only the provider-specific strict_request_whitelist and avoid full OpenAI Chat parameter passthrough.",
-      "claude_code_like": "Use the Anthropic-compatible endpoint, top-level system, user/assistant messages only, max_tokens, and the documented Claude Code environment variables.",
+      "claude_code_like": "Use claude_code_interface with a provider_variant, top-level system, user/assistant messages only, max_tokens, and the documented Claude Code environment variables.",
       "identity_rule": "Do not spoof a false User-Agent or client identity. 'Claude Code-compatible' means request shape and documented environment mapping, not pretending to be a different client."
     },
     "sampling_policy": {
@@ -832,6 +926,124 @@
         "openai_chat_completions": "temperature is normally 0..2.",
         "deepseek_chat": "temperature <= 2 and top_p <= 1.",
         "aliyun_qwen_openai_chat": "temperature range is [0,2); top_p range is (0,1]."
+      }
+    },
+    "structured_output_details": {
+      "summary": "Provider-specific mechanisms for constraining model output to strict JSON schemas.",
+      "anthropic_messages": {
+        "mechanisms": [
+          {
+            "name": "output_config.format",
+            "description": "Native structured output via output_config.format with JSON Schema. SDKs support Pydantic/Zod auto-conversion.",
+            "usage": {
+              "field": "output_config.format",
+              "required_properties": ["type", "schema"],
+              "schema_requirements": {
+                "type": "Must be 'json_schema'",
+                "additionalProperties": "Must be false for all objects",
+                "required": "List required properties; they appear before optional ones in output"
+              },
+              "sdk_helpers": {
+                "python": "client.messages.parse() with output_format=PydanticModel",
+                "typescript": "client.messages.parse() with zodOutputFormat(ZodSchema)"
+              }
+            },
+            "guarantees": "Grammar-constrained sampling ensures output matches schema exactly.",
+            "limitations": {
+              "supported_types": ["object", "array", "string", "integer", "number", "boolean", "null"],
+              "supported_keywords": ["enum (primitives only)", "const", "anyOf", "allOf", "$ref (internal)", "default", "required", "additionalProperties", "string formats (date-time, email, uri, etc.)", "minItems (0 or 1 only)"],
+              "unsupported_keywords": ["recursive schemas", "enum with complex types", "external $ref", "minimum/maximum/multipleOf", "minLength/maxLength", "array constraints (except minItems 0/1)", "additionalProperties not false", "complex regex"],
+              "complexity_limits": {
+                "strict_tools_per_request": 20,
+                "optional_parameters_total": 24,
+                "union_type_parameters_total": 16,
+                "compilation_timeout_seconds": 180
+              }
+            },
+            "incompatible_features": ["citations", "message prefilling"],
+            "compatible_features": ["batch processing", "token counting", "streaming", "strict tool use simultaneously"]
+          },
+          {
+            "name": "strict_tool_use",
+            "description": "Tool definitions with strict:true guarantee tool call parameters match input_schema exactly.",
+            "usage": {
+              "field": "tools[].strict",
+              "value": true,
+              "schema_requirements": "Same as output_config.format - additionalProperties must be false"
+            },
+            "guarantees": "Tool input strictly follows input_schema; tool name is always valid.",
+            "use_cases": ["validated tool inputs", "agentic workflows", "type-safe function calls"]
+          }
+        ],
+        "data_retention": {
+          "schema_cache_hours": 24,
+          "phi_warning": "Do NOT include PHI in schema definitions (property names, enum values, const, pattern). PHI only in message content."
+        }
+      },
+      "deepseek_chat": {
+        "mechanisms": [
+          {
+            "name": "response_format.type=json_object",
+            "description": "JSON mode guarantees valid JSON output, but NOT schema compliance.",
+            "usage": {
+              "field": "response_format.type",
+              "value": "json_object",
+              "critical_requirement": "MUST instruct model to produce JSON via system or user message. Without this, model may generate endless whitespace until token limit."
+            },
+            "guarantees": "Output is valid JSON. Does NOT guarantee schema compliance.",
+            "limitations": ["No schema validation", "May be truncated if finish_reason=length"],
+            "recommended_practice": "Use with prompt instruction specifying desired JSON structure, then validate locally."
+          },
+          {
+            "name": "tools[].strict",
+            "description": "Function calling with strict mode ensures tool call parameters match JSON schema.",
+            "usage": {
+              "field": "tools[].strict",
+              "value": true,
+              "max_tools": 128
+            },
+            "guarantees": "Tool call input complies with function's JSON schema when strict=true.",
+            "schema_support": "tools[].function.parameters accepts JSON Schema object"
+          }
+        ],
+        "recommended_strategy": "For structured output: (1) Use response_format.type=json_object with explicit JSON instruction in prompt, (2) Validate response against schema locally, OR (3) Use tools with strict:true for function calling scenarios."
+      },
+      "openai_chat_completions": {
+        "mechanisms": [
+          {
+            "name": "response_format.type=json_schema",
+            "description": "Strict JSON Schema output for Chat Completions API.",
+            "usage": {
+              "field": "response_format",
+              "structure": {"type": "json_schema", "json_schema": {"name": "Schema name", "schema": "JSON Schema object"}}
+            },
+            "guarantees": "Output matches schema exactly when using json_schema type."
+          },
+          {
+            "name": "response_format.type=json_object",
+            "description": "Basic JSON mode - valid JSON but no schema guarantee.",
+            "usage": {"field": "response_format.type", "value": "json_object"},
+            "guarantees": "Valid JSON output only."
+          }
+        ]
+      },
+      "openai_responses": {
+        "mechanisms": [
+          {
+            "name": "text.format",
+            "description": "Structured output via text.format in Responses API.",
+            "usage": {"field": "text.format", "structure": {"type": "json_schema", "schema": "JSON Schema object"}}
+          }
+        ]
+      },
+      "gemini_generate_content": {
+        "mechanisms": [
+          {
+            "name": "generationConfig.responseMimeType + responseSchema",
+            "description": "JSON output via generation config.",
+            "usage": {"responseMimeType": "application/json", "responseSchema": "JSON Schema object"}
+          }
+        ]
       }
     },
     "logging_policy": {

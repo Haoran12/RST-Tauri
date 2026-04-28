@@ -17,6 +17,7 @@
 | LLM 输出不符合 schema | 解析失败 / 主循环中断 | 优先使用 Provider structured output / tool schema；JSON mode 仅作降级，并必须配合 schema 校验 + 重试 + 程序容错修复；必要时由 OutcomePlanner 兜底 |
 | LLM 数值不稳定 | belief/emotion 数值跳变 | LLM 输出离散级别（ConfidenceShift），程序映射为数值 |
 | Prompt 漂移 | 模型行为变化 | 固定 prompt 版本 + A/B 测试 + 监控 |
+| PromptBuilder 混入世界事实 | 静态模板携带隐藏设定，或动态输入绕过 schema | 静态节点提示词只写权限/任务/输出规则；动态部分只允许 `{ input: <TInput> }`；Trace 记录 prompt_template_id/version/hash |
 | 不同 Agent 节点误用同一 API 配置 | 结构化节点用到不支持 schema 的模型，或叙事节点误用低质量便宜模型 | AgentLlmProfile 按节点绑定 API 配置；调用前校验结构化能力；日志记录 api_config_id |
 | 中间数据混入可判定自由文本 | 屎山起点；规则匹配失效 | 数据形态铁律 + 类型隔离；允许 `summary_text` / `effect_hints` 等 LLM-readable 文本叶子字段，但禁止参与程序判断 |
 | SurfaceRealizer 私自添加事实 | 误导用户 / 后续状态不一致 | NarrativeFactCheck 强制扫描；visible_facts 白名单约束 |
@@ -37,6 +38,8 @@
 | 全知泄露难检测 | 行为不符设定 | 输入过滤 + 输出验证 + 访问日志审计 |
 | Layer 1 泄露至受限 LLM | 全知 / 屎山起点 | InputAssembly 类型隔离（仅接受 Layer 2 类型）+ 单元测试断言；God-read 节点必须显式记录权限域 |
 | 可见性逻辑散落 | 多处不一致 | VisibilityResolver 是唯一入口；所有判断必须经它 |
+| 可见性索引替代 Resolver | SQL 查询结果被当成最终可见性，绕过 GodOnly / apparent / self_belief 规则 | `known_by` / `scope` 派生索引只做候选预筛；所有候选必须再经 VisibilityResolver |
+| 可见性派生索引漂移 | `visibility` JSON 与索引表不一致，导致该见的看不到或隐藏知识泄露 | KnowledgeStore / StateCommitter 同事务维护索引；提供从 JSON 全量重建并比对的校验 |
 | 可见性读取 L3 主观关系 | LLM 输出改变知识可见性，形成循环 | SocialAccessAtLeast 只读 L1 客观关系/授权等级，不读 relation_models |
 | Subject self-belief 被外部读 | 暴露真相 | `KnowledgeEntry.content` 与 `self_belief` 在类型层面分离；访问 API 强制经过 awareness 检查 |
 | Knowledge 揭示无追溯 | 不知何时谁知道了什么 | 所有可见性变更必须经 KnowledgeRevealEvent；持久化到独立表，包含 scope_change |
@@ -51,7 +54,15 @@
 | Rust-TS 类型同步 | 两端定义不一致 | 代码生成 + 共享 schema + 单元测试 |
 | 状态爆炸 | 长对话状态过大 | 增量更新 + 周期压缩 + Knowledge metadata 衰减 |
 
-### 1.4 物理 / 灵力档位翻译
+### 1.4 SQLite 并发与派生索引
+
+| 坑点 | 风险 | 应对策略 |
+|---|---|---|
+| 等待 LLM 时持有写事务 | SQLite 写锁阻塞 UI、日志和后续提交 | 并行认知阶段只读快照；远程调用期间不持有写事务；最终 StateCommitter 单写提交 |
+| 多个 Agent 并发写状态 | L1/L3 顺序不确定，回滚困难 | CognitivePass 只产出候选；统一验证后由 OutcomePlanner 协调，StateCommitter 单事务写入 |
+| 流式日志高频抢写 | stream chunk 写入阻塞状态提交 | 日志使用短事务、队列或批量写；状态提交优先级高于调试日志 |
+
+### 1.5 物理 / 灵力档位翻译
 
 | 坑点 | 风险 | 应对策略 |
 |---|---|---|
@@ -68,13 +79,14 @@
 | 不同世界灵力数值无法兼容 | 某些世界无修真 / 数值范围迥异 | ManaPotencyTier 边界与 Δ 桶阈值存于 world_base.yaml; 不同世界各自一份阈值表; 角色卡解析与档位翻译共用 |
 | 灵觉过载处理 | 高灵气环境失真 | 过载阈值 + 感知降级 + 验证 |
 
-### 1.5 调用预算与性能
+### 1.6 调用预算与性能
 
 | 坑点 | 风险 | 应对策略 |
 |---|---|---|
 | 多角色调用成本 | Token 消耗大 | Dirty Flags + 意图复用 + Tier 分级 |
+| 并行 Agent 放大 Provider 限流 | 延迟抖动、费用飙升 | 并行度受 Active Set、Tier、场景预算和 Provider 限流器约束 |
 
-### 1.6 日志与 Trace
+### 1.7 日志与 Trace
 
 | 坑点 | 风险 | 应对策略 |
 |---|---|---|
@@ -111,7 +123,10 @@
 #### 知识可见性体系
 
 - [ ] **私密 Knowledge 仅 known_by 中的角色能访问。**
+- [ ] **`knowledge_visibility_known_by` 只作为候选索引**；删除索引命中后的 Resolver 调用会导致测试失败。
+- [ ] **`knowledge_visibility_scopes` + `character_scope_memberships` 能预筛 scope 候选**，但最终 accessible_knowledge 与 VisibilityResolver 全量扫描结果一致。
 - [ ] **GodOnly 知识不出现在任何角色的 accessible_knowledge 中。**
+- [ ] **GodOnly 即使存在于派生索引候选中，也会被 VisibilityResolver hard deny。**
 - [ ] **GodOnly 启用态下 known_by 必须为空；若故事揭示，KnowledgeRevealEvent 必须先解除 GodOnly 再追加知情者。**
 - [ ] **subject_awareness=Unaware 时，subject 自我描述只能引用 self_belief**（如被封印记忆的狐狸精仍自称人类）。
 - [ ] **观察者通过 apparent_content 看到的伪装信息与 content 真相一致地分流**（伪装方与揭穿方分别得到不同 visible_content）。
@@ -119,6 +134,7 @@
 - [ ] **同场景观察可获得他人 Appearance facet，但获取不到 TrueName facet**（无关系阈值）。
 - [ ] **KnowledgeRevealEvent 触发后**，被揭示者的下一回合输入包含新可见 Knowledge。
 - [ ] **GodOnly 揭示事件持久化 scope_change**，回滚后 scope 与 known_by 恢复到揭示前状态。
+- [ ] **KnowledgeEntry.visibility JSON 与派生索引全量重建结果一致**；不一致时报告存储一致性错误。
 - [ ] **SocialAccessAtLeast 只读取 L1 客观关系/授权等级**，L3 `relation_models` 改变不会影响 Knowledge 可见性。
 - [ ] **CustomPredicate 可见性条件只能使用结构化 VisibilityExpression AST，不接受自然语言表达式。**
 
@@ -129,6 +145,10 @@
 - [ ] 受伤状态跨回合保持。
 - [ ] `temporary_body_state` 存储在 Layer 1，并只能通过 `EmbodimentState` 派生进入 CognitivePass。
 - [ ] CharacterCognitivePass 输入只含 L2 + prior L3，不含 Layer 1 原始 SceneEvent；本回合事件使用 `VisibleEventDelta`。
+- [ ] PromptBuilder 为四类 Agent LLM 节点生成固定消息布局：system 静态契约、developer/task 指令、user 单个 `{ input }` JSON；Trace 记录 prompt_template_id/version/hash。
+- [ ] 静态节点提示词不包含世界事实、角色秘密、Knowledge 内容或日志摘要；动态输入必须匹配对应 `*Input` schema。
+- [ ] 多个 active + dirty 角色的 CognitivePass 可以并行执行；并行阶段不写 Layer 1 / Layer 3 / Knowledge。
+- [ ] 并行 CognitivePass 输出按稳定顺序进入 Validator；LLM 返回顺序变化不改变最终 StateCommitter 提交结果。
 - [ ] OutcomePlanner 可 God-read，但输出必须是 `OutcomePlannerOutput` / `StateUpdatePlan`，并在 StateCommitter 前通过 EffectValidator 硬约束校验。
 - [ ] OutcomePlanner 每回合默认最多调用一次；候选效果校验失败时不会反复调用 LLM 修复。
 - [ ] LLM 候选技能效果超出 SkillEffectContract 时，硬状态不提交，转入 `blocked_effects` 或 `soft_effects`。
@@ -140,6 +160,7 @@
 - [ ] `CharacterFocused` 叙事只能引用该角色可见事实；`ObjectiveCamera` 叙事不能进入任何角色内心；`DirectorView` 默认仍剔除 GodOnly。
 - [ ] Dirty Flags 正确过滤无变化角色。
 - [ ] Primary cognitive pass 控制在每场景 0-2 次；reaction pass 只对 eligible reactors 执行，并受每窗口/每角色/深度预算限制。
+- [ ] SQLite 使用 WAL + 读连接池 + 单写提交；等待远程 LLM 时没有打开写事务。
 - [ ] 四类 Agent LLM 节点可分别选择 `api_configs/` 中的不同配置；未配置节点继承默认 Agent 配置。
 - [ ] `chat_structured` 节点绑定到不支持结构化输出的配置时，按文档降级或报错，不静默绕过 schema 校验。
 
