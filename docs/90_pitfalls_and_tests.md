@@ -29,6 +29,8 @@
 | 反应事件递归 | A 攻击 B，B 反击又触发 A 反应，形成无限循环 | ReactionWindow 只收集 ReactionIntent；默认 no_reaction_to_reaction + one_reaction_per_character_per_window；interrupt 必须有显式深度上限 |
 | 伙伴援护缺失或越权 | B 被攻击时伙伴不能救，或不可观察角色凭空救场 | eligible_reactors 由程序按感知可达性、Knowledge 访问权限、关系/姿态、距离、通道、资源与 SkillEffectContract 判定；LLM 只能在合法 ReactionOption 中选择 |
 | SceneStateExtractor 权限不清 | 用户一句话触发隐藏 Knowledge 泄露或改写私密设定 | 第一版只读当前 SceneModel + 世界级约束；隐藏 Knowledge / GodOnly 默认不可读，作者编辑模式另行设计 |
+| SceneInitializer 过度创作 | 切场景时凭空生成重要 NPC、秘密机关或剧情硬事实 | 只读公开上下文；通过 generation_policy 限定可补全域；所有 LLM 推断写 assumptions，高风险需用户确认 |
+| SceneInitializer 与 SceneStateExtractor 职责重叠 | 一个节点既解析用户输入又补全完整场景，权限和 trace 混乱 | SceneInitializer 只处理结构化 SceneSeed；SceneStateExtractor 只处理最近自由文本到 delta / UserInputDelta |
 | 用户输入 LLM 解析失败 | 用户操作丢失 | 显示原始输入 + 提示重写；保留 raw_text 供 trace |
 
 ### 1.2 全知与 Knowledge 访问权限
@@ -69,7 +71,7 @@
 | LLM 误读物理量数值 | 50m/s 当成微风、-30℃ 当成凉爽 | 程序在 EmbodimentResolver/SceneFilter 把 raw → tier + effect_hints；FilteredSceneView 不暴露 raw 值给 CognitivePass |
 | 物种舒适带未校准 | 同样温度对不同种族应不同感受 | BaselineBodyProfile 含 comfort_temperature_range；档位是相对该范围偏离量计算 |
 | 环境压力跨回合丢失 | 长期暴露不发生冻伤 | EnvironmentalStrain.cold_strain/heat_strain/respiration_strain 在 EmbodimentResolver 累加，到阈值后经 OutcomePlanner 候选 + EffectValidator 生成伤势事件 |
-| L1 物理子字段不自洽 | 暴雨却地面不湿、沙暴但能见度 100m | SceneStateExtractor prompt 模板强制一并填齐；额外 ConsistencyRule 检查（暴雨时 wetness>=阈值，沙暴时 dust_density>=阈值） |
+| L1 物理子字段不自洽 | 暴雨却地面不湿、沙暴但能见度 100m | SceneInitializer / SceneStateExtractor prompt 模板强制一并填齐；额外 ConsistencyRule 检查（暴雨时 wetness>=阈值，沙暴时 dust_density>=阈值） |
 | 档位阈值在两侧不一致 | body 已 Storm 但 perception 仍 Strong | 阈值表集中常量化（一份表两侧共享）；改阈值需同时跑两侧单元测试 |
 | LLM 误读灵力数值 | 8800 当成"高了点"、Δ=3000 当作"略胜" | SceneFilter 把 mana_power → ManaPotencyTier + ManaPerceptionDelta；FilteredSceneView 不暴露 raw 数值给 CognitivePass |
 | 凡人感知修士细节 | T0 观察者却给出 attribute / 具体档位 | 规则 5/6: T0 灵觉为 0 时 mana_signals 为空; T0 仅能感知 effective ≥ 1000 为"超出常理"，无具体档位 |
@@ -145,10 +147,14 @@
 
 - [ ] SceneStateExtractor 输入包含最近自由文本与当前结构化 Scene JSON，输出 `SceneStateExtractorOutput`，不直接提交 Layer 1。
 - [ ] SceneStateExtractor 第一版不会读取隐藏 Knowledge / GodOnly；若请求使用这些信息，权限域检查失败。
+- [ ] SceneInitializer 输入只包含结构化 SceneSeed、公开世界 / 地点 / 人物上下文和 generation_policy，不包含用户原始自由文本。
+- [ ] SceneInitializer 输出 `SceneInitializationDraft`，所有非输入来源字段都有 `SceneAssumption`，且风险达到阈值时不会自动提交。
+- [ ] SceneInitializer 在 `forbid_new_named_entities=true` 时不能生成新的命名持久实体；背景实体只能是 transient / unnamed / non_persistent。
+- [ ] SceneInitializer 第一版不会读取隐藏 Knowledge / GodOnly；若请求用私密设定补场景，权限域检查失败。
 - [ ] 受伤状态跨回合保持。
 - [ ] `temporary_body_state` 存储在 Layer 1，并只能通过 `EmbodimentState` 派生进入 CognitivePass。
 - [ ] CharacterCognitivePass 输入只含 L2 + prior L3，不含 Layer 1 原始 SceneEvent；本回合事件使用 `ObservableEventDelta`。
-- [ ] PromptBuilder 为四类 Agent LLM 节点生成固定消息布局：system 静态契约、developer/task 指令、user 单个 `{ input }` JSON；Trace 记录 prompt_template_id/version/hash。
+- [ ] PromptBuilder 为五类 Agent LLM 节点生成固定消息布局：system 静态契约、developer/task 指令、user 单个 `{ input }` JSON；Trace 记录 prompt_template_id/version/hash。
 - [ ] 静态节点提示词不包含世界事实、角色秘密、Knowledge 内容或日志摘要；动态输入必须匹配对应 `*Input` schema。
 - [ ] 多个 active + dirty 角色的 CognitivePass 可以并行执行；并行阶段不写 Layer 1 / Layer 3 / Knowledge。
 - [ ] 并行 CognitivePass 输出按稳定顺序进入 Validator；LLM 返回顺序变化不改变最终 StateCommitter 提交结果。
@@ -164,7 +170,7 @@
 - [ ] Dirty Flags 正确过滤无变化角色。
 - [ ] Primary cognitive pass 控制在每场景 0-2 次；reaction pass 只对 eligible reactors 执行，并受每窗口/每角色/深度预算限制。
 - [ ] SQLite 使用 WAL + 读连接池 + 单写提交；等待远程 LLM 时没有打开写事务。
-- [ ] 四类 Agent LLM 节点可分别选择 `api_configs/` 中的不同配置；未配置节点继承默认 Agent 配置。
+- [ ] 五类 Agent LLM 节点可分别选择 `api_configs/` 中的不同配置；未配置节点继承默认 Agent 配置。
 - [ ] `chat_structured` 节点绑定到不支持结构化输出的配置时，按文档降级或报错，不静默绕过 schema 校验。
 
 #### 日志与 Trace
@@ -172,7 +178,7 @@
 - [ ] ST 模式 LLM 调用只写全局 `./data/logs/app_logs.sqlite`。
 - [ ] Agent 模式任意 `scene_turn_id` 能查到完整 `turn_traces` / `agent_step_traces`。
 - [ ] Agent Trace 能通过 `request_id` 跳转到对应 LLM request / response。
-- [ ] SceneStateExtractor / CognitivePass / OutcomePlanner / SurfaceRealizer 的 request、response、schema、状态、耗时都被记录。
+- [ ] SceneInitializer / SceneStateExtractor / CognitivePass / OutcomePlanner / SurfaceRealizer 的 request、response、schema、状态、耗时都被记录。
 - [ ] 每条 Agent LLM 调用日志都记录实际 `api_config_id`、provider、model。
 - [ ] 流式输出保存原始 chunk 顺序，并生成 `assembled_text` / `readable_text`。
 - [ ] API Key、Authorization header、Provider secret、代理认证不会进入 SQLite。

@@ -57,6 +57,10 @@
 **信息流向（线性，单向）**：
 
 ```
+SceneSeed + 公开世界 / 地点 / 人物上下文
+    → SceneInitializer(LLM, 公开上下文受控补全) → SceneInitializationDraft 候选
+    → Validator + StateCommitter → 新 SceneModel(L1)
+
 最近用户自由文本 + 当前 SceneModel(L1)
     → SceneStateExtractor(LLM, 场景域 God-read) → SceneUpdate / UserInputDelta 候选
     → Validator + StateApplier → World Truth (L1)
@@ -100,7 +104,7 @@ pub struct SceneModel {
 
 ### 2.2 Physical Conditions（物理环境）
 
-承载客观、可量化、直接影响行动与感知的物理量。属于 Layer 1 真相，由 `SceneStateExtractor` 候选更新与 StateCommitter 提交维护，凡人/修士均可被影响。
+承载客观、可量化、直接影响行动与感知的物理量。属于 Layer 1 真相，由 `SceneInitializer` 候选初始化、`SceneStateExtractor` 候选更新与 StateCommitter 提交维护，凡人/修士均可被影响。
 
 ```rust
 pub struct PhysicalConditions {

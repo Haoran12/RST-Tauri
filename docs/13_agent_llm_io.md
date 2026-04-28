@@ -4,6 +4,7 @@
 
 - PromptBuilder 与各 LLM 节点提示词契约
 - CognitivePass I/O
+- SceneInitializer I/O
 - SceneStateExtractor I/O 与 UserInputDelta
 - StyleConstraints 与 SurfaceRealizerInput
 - OutcomePlanner I/O 与 ReactionWindow
@@ -68,8 +69,23 @@ pub struct AgentPromptBundle<TInput> {
 6. 若信息不足，选择保守输出：保留不确定性、降低置信度、给出候选/歧义，而不是补写新事实。
 7. 受限角色节点可以误判、偏见和不完整，但误判必须来自其可观察输入 / 可访问 Knowledge 与 prior L3，不能来自隐藏真相。
 8. 不从 raw 物理量或 raw 灵力值自行推导后果；只能使用程序提供的 tier / effect_hints / constraints。
+9. 只有 `SceneInitializer` 可按 `generation_policy` 对缺省场景细节做受控补全；补全必须落在允许域内，并写入来源、置信度与假设说明。
 
-### 0.2 SceneStateExtractor 提示词契约
+### 0.2 SceneInitializer 提示词契约
+
+节点身份：场景初始化器。任务是在新建场景、切场景或大幅跳时后，根据结构化场景种子、公开世界约束、时间、场所和相关人物，生成候选 `SceneInitializationDraft`。
+
+静态提示词必须强调：
+
+- 只在 `generation_policy.allowed_detail_domains` 中补齐细节，例如空间布局、光照、声场、气味、天气、地表、环境灵气、场景基调和临时背景实体。
+- 不读取隐藏角色 Knowledge / GodOnly；第一版只使用公开世界设定、公开地点设定、当前参与者公开外显信息和程序提供的约束。
+- 不创造新的命名重要人物、势力秘密、隐藏机关、关键道具、历史真相或剧情硬事实；若需要这些内容，写入 `blocked_additions` 或 `ambiguity_report`。
+- 可创建短生命周期、无持久身份的背景实体，但必须受 `max_generated_background_entities` 和 `allow_transient_background_entities` 约束。
+- 每个生成性补全都必须写入 `assumptions`，标明来源类型、置信度和影响字段；程序可据此审计、回滚或要求用户确认。
+- 输出只是候选草案，不写数据库；最终 SceneModel 必须通过 SceneInitializerValidator / ConsistencyRule 后才可提交。
+- 场景细节应与时间、季节、昼夜、地点类型、天气、人物状态和世界物理 / 灵力规则自洽；不确定时降低置信度，不强行定死。
+
+### 0.3 SceneStateExtractor 提示词契约
 
 节点身份：场景输入解析器。任务是把用户最近自由文本与当前 `SceneModel` 对齐，产出候选 `SceneUpdate` 与 `UserInputDelta`。
 
@@ -82,7 +98,7 @@ pub struct AgentPromptBundle<TInput> {
 - 涉及天气、地表、能见度、灵力环境等 Layer 1 物理子字段时，应保持结构自洽；不确定则写入 `ambiguity_report`。
 - 不能把用户的文风要求直接塞进世界事实；文风只进入 `DirectorHint.style_override`。
 
-### 0.3 CharacterCognitivePass 提示词契约
+### 0.4 CharacterCognitivePass 提示词契约
 
 节点身份：单个角色的受限主观认知与意图生成器。任务是根据该角色本回合 L2 可观察世界、具身状态、可访问 Knowledge 和 prior L3，更新主观感知、信念倾向、情绪与意图。
 
@@ -101,7 +117,7 @@ Reaction pass 复用受限角色视角，但静态提示词必须额外强调：
 - `ReactionIntent` 只表达即时反应意图，不叙述结算结果，不打开新的普通反应窗口。
 - 若所有选项都不符合角色动机或状态，应选择 schema 允许的默认防御 / 无反应选项；不得越权创造硬效果。
 
-### 0.4 OutcomePlanner 提示词契约
+### 0.5 OutcomePlanner 提示词契约
 
 节点身份：结果规划器。任务是综合 L1 真相、角色意图、反应窗口、技能契约和导演偏置，产出候选外显结果与候选状态更新。
 
@@ -114,7 +130,7 @@ Reaction pass 复用受限角色视角，但静态提示词必须额外强调：
 - `narratable_facts` 必须是 SurfaceRealizer 可叙述事实白名单，不能直接暴露 GodOnly 或超出 `NarrationScope` 的事实。
 - 数值、资源、位置、伤势、冷却等硬效果必须能对应到输入中的技能契约、物理公式或已有状态。
 
-### 0.5 SurfaceRealizer 提示词契约
+### 0.6 SurfaceRealizer 提示词契约
 
 节点身份：最终叙事渲染器。任务是把结构化结果转成给用户阅读的自由文本。
 
@@ -192,7 +208,186 @@ CognitivePassOutput **必须为严格 schema JSON**，优先由 Provider structu
 
 ---
 
-## 2. SceneStateExtractor I/O 与 UserInputDelta
+## 2. SceneInitializer I/O
+
+`SceneInitializer` 负责在当前没有可用 `SceneModel`、切换到新场所、时间大幅跳过、或程序判定当前场景锚点已失效时，生成一个可运行的候选场景草案。它不是普通叙事节点，也不替代 `SceneStateExtractor`：前者从结构化种子合成完整舞台，后者从用户自由文本提取本回合变化。
+
+第一版权限采用保守规则：
+
+- 可读：结构化 `SceneSeed`、公开世界 / 地区 / 场所摘要、相关人物公开外显状态、世界级 schema / 枚举 / 物理约束、程序生成的时间与天气趋势。
+- 默认不可读：隐藏角色 Knowledge、GodOnly Knowledge、非当前场景的私密历史、未公开身份或秘密能力。
+- 不可写：数据库和持久状态；只能输出候选 `SceneInitializationDraft`，由程序校验后提交为新的 `SceneModel` 或返回用户确认。
+
+```rust
+pub struct SceneInitializerInput {
+    pub scene_turn_id: String,
+    pub world_id: String,
+    pub seed: SceneSeed,
+    pub public_world_context: PublicWorldContext,
+    pub location_context: LocationContext,
+    pub participant_context: Vec<SceneParticipantSeed>,
+    pub continuity_context: Option<SceneContinuityContext>,
+    pub world_constraints: serde_json::Value,      // semantic: 枚举、schema、物理边界、世界级规则
+    pub generation_policy: SceneGenerationPolicy,
+}
+
+pub struct SceneSeed {
+    pub scene_id: String,
+    pub transition_reason: SceneTransitionReason,  // initial_scene / location_change / time_skip / rollback_rebuild
+    pub time_seed: TimeContextSeed,                // 季节、昼夜、相对时间、天气趋势锚点
+    pub location_anchor: LocationAnchor,           // region_id / location_id / location_type
+    pub required_participant_ids: Vec<String>,
+    pub requested_mood: Option<SceneMood>,         // semantic enum
+    pub required_entities: Vec<SceneEntitySeed>,   // 用户或程序明确要求出现的实体
+}
+
+pub enum SceneTransitionReason {
+    InitialScene,
+    LocationChange,
+    TimeSkip,
+    RollbackRebuild,
+}
+
+pub struct SceneEntitySeed {
+    pub entity_id: Option<String>,                 // 已存在持久实体必须提供；背景实体可为空
+    pub entity_kind: String,                       // character / prop / terrain_feature / background_actor ...
+    pub display_label: Option<String>,             // llm_readable; 非持久背景实体不得当作检索键
+    pub persistence: EntityPersistence,
+    pub required: bool,
+    pub position_hint: Option<String>,             // semantic direction / zone in implementation
+}
+
+pub enum EntityPersistence {
+    Persistent,
+    Transient,
+    NonPersistent,
+}
+
+pub struct TimeContextSeed {
+    pub season: Option<String>,                    // semantic enum in implementation
+    pub day_phase: Option<String>,                 // dawn / day / dusk / night / deep_night
+    pub absolute_time_hint: Option<String>,         // trace_only / llm_readable，不参与程序排序
+    pub elapsed_from_previous: Option<String>,      // semantic duration in implementation
+    pub weather_trend: Option<String>,             // clear / rainy / snow / storm / dry / unknown
+}
+
+pub struct LocationAnchor {
+    pub region_id: Option<String>,
+    pub location_id: Option<String>,
+    pub location_type: String,                     // courtyard / forest_path / inn_room / sect_gate / cave ...
+    pub known_exits: Vec<String>,                  // semantic ids or direction enums
+}
+
+pub struct PublicWorldContext {
+    pub world_summary: String,                     // llm_readable: 公开世界观摘要
+    pub public_rules: Vec<String>,                 // llm_readable: 公开物理 / 灵力 / 风俗约束
+    pub ambient_defaults: serde_json::Value,        // semantic: 世界默认温度、灵气、昼夜规则等
+}
+
+pub struct LocationContext {
+    pub public_location_summary: String,            // llm_readable
+    pub terrain_tags: Vec<String>,                  // semantic
+    pub climate_tags: Vec<String>,                  // semantic
+    pub known_static_features: Vec<SceneEntitySeed>,
+    pub forbidden_features: Vec<String>,            // semantic: 不可生成的特征类型
+}
+
+pub struct SceneParticipantSeed {
+    pub character_id: String,
+    pub public_appearance_summary: String,          // llm_readable: 仅公开外显
+    pub entry_state: ParticipantEntryState,         // semantic
+    pub position_hint: Option<String>,              // semantic direction / zone in implementation
+}
+
+pub enum ParticipantEntryState {
+    AlreadyPresent,
+    Entering,
+    ArrivingWithGroup,
+    OffstageExpected,
+}
+
+pub struct SceneContinuityContext {
+    pub previous_scene_summary: String,             // llm_readable
+    pub carried_entities: Vec<SceneEntitySeed>,
+    pub unresolved_visible_events: Vec<String>,     // semantic event ids or public summaries
+}
+
+pub struct SceneGenerationPolicy {
+    pub detail_level: DetailLevel,
+    pub allowed_detail_domains: Vec<SceneDetailDomain>,
+    pub allow_transient_background_entities: bool,
+    pub max_generated_background_entities: u32,
+    pub forbid_new_named_entities: bool,
+    pub require_user_confirmation_above: AssumptionRisk,
+}
+
+pub enum SceneDetailDomain {
+    SpatialLayout,
+    Lighting,
+    Acoustics,
+    OlfactoryField,
+    PhysicalConditions,
+    ManaField,
+    SceneMood,
+    BackgroundEntities,
+    ObservableSignals,
+}
+
+pub enum AssumptionRisk {
+    Low,
+    Medium,
+    High,
+}
+
+pub struct SceneInitializationDraft {
+    pub scene_turn_id: String,
+    pub scene_model: SceneModel,
+    pub assumptions: Vec<SceneAssumption>,
+    pub blocked_additions: Vec<BlockedSceneAddition>,
+    pub ambiguity_report: Vec<String>,             // llm_readable
+    pub validation_hints: Vec<String>,              // trace_only / llm_readable
+}
+
+pub struct SceneAssumption {
+    pub field_path: String,                         // semantic path，如 physical_conditions.wind
+    pub source: SceneAssumptionSource,
+    pub confidence: AssumptionConfidence,
+    pub risk: AssumptionRisk,
+    pub rationale: String,                          // llm_readable
+}
+
+pub enum SceneAssumptionSource {
+    UserSeed,
+    PublicWorldContext,
+    LocationContext,
+    ParticipantContext,
+    ContinuityContext,
+    ProgramDefault,
+    LlmInferred,
+}
+
+pub enum AssumptionConfidence {
+    Low,
+    Medium,
+    High,
+}
+
+pub struct BlockedSceneAddition {
+    pub attempted_domain: SceneDetailDomain,
+    pub reason_code: String,                        // semantic enum in implementation
+    pub description: String,                        // llm_readable
+}
+```
+
+校验要求：
+
+- `SceneInitializationDraft.scene_model.scene_id` 必须等于 `seed.scene_id`，`scene_turn_id` 必须等于输入回合。
+- `required_participant_ids` 必须全部出现在 `scene_model.entities` 中；不得新增命名重要角色，除非实体 ID 已由输入提供。
+- `forbid_new_named_entities = true` 时，所有生成背景实体必须是 transient / unnamed / non_persistent。
+- 任何不来自输入的字段必须有对应 `SceneAssumption`；`risk >= require_user_confirmation_above` 时，运行时不得自动提交。
+- 物理子字段、灵力场和可观察信号必须通过与 `SceneStateExtractor` 相同的 ConsistencyRule。
+
+## 3. SceneStateExtractor I/O 与 UserInputDelta
 
 用户的最近一轮自由文本输入由 SceneStateExtractor (LLM) 结合当前结构化场景信息解析。它不是普通角色认知节点，而是场景域编排节点：可读取当前 `SceneModel`，输出候选 `SceneUpdate` 与 `UserInputDelta`，但不直接写入 Layer 1。
 
@@ -273,7 +468,7 @@ pub enum OutcomePressure {
 
 ---
 
-## 3. StyleConstraints（叙事层文风约束）
+## 4. StyleConstraints（叙事层文风约束）
 
 由作者预设或用户 DirectorHint 提供，最终交给 SurfaceRealizer LLM 阅读。
 
@@ -294,7 +489,7 @@ pub struct StyleConstraints {
 
 ---
 
-## 4. OutcomePlanner I/O（结果规划与状态更新计划）
+## 5. OutcomePlanner I/O（结果规划与状态更新计划）
 
 OutcomePlanner 是编排类 LLM 节点，可以拥有 God 读取权限。它负责把场景真相、人物情绪与言行意图、技能契约/设定约束综合成"实际可能发生什么"和"候选需要更新哪些数据"。但它不直接写入数据库；输出必须被 EffectValidator 按技能契约和程序硬边界裁剪后，再交给 StateCommitter。
 
@@ -363,7 +558,7 @@ pub struct BlockedEffect {
 }
 ```
 
-### 4.1 ReactionWindow（有限反应窗口）
+### 5.1 ReactionWindow（有限反应窗口）
 
 ReactionWindow 解决"被攻击者及其伙伴是否能即时反应"的问题，但它不是递归事件链。程序打开窗口后，只收集合格角色的 `ReactionIntent`，再由同一次 OutcomePlanner 调用把原行动与所有反应意图一起结算。
 
@@ -437,7 +632,7 @@ pub struct ReactionPassInput {
 
 ---
 
-## 5. SurfaceRealizerInput（叙事层输入）
+## 6. SurfaceRealizerInput（叙事层输入）
 
 叙事层 LLM 仅接受以下四类结构化输入，**不再读取角色档案 / 世界设定 / 角色心智**（它们已体现在情景与认知结果中）。
 
@@ -478,7 +673,7 @@ pub enum NarrationScope {
 
 ---
 
-## 6. Dirty Flags（调用预算控制）
+## 7. Dirty Flags（调用预算控制）
 
 ```rust
 pub struct DirtyFlags {

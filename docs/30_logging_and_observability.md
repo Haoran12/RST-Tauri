@@ -82,7 +82,7 @@ pub struct LogContext {
     pub scene_turn_id: Option<String>,
     pub character_id: Option<String>,
     pub trace_id: Option<String>,
-    pub llm_node: LlmNode,             // STChat / SceneStateExtractor / CharacterCognitivePass / OutcomePlanner / SurfaceRealizer
+    pub llm_node: LlmNode,             // STChat / SceneInitializer / SceneStateExtractor / CharacterCognitivePass / OutcomePlanner / SurfaceRealizer
     pub api_config_id: String,
     pub request_id: String,
 }
@@ -120,6 +120,7 @@ Agent Trace 记录 Agent 模式下"程序如何判断"与"模型如何输出"。
 
 典型记录点：
 
+- SceneInitializer 请求、响应、假设列表、阻止项、确认需求、解析失败与重试。
 - SceneStateExtractor 请求、响应、解析失败与重试。
 - UserInputDelta 应用结果。
 - 身体 / 资源 / 状态 / 冷却的机械演化摘要。

@@ -22,12 +22,13 @@
 
 ## 2. Agent 模式 LLM 节点
 
-Agent 模式包含四类 LLM 节点，权限不同：
+Agent 模式包含五类 LLM 节点，权限不同：
 
-1. **SceneStateExtractor（场景提取器）**：输入最近一轮自由文本 + 当前结构化 Scene JSON；输出候选 `SceneUpdate` 与 `UserInputDelta`。它可读当前场景真相，但第一版默认不读隐藏角色 Knowledge / GodOnly。
-2. **CharacterCognitivePass（人物认知与意图生成器）**：输入该角色可接触的 L2 场景、具身感官、可访问设定与 prior L3；输出结构化心理活动、情绪、言行意图。它是强访问限制节点。
-3. **OutcomePlanner（结果规划器）**：输入 L1 场景真相、人物情绪与意图、技能契约/设定、结构化 DirectorHint；输出实际言行、交互/对抗结果、状态更新计划候选。它可以 God-read，但不能直接提交状态。
-4. **SurfaceRealizer（叙事文本输出）**：输入 NarrationScope 限制后的场景、人物心理/情绪摘要、实际言行、交互结果、文风/格式要求；输出自由文本叙事。它是强叙事披露限制节点。
+1. **SceneInitializer（场景初始化器）**：输入结构化 SceneSeed + 公开世界 / 地点 / 人物上下文 + 生成策略；输出候选 `SceneInitializationDraft`。它用于新建场景、切场景和大幅跳时，默认不读隐藏角色 Knowledge / GodOnly。
+2. **SceneStateExtractor（场景提取器）**：输入最近一轮自由文本 + 当前结构化 Scene JSON；输出候选 `SceneUpdate` 与 `UserInputDelta`。它可读当前场景真相，但第一版默认不读隐藏角色 Knowledge / GodOnly。
+3. **CharacterCognitivePass（人物认知与意图生成器）**：输入该角色可接触的 L2 场景、具身感官、可访问设定与 prior L3；输出结构化心理活动、情绪、言行意图。它是强访问限制节点。
+4. **OutcomePlanner（结果规划器）**：输入 L1 场景真相、人物情绪与意图、技能契约/设定、结构化 DirectorHint；输出实际言行、交互/对抗结果、状态更新计划候选。它可以 God-read，但不能直接提交状态。
+5. **SurfaceRealizer（叙事文本输出）**：输入 NarrationScope 限制后的场景、人物心理/情绪摘要、实际言行、交互结果、文风/格式要求；输出自由文本叙事。它是强叙事披露限制节点。
 
 `God-read` 只用于编排判断；所有 LLM 输出必须先通过 schema + 业务校验，再由程序提交。
 
@@ -98,6 +99,10 @@ OutcomePlanner 每回合仍默认最多 1 次：它接收原行动、所有 `Rea
 == Per Turn ==
 
 1. 收集用户输入（自由文本）
+1a. 若当前没有可用 SceneModel，或上一回合 MetaCommand / 程序事件要求切场景、大幅跳时：
+   - 程序组装 SceneSeed、公开世界 / 地点 / 人物上下文、SceneGenerationPolicy
+   - SceneInitializer(LLM) → SceneInitializationDraft（结构化）
+   - SceneInitializerValidator + ConsistencyRule 校验；高风险假设需用户确认，否则提交为新的 SceneModel
 2. SceneStateExtractor(LLM) ← {最近自由文本, 当前结构化 Scene JSON}
    → SceneStateExtractorOutput（结构化）
    - 输出 SceneUpdate 候选 + UserInputDelta
@@ -189,6 +194,7 @@ SQLite 并发策略：
 | 步骤 | Agent Trace | 运行 Logs |
 |---|---|---|
 | 1 | 记录原始用户输入摘要与回合起点 | 输入采集异常 |
+| 1a | 记录 SceneInitializer 输入域、生成策略、假设列表、阻止项、确认需求、api_config_id | LLM request / response / schema / retry / error |
 | 2 | 记录 SceneStateExtractor 输入域、输出、解析状态、修复状态、api_config_id | LLM request / response / schema / retry / error |
 | 3 | 记录 UserInputDelta 应用摘要 | 状态应用异常 |
 | 4-5 | 记录机械演化与事件 delta 摘要 | 状态演化异常 |
@@ -220,6 +226,7 @@ CognitivePassOutput **必须为严格 schema JSON**，优先由 Provider structu
 - Reaction pass 只对 `ReactionWindow.eligible_reactors` 执行；每角色每窗口最多 1 次，并受 `max_reaction_depth` 与场景级预算限制。
 - 0 次 cognitive passes（次要 / 背景角色）。
 - 1 次 surface realization（仅当需要叙事输出）。
+- 0-1 次 SceneInitializer（仅新建场景、切场景、大幅跳时或回滚重建时）。
 - 1 次 SceneStateExtractor（每次用户输入）。
 - 0-1 次 OutcomePlanner（每回合需要状态推进时；若无交互可跳过；默认不因校验失败二次调用）。
 
@@ -244,6 +251,7 @@ CognitivePassOutput **必须为严格 schema JSON**，优先由 Provider structu
 
 ### 9.2 验证时机
 
+- **SceneInitializer 之后**：schema 校验 + 生成策略域检查 + 假设风险检查 + 场景完整性 / 物理一致性检查 + 权限域检查（默认不得使用隐藏 Knowledge / GodOnly）。
 - **SceneStateExtractor 之后**：schema 校验 + 场景 delta 合法性检查 + 权限域检查（默认不得使用隐藏 Knowledge / GodOnly）。
 - **InputAssembly 之后、CognitivePass 之前**：扫描 prompt 不含 Layer 1 原始对象（结构性检查）。
 - **CognitivePass 之后**：schema 校验（规则 9）+ 语义级泄露检测（规则 1-5、7）。

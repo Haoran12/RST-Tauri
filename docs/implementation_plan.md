@@ -60,9 +60,9 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 6. CharacterSubjectiveState（Layer 3）。
 7. EmbodimentState / FilteredSceneView / AccessibleKnowledge（Layer 2 派生类型）。
 8. CognitivePass I/O 类型（含 ConfidenceShift / BodyReactionDelta）。
-9. SceneStateExtractorOutput / UserInputDelta / StyleConstraints / OutcomePlannerOutput / SurfaceRealizerInput。
+9. SceneInitializationDraft / SceneStateExtractorOutput / UserInputDelta / StyleConstraints / OutcomePlannerOutput / SurfaceRealizerInput。
 10. Agent Trace / LLM Logs / app_event_logs 表结构。
-11. AgentLlmProfile / World Agent settings（四类 Agent LLM 节点独立绑定 API 配置）。
+11. AgentLlmProfile / World Agent settings（五类 Agent LLM 节点独立绑定 API 配置）。
 
 ### 阶段四：Agent 模式 — 程序化核心
 
@@ -77,15 +77,16 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 
 ### 阶段五：Agent 模式 — 认知与叙事层
 
-1. PromptBuilder（`AgentPromptBundle`、四类节点静态提示词、动态 JSON 输入、JSON schema 注入、prompt version/hash）。
-2. SceneStateExtractor（最近自由文本 + 当前 Scene JSON → SceneStateExtractorOutput，严格 schema）。
-3. CharacterCognitivePass（融合调用，严格 schema 输出）。
-4. JSON 输出容错修复器（缺字段补默认 / 修复常见结构错误）。
-5. OutcomePlanner（结果规划与状态更新计划，God-read 但不直接提交）。
-6. SurfaceRealizer（叙事生成，受 narratable_facts 约束）。
-7. AI Provider 的 chat_structured 实现（OpenAI Responses / OpenAI Chat Completions / Anthropic / Gemini / DeepSeek / Claude Code Interface 各自的 structured output / tool schema / JSON 降级路径）。
-8. LLM 调用日志：request / response / schema / stream chunks / readable_text。
-9. Agent LLM 节点配置选择 UI：SceneStateExtractor / CharacterCognitivePass / OutcomePlanner / SurfaceRealizer 分别选择 API 配置。
+1. PromptBuilder（`AgentPromptBundle`、五类节点静态提示词、动态 JSON 输入、JSON schema 注入、prompt version/hash）。
+2. SceneInitializer（SceneSeed + 公开上下文 + generation_policy → SceneInitializationDraft，严格 schema）。
+3. SceneStateExtractor（最近自由文本 + 当前 Scene JSON → SceneStateExtractorOutput，严格 schema）。
+4. CharacterCognitivePass（融合调用，严格 schema 输出）。
+5. JSON 输出容错修复器（缺字段补默认 / 修复常见结构错误）。
+6. OutcomePlanner（结果规划与状态更新计划，God-read 但不直接提交）。
+7. SurfaceRealizer（叙事生成，受 narratable_facts 约束）。
+8. AI Provider 的 chat_structured 实现（OpenAI Responses / OpenAI Chat Completions / Anthropic / Gemini / DeepSeek / Claude Code Interface 各自的 structured output / tool schema / JSON 降级路径）。
+9. LLM 调用日志：request / response / schema / stream chunks / readable_text。
+10. Agent LLM 节点配置选择 UI：SceneInitializer / SceneStateExtractor / CharacterCognitivePass / OutcomePlanner / SurfaceRealizer 分别选择 API 配置。
 
 ### 阶段六：Agent 模式 — 验证与运行时
 
@@ -160,7 +161,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 
 | 主题 | 决策 | 理由 |
 |---|---|---|
-| 数据形态铁律 | 自由文本仅在三处出现：用户输入、SceneStateExtractor 输入、SurfaceRealizer 输出。其他全程结构化 JSON | 避免规则匹配失效与"屎山"起点 |
+| 数据形态铁律 | 自由文本仅在三处出现：用户输入、SceneStateExtractor 输入、SurfaceRealizer 输出。SceneInitializer 只接收结构化 SceneSeed 与 llm_readable 公开上下文，其他全程结构化 JSON | 避免规则匹配失效与"屎山"起点 |
 | 三层数据语义 | Layer 1 (Truth) / Layer 2 (Per-Character Access) / Layer 3 (Subjective)，强制隔离 | 受限 LLM 不接触 Layer 1 原始对象；God-read 节点只产出候选更新，防止全知泄露与直接写状态 |
 | 知识统一模型 | KnowledgeEntry 统一承载世界/势力/角色档案/记忆，按 access_policy 谓词控制，并维护 SQLite 访问派生索引 | 单一访问权限入口（KnowledgeAccessResolver），索引只做候选预筛 |
 | 灵力档位 | 6 档（Mundane / Awakened / Adept / Master / Ascendant / Transcendent），边界对 `rp_cards\` 锚点校准 | 用档位识别身份，用数值差识别实力 |
@@ -170,7 +171,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 | LLM 数值字段 | 用 ConfidenceShift 等离散级别，由程序映射为数值 | LLM 直出浮点不稳定 |
 | Agent Prompt 契约 | 静态节点提示词版本化；动态输入只传对应 schema JSON；Trace 记录 prompt_template_id/version/hash | 防止提示词漂移、隐藏事实混入 prompt、回放无法定位 |
 | 反应窗口 | 主动威胁打开有限 ReactionWindow；合格目标/伙伴/守护者各最多提交一个 ReactionIntent；默认 reaction 不再触发 reaction | 支持即时援护与反击，同时避免无限递归和调用成本失控 |
-| Agent LLM API 配置 | 四类 Agent LLM 节点可分别绑定 `api_configs/` 中的配置，未配置时继承默认 Agent 配置 | 不同节点对成本、速度、结构化输出能力、叙事质量要求不同 |
+| Agent LLM API 配置 | 五类 Agent LLM 节点可分别绑定 `api_configs/` 中的配置，未配置时继承默认 Agent 配置 | 不同节点对成本、速度、结构化输出能力、叙事质量要求不同 |
 | OutcomePlanner 权限 | 可 God-read 并输出实际言行、交互结果和 StateUpdatePlan 候选；EffectValidator 裁剪非法硬效果后才提交 | 支持复杂技能与叙事结果规划，同时避免 LLM 直接改写世界状态 |
 | Agent Trace 与运行 Logs | Agent Trace 随 World 保存，运行 Logs 记录应用观测；两者只通过 ID 关联，不参与业务判断 | 保证复盘、清理、审计边界清晰 |
 | 日志存储 | 全局 Logs 位于 `./data/logs/app_logs.sqlite`，Agent Trace 与世界内 LLM Logs 位于 `world.sqlite` | ST 与 Agent 生命周期不同，World 迁移需要自包含 Trace |
