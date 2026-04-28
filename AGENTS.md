@@ -7,7 +7,13 @@ This is currently a documentation-first Tauri project for Ran's SmartTavern (RST
 - `README.md`: project map and document ownership.
 - `docs/implementation_plan.md`: roadmap, milestones, and key decisions.
 - `docs/01_architecture.md`: architecture, invariants, and LLM/program boundaries.
-- `docs/02_st_mode.md`: SillyTavern-compatible character card, worldbook, and injection behavior.
+- `docs/70_st_mode.md`: SillyTavern mode overview and compatibility principles.
+- `docs/71_st_character_cards.md`: SillyTavern-compatible TavernCard V3 behavior.
+- `docs/72_st_worldbook_model.md`: SillyTavern-compatible worldbook and CharacterBook data model.
+- `docs/73_st_worldbook_injection.md`: SillyTavern-compatible worldbook injection workflow.
+- `docs/74_st_presets.md`: SillyTavern-compatible presets with RST provider decoupling.
+- `docs/75_st_runtime_assembly.md`: ST runtime state, request assembly, and provider mapping.
+- `docs/76_st_regex.md`: SillyTavern-compatible Regex extension data model, scope rules, and runtime hooks.
 - `docs/10_agent_data_model.md`: Agent data model, three-layer semantics, KnowledgeEntry, and CharacterRecord.
 - `docs/11_agent_runtime.md`: runtime loop, cognitive pass, active set, dirty flags, and validation rules.
 - `docs/12_agent_simulation.md`: deterministic derived state, environment/mana tiers, combat resolution, and skill contracts.

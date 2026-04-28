@@ -1,6 +1,6 @@
 # SillyTavern 世界书（Lore / World Info）注入判定流程
 
-本文整理 `D:\AI\SillyTavern` 当前实现中，Lore 条目从“候选”到“真正注入 Prompt”的完整判定链路。重点是**执行顺序**与**分支条件**，避免只看单个开关导致误判。
+本文整理 `SillyTavern` 当前实现中，Lore 条目从“候选”到“真正注入 Prompt”的完整判定链路。重点是**执行顺序**与**分支条件**，避免只看单个开关导致误判。
 
 ## 1. 入口与总体链路
 
@@ -13,13 +13,13 @@
 
 关键位置：
 
-- `D:\AI\SillyTavern\public\script.js:4535`  
+- `SillyTavern\public\script.js:4535`
   构造 `chatForWI`，并调用 `getWorldInfoPrompt`。
-- `D:\AI\SillyTavern\public\scripts\world-info.js:892`  
+- `SillyTavern\public\scripts\world-info.js:892`
   `getWorldInfoPrompt(...)` 包装层。
-- `D:\AI\SillyTavern\public\scripts\world-info.js:4579`  
+- `SillyTavern\public\scripts\world-info.js:4579`
   `checkWorldInfo(...)` 主扫描与判定逻辑。
-- `D:\AI\SillyTavern\public\scripts\openai.js:1338`  
+- `SillyTavern\public\scripts\openai.js:1338`
   OpenAI 聊天补全路径将 `worldInfoBefore/After` 作为 system prompt 片段。
 
 ---
@@ -329,4 +329,3 @@ return prompt parts
 7. 是否概率失败并进入 `failedProbabilityChecks`。
 8. 是否命中预算上限且非 `ignoreBudget`。
 9. 是否被 `preventRecursion` 影响后续连锁触发。
-

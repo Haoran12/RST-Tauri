@@ -153,20 +153,153 @@ interface STChatMetadata {
 
 ## 5. Provider 差异适配
 
-不同 Provider 对采样参数的支持不同：
+### 5.0 一等适配范围
 
-| 参数 | OpenAI | Anthropic | Gemini | Ollama |
+ST 模式和共享 API 配置池必须把以下 Provider / 协议作为一等适配目标：
+
+- OpenAI Responses API
+- OpenAI Chat Completions API
+- Google Gemini GenerateContent / streamGenerateContent
+- Anthropic Messages API
+- DeepSeek Chat Completions 兼容接口
+- Claude Code Interface
+
+后续任何 API 相关改动都必须同时评估这六类：中立 `ChatRequest` 到 Provider 请求的字段映射、消息 role/content 形态、流式事件解析、token usage、错误响应、结构化输出降级、日志脱敏与回放还原。矩阵中写作 `OpenAI` 的参数若两种 OpenAI 协议行为不同，必须在实现中拆成 `openai_responses` 与 `openai_chat_completions` 两条适配路径；DeepSeek 虽兼容 OpenAI Chat 形态，也必须保留独立能力表与错误处理。
+
+### 5.1 采样参数支持矩阵
+
+不同 Provider 对采样参数的支持不同，DeepSeek 与 OpenAI 同为高优先级支持：
+
+| 参数 | OpenAI Responses | OpenAI Chat | DeepSeek | Anthropic | Gemini | Claude Code Interface |
+|---|---|---|---|---|---|---|
+| temperature | ✓ (0-2) | ✓ (0-2) | ✓ (0-2) | ✓ (0-1) | ✓ | 取决于后端变体 |
+| top_p | ✓ (0-1) | ✓ (0-1) | ✓ (0-1) | ✓ (0-1) | ✓ | 取决于后端变体 |
+| top_k | ✗ | ✗ | ✗ | ✓ | ✓ | 取决于后端变体 |
+| frequency_penalty | ✗ | ✓ (-2~2) | ✓ (-2~2) | ✗ | ✗ | 取决于后端变体 |
+| presence_penalty | ✗ | ✓ (-2~2) | ✓ (-2~2) | ✗ | ✗ | 取决于后端变体 |
+| repetition_penalty | ✗ | ✗ | ✗ | ✗ | ✓ | 取决于后端变体 |
+| stop | 视模型支持 | ✓ | ✓ (最多16个) | ✓ (stop_sequences) | ✓ (stopSequences) | 取决于后端变体 |
+
+### 5.2 流式传输设置
+
+| Provider | 字段 | 类型 | 说明 |
+|---|---|---|---|
+| OpenAI Responses | `stream` | boolean | 启用 Responses SSE 事件流 |
+| OpenAI Chat | `stream` | boolean | 启用 Chat Completions SSE chunk |
+| OpenAI Chat | `stream_options.include_usage` | boolean | 流式返回 token 用量 |
+| DeepSeek | `stream` | boolean | 启用 SSE 流式传输 |
+| DeepSeek | `stream_options.include_usage` | boolean | 流式返回 token 用量 |
+| Anthropic | `stream` | boolean | 启用 SSE 流式传输 |
+| Gemini | 端点切换 | - | 使用 `streamGenerateContent` 端点 |
+| Claude Code Interface | 接口事件流 | - | 按 Claude Code 兼容事件/消息循环解析，不直接复用普通 SSE chunk parser |
+
+### 5.3 推理/思维链设置
+
+| Provider | 字段 | 类型 | 取值 | 说明 |
 |---|---|---|---|---|
-| temperature | ✓ | ✓ | ✓ | ✓ |
-| top_p | ✓ | ✓ | ✓ | ✓ |
-| top_k | ✗ | ✗ | ✓ | ✓ |
-| frequency_penalty | ✓ | ✗ | ✗ | ✗ |
-| presence_penalty | ✓ | ✗ | ✗ | ✗ |
-| repetition_penalty | ✗ | ✗ | ✓ | ✓ |
-| mirostat | ✗ | ✗ | ✗ | ✓ |
+| OpenAI Responses | `reasoning.effort` | string | "low", "medium", "high" | 推理强度，仅推理模型支持 |
+| OpenAI Chat | `reasoning_effort` | string | "low", "medium", "high" | 推理强度，仅推理模型支持 |
+| DeepSeek | `thinking.type` | string | "enabled", "disabled" | 推理开关 |
+| DeepSeek | `thinking.reasoning_effort` | string | "high", "max" | 推理强度 |
+| Anthropic | `thinking.type` | string | "enabled", "disabled", "adaptive" | 思维链模式 |
+| Anthropic | `thinking.budget_tokens` | integer | ≥1024 | 思维链 token 预算 |
+| Anthropic | `thinking.display` | string | "summarized", "omitted" | 思维链显示方式 |
+| Claude Code Interface | 取决于后端变体 | - | - | 不假定可用；必须显式探测或配置 |
 
-适配策略：
+### 5.4 语义相近参数映射
+
+当用户设置的参数在当前 Provider 不支持时，可尝试映射到语义相近的参数：
+
+| 源参数 | 目标参数 | 映射方向 | 近似程度 | 说明 |
+|---|---|---|---|---|
+| `repetition_penalty` | `frequency_penalty` | → OpenAI/DeepSeek | 中等 | 都惩罚重复，但机制不同 |
+| `repetition_penalty` | `presence_penalty` | → OpenAI/DeepSeek | 较弱 | presence 只惩罚出现与否 |
+| `top_k` | - | 无映射 | - | Anthropic/DeepSeek/OpenAI 无等价参数 |
+
+**映射规则：**
+- `repetition_penalty` (通常 1.0-2.0) → `frequency_penalty` (0-2)：`frequency_penalty ≈ repetition_penalty - 1.0`
+- 映射为近似值，用户应针对不同 Provider 单独调参
+
+### 5.5 适配策略
 
 - 不支持的参数静默忽略，不报错。
-- 语义相近参数可自动映射，例如 `repetition_penalty` → `frequency_penalty` 近似。
+- 语义相近参数可自动映射（需用户确认或预设配置）。
 - 预设可声明 `provider_overrides` 字段，为特定 Provider 提供替代值。
+- 推理参数仅在支持的模型上生效，否则忽略。
+
+### 5.6 请求组装示例
+
+**OpenAI Responses:**
+```json
+{
+  "model": "gpt-<model>",
+  "input": [...],
+  "temperature": 0.7,
+  "top_p": 0.9,
+  "stream": true
+}
+```
+
+**OpenAI Chat Completions:**
+```json
+{
+  "model": "gpt-4o",
+  "messages": [...],
+  "temperature": 0.7,
+  "top_p": 0.9,
+  "frequency_penalty": 0.5,
+  "stream": true,
+  "stream_options": { "include_usage": true }
+}
+```
+
+**DeepSeek Chat:**
+```json
+{
+  "model": "deepseek-v4-pro",
+  "messages": [...],
+  "temperature": 0.7,
+  "top_p": 0.9,
+  "frequency_penalty": 0.5,
+  "thinking": { "type": "enabled", "reasoning_effort": "high" },
+  "stream": true
+}
+```
+
+**Anthropic Messages:**
+```json
+{
+  "model": "claude-sonnet-4-6",
+  "max_tokens": 4096,
+  "messages": [...],
+  "temperature": 0.7,
+  "top_p": 0.9,
+  "top_k": 50,
+  "thinking": { "type": "enabled", "budget_tokens": 2048 },
+  "stream": true
+}
+```
+
+**Gemini GenerateContent:**
+```json
+{
+  "contents": [...],
+  "generationConfig": {
+    "temperature": 0.7,
+    "topP": 0.9,
+    "topK": 50,
+    "maxOutputTokens": 4096
+  }
+}
+```
+
+**Claude Code Interface:**
+```json
+{
+  "system": "...",
+  "messages": [...],
+  "tools": [...],
+  "max_tokens": 4096,
+  "stream": true
+}
+```

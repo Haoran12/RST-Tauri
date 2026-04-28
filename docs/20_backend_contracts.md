@@ -8,6 +8,19 @@
 
 所有调用必须经过日志包装层记录请求、响应、流式 chunk 与异常。日志结构与清理规则见 [30_logging_and_observability.md](30_logging_and_observability.md)。
 
+第一版 AI Provider / 协议适配范围必须覆盖：
+
+| 适配目标 | 协议 / 端点形态 | 说明 |
+|---|---|---|
+| OpenAI Responses API | `/v1/responses` | OpenAI 新一代响应接口；结构化输出优先使用 `text.format` / JSON Schema |
+| OpenAI Chat Completions API | `/v1/chat/completions` | OpenAI 兼容消息接口；同时作为部分兼容 Provider 的基础协议形态 |
+| Google Gemini | `models.generateContent` / `streamGenerateContent` | 使用 `contents` 与 `generationConfig` 组装请求 |
+| Anthropic | Messages API | 原生 `system` + `messages` 结构；结构化输出优先使用官方 schema / tool 能力 |
+| DeepSeek | Chat Completions 兼容接口 | OpenAI Chat 兼容形态，但推理、JSON mode、限制和错误处理按 DeepSeek 独立适配 |
+| Claude Code Interface | Claude Code 风格消息 / 工具 / 环境接口 | 面向 Claude Code 兼容网关或本地接口；不得简单等同于普通 Anthropic Messages passthrough |
+
+后续做 API 相关适配时，必须逐项考虑上述六类：请求字段白名单、role / content 映射、流式事件解析、结构化输出降级、token usage、错误响应、日志脱敏和回放还原都要明确各自行为。
+
 ---
 
 ## 1. AIProvider trait
@@ -36,7 +49,7 @@ pub trait AIProvider: Send + Sync {
 }
 ```
 
-实现：`OpenAIProvider` / `AnthropicProvider` / `GeminiProvider` / `OllamaProvider` / `DeepSeekProvider`。
+实现：`OpenAIResponsesProvider` / `OpenAIChatProvider` / `AnthropicProvider` / `GeminiProvider` / `DeepSeekProvider` / `ClaudeCodeInterfaceProvider`。其他 Provider（例如本地模型或 Ollama）可作为扩展加入，但不得替代上述一等适配目标。
 
 Provider 实现只负责真实 API 调用，不直接写日志。调用方必须通过 `LoggingAIProvider` 或等价 wrapper 注入 `LogContext`：
 
@@ -72,11 +85,12 @@ Wrapper 的后置条件：
 
 | Provider | structured 输出机制 |
 |---|---|
-| OpenAI | Structured Outputs（`json_schema` / typed `text.format`，strict schema）；旧模型才降级为 JSON mode + schema 校验 |
-| Anthropic | Tool use（声明一个返回该 schema 的虚拟工具，让模型调用） |
+| OpenAI Responses | Structured Outputs（typed `text.format` / JSON Schema，strict schema）；不支持时才降级为工具或 JSON mode + schema 校验 |
+| OpenAI Chat Completions | Structured Outputs（`response_format.type=json_schema`）；旧模型才降级为 JSON mode + schema 校验 |
+| Anthropic | 原生 structured output / tool use（声明一个返回该 schema 的虚拟工具，让模型调用） |
 | Gemini | `response_schema` 字段直接传 JSON Schema |
-| Ollama | `format=json` 参数 + system prompt 中嵌 schema + 返回后 schema 校验 |
 | DeepSeek | JSON/object 模式或兼容格式 + system prompt 中嵌 schema + 返回后 schema 校验 |
+| Claude Code Interface | 优先沿用接口暴露的 tool/schema 能力；若后端仅提供 Claude Code 兼容消息循环，则用受控工具调用或 JSON 降级，并在本地 schema 校验 |
 
 `chat_structured` 的统一后置条件：返回值必须通过传入的 JSON Schema 校验；未通过时由 Provider 层执行有限重试，仍失败则向上返回错误并触发运行时容错路径。JSON mode 只能保证 JSON 可解析，不能替代 schema adherence。
 
@@ -133,7 +147,7 @@ pub struct AgentLlmProfile {
 约束：
 
 - API 配置只定义 Provider、model、base URL、鉴权、采样参数、超时、代理等调用参数；不得改变节点权限。
-- 节点权限由 `AgentLlmNode` 决定，不能因为用户选择了更强模型而提升可见性。
+- 节点权限由 `AgentLlmNode` 决定，不能因为用户选择了更强模型而提升 Knowledge 访问权限或叙事披露范围。
 - `chat_structured` 节点必须校验所选 API 配置支持结构化输出；不支持时只允许走文档定义的 JSON 降级路径。
 - 每次调用必须把 `api_config_id`、provider、model 写入 `llm_call_logs`，便于回放与问题定位。
 - World 可以保存自己的 `AgentLlmProfile` 引用或覆盖项；删除 API 配置前必须检查是否被 Agent profile / World 引用。

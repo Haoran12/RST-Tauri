@@ -20,20 +20,20 @@
 │  Layer 1 — Truth Store（客观真相，仅编排器与结果规划/验证层访问）│
 │  ├── SceneModel              场景客观状态                    │
 │  ├── KnowledgeEntry[*]       统一知识库（含世界/势力/角色档 │
-│  │                           案/记忆，带可见性谓词）         │
+│  │                           案/记忆，带访问策略）           │
 │  └── 角色 baseline_body_profile（物种/感官基线/灵觉基线）    │
 │      + temporary_body_state  伤势/疲惫/痛感/灵力消耗等当前态 │
 │  约束：只有声明 God-read 的编排类节点可读此层；              │
 │        CognitivePassInput / SurfaceRealizerInput 不出现       │
 │        Layer 1 原始对象。                                    │
 └──────────────────────────────────────────────────────────────┘
-                  │ 经 VisibilityResolver + SceneFilter 派生
+                  │ 经 KnowledgeAccessResolver + SceneFilter 派生
                   ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  Layer 2 — Per-Character Access（角色可触及的客观，每回合重 │
 │            建，无独立持久化）                                │
-│  ├── FilteredSceneView       能感知的场景 + 可见 facets      │
-│  ├── AccessibleKnowledge[*]  通过可见性过滤的 KnowledgeEntry │
+│  ├── FilteredSceneView       能感知的场景 + observable facets│
+│  ├── AccessibleKnowledge[*]  通过访问控制过滤的 KnowledgeEntry │
 │  │                           视图（含表象 / 自以为版本）     │
 │  └── EmbodimentState         具身状态（每回合从 baseline +   │
 │                              temp + scene 计算）             │
@@ -62,7 +62,7 @@
     → Validator + StateApplier → World Truth (L1)
     → Embodiment 计算 (L1 baseline + L1 temp + L1 scene → L2 embodiment)
     → SceneFilter (L1 scene + L2 embodiment → L2 filtered_view)
-    → KnowledgeAccess (SQLite 可见性索引预筛 + VisibilityResolver 裁剪 → L2 accessible_knowledge)
+    → KnowledgeAccess (SQLite 访问索引预筛 + KnowledgeAccessResolver 裁剪 → L2 accessible_knowledge)
     → InputAssembly (L2 全部 + L3 prior → CognitivePassInput)
     → CognitivePass(LLM) → Output(perception/belief/intent)
     → Validator (扫描 Output 引用是否 ⊆ L2 输入)
@@ -182,7 +182,7 @@ pub enum ManaSourceType {
 
 ### 2.4 KnowledgeEntry（统一知识模型）
 
-`KnowledgeEntry` 是 Layer 1 的核心，承载世界设定 / 地区设定 / 势力设定 / 角色档案分面 / 历史事件（Memory）。所有"谁能知道什么"的判断由它的 `visibility` 字段决定，由 `VisibilityResolver` 统一计算。
+`KnowledgeEntry` 是 Layer 1 的核心，承载世界设定 / 地区设定 / 势力设定 / 角色档案分面 / 历史事件（Memory）。所有"谁能读取什么 Knowledge"的判断由它的 `access_policy` 字段决定，由 `KnowledgeAccessResolver` 统一计算。
 
 ```rust
 pub struct KnowledgeEntry {
@@ -191,7 +191,7 @@ pub struct KnowledgeEntry {
     pub subject: KnowledgeSubject,
     pub content: serde_json::Value,                  // 客观真相（结构化）
     pub apparent_content: Option<serde_json::Value>, // 表象（伪装/欺骗时给观察者看的版本）
-    pub visibility: VisibilityPredicate,
+    pub access_policy: AccessPolicy,
     pub subject_awareness: SubjectAwareness,         // 仅 subject 为 Character 时有意义
     pub metadata: KnowledgeMetadata,
     pub schema_version: String,
@@ -229,15 +229,15 @@ pub enum CharacterFacetType {
     // 可扩展
 }
 
-pub struct VisibilityPredicate {
-    // 三谓词，OR 关系（任一为真即可见）。
+pub struct AccessPolicy {
+    // 三谓词，OR 关系（任一为真即可访问）。
     // 例外：scope 含 GodOnly 时为 hard deny，优先级高于 known_by / scope / conditions。
     pub known_by: Vec<String>,                  // 名单制
-    pub scope: Vec<VisibilityScope>,            // 标签制
-    pub conditions: Vec<VisibilityCondition>,   // 条件制（运行时求值）
+    pub scope: Vec<AccessScope>,            // 标签制
+    pub conditions: Vec<AccessCondition>,   // 条件制（运行时求值）
 }
 
-pub enum VisibilityScope {
+pub enum AccessScope {
     Public,                  // 所有原住民
     GodOnly,                 // 仅编排器（无人可知；hard deny）
     Region(String),          // 在该地区的角色
@@ -248,19 +248,19 @@ pub enum VisibilityScope {
     // 可扩展
 }
 
-pub enum VisibilityCondition {
-    InSameSceneVisible,                                    // 同场景且能感知
+pub enum AccessCondition {
+    InSameSceneObservable,                                    // 同场景且能感知
     SocialAccessAtLeast { target: String, threshold: f64 }, // L1 客观关系/授权阈值；禁止读取 L3 relation_models
     HasSkill(String),                                      // 拥有特定技能
     CultivationAtLeast(String),                            // 修为达到
-    CustomPredicate(VisibilityExpression),                 // 结构化 DSL AST 扩展点；禁止自然语言表达式
+    CustomPredicate(AccessExpression),                 // 结构化 DSL AST 扩展点；禁止自然语言表达式
     // 可扩展
 }
 
-pub enum VisibilityExpression {
-    All(Vec<VisibilityExpression>),
-    Any(Vec<VisibilityExpression>),
-    Not(Box<VisibilityExpression>),
+pub enum AccessExpression {
+    All(Vec<AccessExpression>),
+    Any(Vec<AccessExpression>),
+    Not(Box<AccessExpression>),
     HasTag { subject_id: String, tag: String },
     NumericAtLeast { path: String, value: f64 },
     BooleanFlag { path: String, expected: bool },
@@ -268,7 +268,7 @@ pub enum VisibilityExpression {
 
 pub enum SubjectAwareness {
     /// 默认：subject 自己知道关于自己的这条 facet。
-    /// 在为 subject 构建 accessible_knowledge 时，content 直接可见。
+    /// 在为 subject 构建 accessible_knowledge 时，content 直接可访问。
     Aware,
 
     /// subject 不知道客观真相，但有一个"自以为是"的版本。
@@ -288,33 +288,33 @@ pub struct KnowledgeMetadata {
 
 **关键不变量**：
 
-1. `content` 永远不进入 LLM，除非 `VisibilityResolver` 判定该角色对该 entry 完全可见。
+1. `content` 永远不进入 LLM，除非 `KnowledgeAccessResolver` 判定该角色对该 entry 拥有完整访问权限。
 2. `subject == Character{id: A}` 且 `subject_awareness == Unaware{self_belief}` 时：A 的 accessible_knowledge 中只见 `self_belief`，看不到 `content`。
 3. `apparent_content` 存在时：观察者（非 subject）默认看到 `apparent_content`；只有满足"揭穿条件"或在 `known_by` 中的角色才看到 `content`。
-4. `visibility.scope` 含 `GodOnly` 表示仅编排器可读，对所有角色不可见；`VisibilityResolver` 必须先检查 `GodOnly`，命中后直接拒绝，不再计算 `known_by` / 其他 scope / conditions。
-5. `GodOnly` 启用态下 `visibility.known_by` 必须为空；Validator / StateCommitter 自动检查并拒绝 `GodOnly + known_by 非空` 的状态。
+4. `access_policy.scope` 含 `GodOnly` 表示仅编排器可读，对所有角色拒绝访问；`KnowledgeAccessResolver` 必须先检查 `GodOnly`，命中后直接拒绝，不再计算 `known_by` / 其他 scope / conditions。
+5. `GodOnly` 启用态下 `access_policy.known_by` 必须为空；Validator / StateCommitter 自动检查并拒绝 `GodOnly + known_by 非空` 的状态。
 6. 若故事推进后 OutcomePlanner 候选 + EffectValidator 确认某条 `GodOnly` 知识可被角色获知，必须通过 `KnowledgeRevealEvent` 先移除 `GodOnly` 或降级为其他 scope，再追加 `known_by`；禁止在 `GodOnly` 仍存在时直接写入 `known_by`。
 7. `MemoryEntry` 不再独立存在；历史事件以 `KnowledgeEntry { kind: Memory }` 形式统一存储。
 8. Layer 1 的 Knowledge 内容由编排器/作者/StateCommitter 写入；CognitivePass 不可写。
 
-#### 2.4.1 可见性存储与查询索引
+#### 2.4.1 访问策略存储与查询索引
 
-`KnowledgeEntry.visibility` 是权威结构，必须完整保存在 `knowledge_entries.visibility` JSON 中，用于导入导出、回滚、schema 校验和 `VisibilityResolver` 最终判定。
+`KnowledgeEntry.access_policy` 是权威结构，必须完整保存在 `knowledge_entries.access_policy` JSON 中，用于导入导出、回滚、schema 校验和 `KnowledgeAccessResolver` 最终判定。
 
 为避免在高频 `KnowledgeAccess` 中扫描全库，`known_by` 与 `scope` 同时维护为 SQLite 派生索引：
 
-- `knowledge_visibility_known_by(knowledge_id, character_id)`：展开 `visibility.known_by`。
-- `knowledge_visibility_scopes(knowledge_id, scope_type, scope_value)`：展开 `visibility.scope`，`Public` / `GodOnly` 等无值 scope 使用空字符串。
+- `knowledge_access_known_by(knowledge_id, character_id)`：展开 `access_policy.known_by`。
+- `knowledge_access_scopes(knowledge_id, scope_type, scope_value)`：展开 `access_policy.scope`，`Public` / `GodOnly` 等无值 scope 使用空字符串。
 - `character_scope_memberships(character_id, scope_type, scope_value)`：角色当前所属地区、势力、修为门槛、职位、血脉等可查询 membership。
 
-派生索引只用于候选预筛，不是第二套可见性规则。`KnowledgeAccess` 的固定流程为：
+派生索引只用于候选预筛，不是第二套访问规则。`KnowledgeAccess` 的固定流程为：
 
-1. 根据当前角色、场景、可见实体、近期事件与 `character_scope_memberships` 查询候选 `knowledge_id`。
+1. 根据当前角色、场景、可观察实体、近期事件与 `character_scope_memberships` 查询候选 `knowledge_id`。
 2. 批量读取候选 `KnowledgeEntry`。
-3. 对每条候选调用 `VisibilityResolver`；`GodOnly` 仍由 Resolver hard deny。
-4. 按 `content` / `apparent_content` / `self_belief` 三选一生成 `AccessibleEntry.visible_content`。
+3. 对每条候选调用 `KnowledgeAccessResolver`；`GodOnly` 仍由 Resolver hard deny。
+4. 按 `content` / `apparent_content` / `self_belief` 三选一生成 `AccessibleEntry.accessible_content`。
 
-任何写入 `KnowledgeEntry.visibility`、处理 `KnowledgeRevealEvent`、改变角色地区/势力/职位/血脉/修为可见身份的操作，必须在同一 SQLite transaction 内同步更新派生索引。索引表可由 `knowledge_entries.visibility` 全量重建；若重建结果与现有索引不一致，视为存储一致性错误。
+任何写入 `KnowledgeEntry.access_policy`、处理 `KnowledgeRevealEvent`、改变角色地区/势力/职位/血脉/修为等访问身份的操作，必须在同一 SQLite transaction 内同步更新派生索引。索引表可由 `knowledge_entries.access_policy` 全量重建；若重建结果与现有索引不一致，视为存储一致性错误。
 
 ### 2.5 Content Schema 约定（核心字段 + extensions 兜底）
 
@@ -322,7 +322,7 @@ pub struct KnowledgeMetadata {
 
 **通用规则**：
 - 必含 `summary_text: string`（自由文本简述，供 LLM 快速理解；不参与程序判断）。
-- 必含该 kind/facet 的核心结构化字段（用于程序检索 / 可见性 / 规则匹配）。
+- 必含该 kind/facet 的核心结构化字段（用于程序检索 / 访问控制 / 规则匹配）。
 - 可含 `extensions: Record<String, Any>` 用于扩展（不参与核心程序逻辑，可供 LLM 阅读）。
 
 **示例：CharacterFacet::Appearance**
@@ -391,9 +391,9 @@ pub struct KnowledgeMetadata {
 
 **核心字段表**（所有 facet/fact 类型应预定义最小集）由 `models/knowledge_schemas.rs` 维护，每种类型一个 struct。`extensions` 总是 `serde_json::Map<String, serde_json::Value>` 兜底。
 
-### 2.6 KnowledgeRevealEvent（可见性扩展）
+### 2.6 KnowledgeRevealEvent（访问权限扩展）
 
-可见性变化必须通过显式事件触发，禁止隐式修改 `visibility.known_by`：
+访问权限变化必须通过显式事件触发，禁止隐式修改 `access_policy.known_by`：
 
 ```rust
 pub struct KnowledgeRevealEvent {
@@ -401,19 +401,19 @@ pub struct KnowledgeRevealEvent {
     pub knowledge_id: String,
     pub newly_known_by: Vec<String>,   // 此次新增的知情者
     pub trigger: RevealTrigger,        // 何种触发：witnessed / told / inferred / awakened
-    pub scope_change: Option<VisibilityScopeChange>, // GodOnly 揭示时必须先降级/移除 GodOnly
+    pub scope_change: Option<AccessScopeChange>, // GodOnly 揭示时必须先降级/移除 GodOnly
     pub scene_turn_id: String,
 }
 
-pub enum VisibilityScopeChange {
+pub enum AccessScopeChange {
     RemoveGodOnly,                     // 结果规划 + 程序校验确认该知识已可进入角色可知范围
-    ReplaceScopes(Vec<VisibilityScope>),
+    ReplaceScopes(Vec<AccessScope>),
 }
 ```
 
 由 StateCommitter 处理：
 - 若原 entry 含 `GodOnly`，必须先验证 `scope_change` 已移除/替换 `GodOnly`，否则拒绝追加 `newly_known_by`。
-- 更新 `KnowledgeEntry.visibility.scope` 与 `visibility.known_by`。
+- 更新 `KnowledgeEntry.access_policy.scope` 与 `access_policy.known_by`。
 - 在 event_stream 追加事件。
 - 创建一条 `KnowledgeEntry { kind: Memory }` 记录"X 何时如何获知 Y"。
 
@@ -486,7 +486,7 @@ pub struct SensoryCapability {
 pub struct FilteredSceneView {
     pub character_id: String,
     pub scene_turn_id: String,
-    pub visible_entities: Vec<VisibleEntity>,
+    pub observable_entities: Vec<ObservableEntity>,
     pub audible_signals: Vec<AudibleSignal>,
     pub olfactory_signals: Vec<OlfactorySignal>,
     pub tactile_signals: Vec<TactileSignal>,
@@ -496,16 +496,16 @@ pub struct FilteredSceneView {
     pub spatial_context: SpatialContext,
 }
 
-pub struct VisibleEntity {
+pub struct ObservableEntity {
     pub entity_id: String,
-    pub visibility_score: f64,
+    pub perception_score: f64,
     pub clarity: f64,
-    pub visible_facets: Vec<String>,   // KnowledgeEntry IDs（该角色当前对该实体可见的 facets）
+    pub observable_facets: Vec<String>,   // KnowledgeEntry IDs（该角色当前对该实体可观察且可访问的 facets）
     pub notes: String,
 }
 ```
 
-`visible_facets` 由 `SceneFilter` 与 `VisibilityResolver` 共同决定：感官可达 + facet 可见性谓词通过。
+`observable_facets` 由 `SceneFilter` 与 `KnowledgeAccessResolver` 共同决定：感官可达 + facet 访问策略通过。
 
 ### 3.3 AccessibleKnowledge
 
@@ -520,8 +520,8 @@ pub struct AccessibleEntry {
     pub knowledge_id: String,
     pub kind: KnowledgeKind,
     pub subject: KnowledgeSubject,
-    pub visible_content: serde_json::Value,    // 经可见性裁剪后的内容（content / apparent_content / self_belief 三选一）
-    pub source_hint: AccessSource,             // 该角色为何能看到这条（用于调试与 prompt 提示）
+    pub accessible_content: serde_json::Value,    // 经访问控制裁剪后的内容（content / apparent_content / self_belief 三选一）
+    pub source_hint: AccessSource,             // 该角色为何能访问这条（用于调试与 prompt 提示）
 }
 
 pub enum AccessSource {

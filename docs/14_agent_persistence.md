@@ -2,7 +2,7 @@
 
 本文档承载 Agent 模式的 SQLite 表结构、索引与持久化边界。
 
-数据语义见 [10_agent_data_model.md](10_agent_data_model.md)。可见性派生索引的运行规则见 KnowledgeEntry 章节。运行时写入顺序见 [11_agent_runtime.md](11_agent_runtime.md)，日志表与清理策略见 [30_logging_and_observability.md](30_logging_and_observability.md)。
+数据语义见 [10_agent_data_model.md](10_agent_data_model.md)。Knowledge 访问派生索引的运行规则见 KnowledgeEntry 章节。运行时写入顺序见 [11_agent_runtime.md](11_agent_runtime.md)，日志表与清理策略见 [30_logging_and_observability.md](30_logging_and_observability.md)。
 
 ---
 
@@ -61,7 +61,7 @@ CREATE TABLE knowledge_entries (
     facet_type TEXT,                       -- 仅 character_facet 有值
     content TEXT NOT NULL,                 -- JSON: 客观真相
     apparent_content TEXT,                 -- JSON: 表象（可空）
-    visibility TEXT NOT NULL,              -- JSON: VisibilityPredicate
+    access_policy TEXT NOT NULL,           -- JSON: AccessPolicy
     subject_awareness TEXT NOT NULL,       -- JSON: SubjectAwareness（含 Unaware 的 self_belief）
     metadata TEXT NOT NULL,                -- JSON: KnowledgeMetadata
     schema_version TEXT NOT NULL DEFAULT '0.1',
@@ -69,27 +69,27 @@ CREATE TABLE knowledge_entries (
     updated_at TEXT NOT NULL
 );
 
--- 知识揭示事件（可见性扩展轨迹）
+-- 知识揭示事件（访问权限扩展轨迹）
 CREATE TABLE knowledge_reveal_events (
     event_id TEXT PRIMARY KEY,
     knowledge_id TEXT NOT NULL,
     newly_known_by TEXT NOT NULL,          -- JSON array
     trigger TEXT NOT NULL,                 -- JSON: RevealTrigger
-    scope_change TEXT,                     -- JSON: VisibilityScopeChange；GodOnly 揭示时必须有值
+    scope_change TEXT,                     -- JSON: AccessScopeChange；GodOnly 揭示时必须有值
     scene_turn_id TEXT NOT NULL,
     created_at TEXT NOT NULL,
     FOREIGN KEY (knowledge_id) REFERENCES knowledge_entries(knowledge_id)
 );
 
--- Knowledge 可见性派生索引；权威来源仍是 knowledge_entries.visibility JSON
-CREATE TABLE knowledge_visibility_known_by (
+-- Knowledge 访问派生索引；权威来源仍是 knowledge_entries.access_policy JSON
+CREATE TABLE knowledge_access_known_by (
     knowledge_id TEXT NOT NULL,
     character_id TEXT NOT NULL,
     PRIMARY KEY (knowledge_id, character_id),
     FOREIGN KEY (knowledge_id) REFERENCES knowledge_entries(knowledge_id)
 );
 
-CREATE TABLE knowledge_visibility_scopes (
+CREATE TABLE knowledge_access_scopes (
     knowledge_id TEXT NOT NULL,
     scope_type TEXT NOT NULL,              -- public / god_only / region / faction / realm / role / bloodline / ...
     scope_value TEXT NOT NULL DEFAULT '',  -- 无值 scope 使用空字符串
@@ -256,8 +256,8 @@ CREATE INDEX idx_knowledge_kind ON knowledge_entries(kind);
 CREATE INDEX idx_knowledge_subject ON knowledge_entries(subject_type, subject_id);
 CREATE INDEX idx_knowledge_facet ON knowledge_entries(subject_id, facet_type) WHERE kind = 'character_facet';
 CREATE INDEX idx_reveal_knowledge ON knowledge_reveal_events(knowledge_id);
-CREATE INDEX idx_visibility_known_by_character ON knowledge_visibility_known_by(character_id);
-CREATE INDEX idx_visibility_scopes_lookup ON knowledge_visibility_scopes(scope_type, scope_value);
+CREATE INDEX idx_access_known_by_character ON knowledge_access_known_by(character_id);
+CREATE INDEX idx_access_scopes_lookup ON knowledge_access_scopes(scope_type, scope_value);
 CREATE INDEX idx_character_scope_lookup ON character_scope_memberships(character_id, scope_type, scope_value);
 CREATE INDEX idx_subjective_char ON character_subjective_snapshots(character_id, scene_turn_id);
 CREATE INDEX idx_traces_turn ON turn_traces(scene_turn_id);
@@ -274,7 +274,7 @@ CREATE INDEX idx_app_events_created ON app_event_logs(created_at);
 
 **说明**：
 
-- `knowledge_entries.visibility` JSON 是权威结构；`knowledge_visibility_known_by`、`knowledge_visibility_scopes` 与 `character_scope_memberships` 是可重建的查询索引，只用于候选预筛，最终可见性仍由 `VisibilityResolver` 判定。
+- `knowledge_entries.access_policy` JSON 是权威结构；`knowledge_access_known_by`、`knowledge_access_scopes` 与 `character_scope_memberships` 是可重建的查询索引，只用于候选预筛，最终访问权限仍由 `KnowledgeAccessResolver` 判定。
 - `subject_id + facet_type` 联合索引服务"取角色 X 的所有 facets"这一最高频查询。
 - `character_subjective_snapshots` 的最新一条即角色当前心智状态；历史快照保留用于回放与一致性验证。
 - 没有"memory_records"表，记忆作为 `knowledge_entries.kind = 'memory'` 统一存储。

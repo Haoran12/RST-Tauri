@@ -114,7 +114,7 @@ Agent Trace 记录 Agent 模式下"程序如何判断"与"模型如何输出"。
 - `step_status`：`started` / `skipped` / `succeeded` / `failed` / `fallback_used`。
 - `input_summary`：结构化输入摘要。
 - `output_summary`：结构化输出摘要。
-- `decision_json`：关键判定值，例如 dirty flag、active set、visible facet、validation failure。
+- `decision_json`：关键判定值，例如 dirty flag、active set、observable facet、validation failure。
 - `linked_request_id`：如该步骤调用 LLM，则关联 `llm_call_logs.request_id`。
 - `error_event_id`：如该步骤触发异常事件，则关联 `app_event_logs.event_id`。
 

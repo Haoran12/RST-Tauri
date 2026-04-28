@@ -2,6 +2,9 @@
   "schema_version": 1,
   "researched_at": "2026-04-28",
   "purpose": "RST AI Provider API interaction contracts. Used to decide which fields may be sent, which fields must be present, and which response fields should be parsed or ignored.",
+  "high_priority_providers": ["openai", "deepseek", "anthropic", "gemini", "claude_code_interface"],
+  "first_class_protocols": ["openai_responses", "openai_chat_completions", "gemini_generate_content", "anthropic_messages", "deepseek_chat", "claude_code_interface"],
+  "provider_priority_notes": "RST first-class API adaptation targets are OpenAI Responses, OpenAI Chat Completions, Google Gemini, Anthropic Messages, DeepSeek Chat, and Claude Code Interface. DeepSeek is treated as equal priority to OpenAI for ST-mode runtime assembly; although it shares OpenAI-compatible wire format, it keeps independent thinking/reasoning, JSON, error, and logging behavior.",
   "conventions": {
     "field_status": {
       "required": "Must be present for this protocol or object shape.",
@@ -149,6 +152,7 @@
     },
     "openai_chat_completions": {
       "provider": "openai_compatible",
+      "priority": "high",
       "wire_api": "chat_completions",
       "endpoint": {
         "method": "POST",
@@ -233,6 +237,7 @@
     },
     "anthropic_messages": {
       "provider": "anthropic",
+      "priority": "high",
       "wire_api": "messages",
       "endpoint": {
         "method": "POST",
@@ -314,6 +319,7 @@
     },
     "gemini_generate_content": {
       "provider": "google_gemini",
+      "priority": "high",
       "wire_api": "generate_content",
       "endpoint": {
         "method": "POST",
@@ -388,6 +394,7 @@
     },
     "deepseek_chat": {
       "provider": "deepseek",
+      "priority": "high",
       "wire_api": "chat_completions",
       "endpoint": {
         "method": "POST",
@@ -407,9 +414,10 @@
         {"path": "messages[].prefix", "status": "conditional", "type": "boolean", "notes": "Beta prefix completion; requires beta base URL."},
         {"path": "messages[].reasoning_content", "status": "conditional", "type": "string | null", "notes": "Beta thinking prefix input; requires prefix=true."},
         {"path": "messages[].tool_call_id", "status": "conditional", "type": "string", "notes": "Required for tool messages."},
-        {"path": "thinking", "status": "optional", "type": "object"},
-        {"path": "thinking.type", "status": "optional", "type": "string", "allowed_values": ["enabled", "disabled"]},
-        {"path": "reasoning_effort", "status": "optional", "type": "string", "allowed_values": ["high", "max"], "notes": "low/medium map to high; xhigh maps to max."},
+        {"path": "thinking", "status": "optional", "type": "object", "notes": "DeepSeek thinking/reasoning configuration."},
+        {"path": "thinking.type", "status": "optional", "type": "string", "allowed_values": ["enabled", "disabled"], "notes": "Enable or disable thinking mode."},
+        {"path": "thinking.reasoning_effort", "status": "optional", "type": "string", "allowed_values": ["high", "max"], "notes": "Reasoning intensity when thinking is enabled."},
+        {"path": "reasoning_effort", "status": "optional", "type": "string", "allowed_values": ["high", "max"], "notes": "Shorthand for thinking.reasoning_effort. low/medium map to high; xhigh maps to max."},
         {"path": "frequency_penalty", "status": "optional", "type": "number", "range": [-2, 2]},
         {"path": "presence_penalty", "status": "optional", "type": "number", "range": [-2, 2]},
         {"path": "max_tokens", "status": "optional", "type": "integer"},
@@ -904,6 +912,199 @@
     }
   },
   "adapter_defaults": {
+    "provider_parameter_matrix": {
+      "summary": "Provider support matrix for sampling, streaming, and reasoning parameters. Used by ProviderRequestMapper to transform neutral requests to provider-specific format.",
+      "high_priority_providers": ["openai", "deepseek", "anthropic", "gemini", "claude_code_interface"],
+      "first_class_protocols": ["openai_responses", "openai_chat_completions", "gemini_generate_content", "anthropic_messages", "deepseek_chat", "claude_code_interface"],
+      "sampling_parameters": {
+        "temperature": {
+          "semantic": "Controls randomness in output. Lower = deterministic, higher = creative.",
+          "providers": {
+            "openai": {"field": "temperature", "type": "number", "range": [0, 2], "default": 1},
+            "deepseek": {"field": "temperature", "type": "number", "range": [0, 2], "default": 1},
+            "anthropic": {"field": "temperature", "type": "number", "range": [0, 1], "default": 1},
+            "gemini": {"field": "generationConfig.temperature", "type": "number", "range": [0, 2], "default": 1}
+          }
+        },
+        "top_p": {
+          "semantic": "Nucleus sampling threshold. Cumulative probability cutoff.",
+          "providers": {
+            "openai": {"field": "top_p", "type": "number", "range": [0, 1], "default": 1},
+            "deepseek": {"field": "top_p", "type": "number", "range": [0, 1], "default": 1},
+            "anthropic": {"field": "top_p", "type": "number", "range": [0, 1], "default": 1},
+            "gemini": {"field": "generationConfig.topP", "type": "number", "range": [0, 1], "default": 1}
+          }
+        },
+        "top_k": {
+          "semantic": "Only sample from top K options per token. Removes long-tail low probability responses.",
+          "providers": {
+            "openai": {"supported": false},
+            "deepseek": {"supported": false},
+            "anthropic": {"field": "top_k", "type": "integer", "range": [0, null], "default": null},
+            "gemini": {"field": "generationConfig.topK", "type": "integer", "range": [1, null], "default": null}
+          }
+        },
+        "frequency_penalty": {
+          "semantic": "Penalize tokens based on frequency in output so far. Higher = less repetition.",
+          "providers": {
+            "openai": {"field": "frequency_penalty", "type": "number", "range": [-2, 2], "default": 0},
+            "deepseek": {"field": "frequency_penalty", "type": "number", "range": [-2, 2], "default": 0},
+            "anthropic": {"supported": false},
+            "gemini": {"supported": false}
+          }
+        },
+        "presence_penalty": {
+          "semantic": "Penalize tokens that have appeared at all. Higher = more diverse topics.",
+          "providers": {
+            "openai": {"field": "presence_penalty", "type": "number", "range": [-2, 2], "default": 0},
+            "deepseek": {"field": "presence_penalty", "type": "number", "range": [-2, 2], "default": 0},
+            "anthropic": {"supported": false},
+            "gemini": {"supported": false}
+          }
+        },
+        "repetition_penalty": {
+          "semantic": "Penalty for repeating tokens. Common in open-source models.",
+          "providers": {
+            "openai": {"supported": false, "alternative": "frequency_penalty"},
+            "deepseek": {"supported": false, "alternative": "frequency_penalty"},
+            "anthropic": {"supported": false},
+            "gemini": {"supported": false, "notes": "Not in standard Gemini API"}
+          },
+          "fallback_mapping": {
+            "to_frequency_penalty": {"formula": "frequency_penalty = repetition_penalty - 1.0", "notes": "Approximate; repetition_penalty typically 1.0-2.0 maps to frequency_penalty 0-1"}
+          }
+        },
+        "stop": {
+          "semantic": "Stop sequences to halt generation.",
+          "providers": {
+            "openai": {"field": "stop", "type": "string | array<string>", "max_sequences": 4},
+            "deepseek": {"field": "stop", "type": "string | array<string>", "max_sequences": 16},
+            "anthropic": {"field": "stop_sequences", "type": "array<string>"},
+            "gemini": {"field": "generationConfig.stopSequences", "type": "array<string>"}
+          }
+        }
+      },
+      "streaming_parameters": {
+        "stream": {
+          "semantic": "Enable streaming response via Server-Sent Events.",
+          "providers": {
+            "openai": {
+              "field": "stream",
+              "type": "boolean",
+              "default": false,
+              "additional_fields": [
+                {"field": "stream_options.include_usage", "type": "boolean", "semantic": "Include token usage in final chunk"}
+              ]
+            },
+            "deepseek": {
+              "field": "stream",
+              "type": "boolean",
+              "default": false,
+              "additional_fields": [
+                {"field": "stream_options.include_usage", "type": "boolean", "semantic": "Include token usage in final chunk"}
+              ]
+            },
+            "anthropic": {
+              "field": "stream",
+              "type": "boolean",
+              "default": false,
+              "notes": "SSE events: message_start, content_block_start, content_block_delta, content_block_stop, message_delta, message_stop"
+            },
+            "gemini": {
+              "mechanism": "endpoint_switch",
+              "streaming_endpoint": "streamGenerateContent",
+              "non_streaming_endpoint": "generateContent",
+              "notes": "Use different REST endpoint; add alt=sse query param for SSE format"
+            }
+          }
+        }
+      },
+      "reasoning_parameters": {
+        "reasoning_effort": {
+          "semantic": "Control reasoning/thinking intensity for reasoning-capable models.",
+          "providers": {
+            "openai": {
+              "field": "reasoning_effort",
+              "type": "string",
+              "allowed_values": ["low", "medium", "high"],
+              "models": ["o1", "o3", "o4-mini"],
+              "notes": "Only supported on reasoning models; ignored otherwise"
+            },
+            "deepseek": {
+              "field": "reasoning_effort",
+              "type": "string",
+              "allowed_values": ["high", "max"],
+              "compatibility_mapping": {"low": "high", "medium": "high", "xhigh": "max"},
+              "notes": "For compatibility, low/medium map to high"
+            },
+            "anthropic": {"supported": false, "alternative": "thinking.budget_tokens"},
+            "gemini": {"supported": false}
+          }
+        },
+        "thinking": {
+          "semantic": "Enable/disable extended thinking/reasoning mode.",
+          "providers": {
+            "openai": {"supported": false, "alternative": "reasoning_effort"},
+            "deepseek": {
+              "field": "thinking",
+              "type": "object",
+              "structure": {
+                "type": {"type": "string", "allowed_values": ["enabled", "disabled"]},
+                "reasoning_effort": {"type": "string", "allowed_values": ["high", "max"]}
+              },
+              "example": {"type": "enabled", "reasoning_effort": "high"}
+            },
+            "anthropic": {
+              "field": "thinking",
+              "type": "object",
+              "structure": {
+                "type": {"type": "string", "allowed_values": ["enabled", "disabled", "adaptive"]},
+                "budget_tokens": {"type": "integer", "min": 1024, "semantic": "Token budget for thinking; must be < max_tokens"},
+                "display": {"type": "string", "allowed_values": ["summarized", "omitted"], "default": "summarized"}
+              },
+              "example": {"type": "enabled", "budget_tokens": 2048, "display": "summarized"},
+              "notes": "Thinking tokens count toward max_tokens limit"
+            },
+            "gemini": {"supported": false, "notes": "Gemini thinking models auto-enable; no explicit control documented"}
+          }
+        }
+      },
+      "semantic_parameter_mappings": [
+        {
+          "from": "repetition_penalty",
+          "to": "frequency_penalty",
+          "applicable_providers": ["openai", "deepseek"],
+          "formula": "frequency_penalty = repetition_penalty - 1.0",
+          "accuracy": "approximate",
+          "notes": "Both penalize repetition but mechanisms differ. User should tune per-provider."
+        },
+        {
+          "from": "repetition_penalty",
+          "to": "presence_penalty",
+          "applicable_providers": ["openai", "deepseek"],
+          "formula": "presence_penalty = (repetition_penalty - 1.0) * 0.5",
+          "accuracy": "weak",
+          "notes": "Presence only penalizes occurrence, not frequency. Less accurate mapping."
+        },
+        {
+          "from": "top_k",
+          "to": null,
+          "applicable_providers": ["openai", "deepseek"],
+          "notes": "No equivalent parameter. Parameter dropped for these providers."
+        }
+      ],
+      "adapter_implementation": {
+        "transform_order": [
+          "1. Apply semantic_parameter_mappings for unsupported parameters",
+          "2. Map neutral field names to provider-specific field paths",
+          "3. Validate ranges and clamp if necessary",
+          "4. Remove unsupported fields (do not error)",
+          "5. Add provider-specific additional fields (e.g., stream_options)"
+        ],
+        "error_handling": "Silently ignore unsupported parameters. Log at debug level for transparency.",
+        "user_notification": "Warn when semantic mapping is applied, so user knows exact behavior may differ."
+      }
+    },
     "structured_output_strategy": {
       "openai_responses": "Use text.format/json_schema or tools where supported.",
       "openai_chat_completions": "Use response_format.type=json_schema when supported; otherwise json_object plus schema validation.",

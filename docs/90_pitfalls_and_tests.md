@@ -20,29 +20,29 @@
 | PromptBuilder 混入世界事实 | 静态模板携带隐藏设定，或动态输入绕过 schema | 静态节点提示词只写权限/任务/输出规则；动态部分只允许 `{ input: <TInput> }`；Trace 记录 prompt_template_id/version/hash |
 | 不同 Agent 节点误用同一 API 配置 | 结构化节点用到不支持 schema 的模型，或叙事节点误用低质量便宜模型 | AgentLlmProfile 按节点绑定 API 配置；调用前校验结构化能力；日志记录 api_config_id |
 | 中间数据混入可判定自由文本 | 屎山起点；规则匹配失效 | 数据形态铁律 + 类型隔离；允许 `summary_text` / `effect_hints` 等 LLM-readable 文本叶子字段，但禁止参与程序判断 |
-| SurfaceRealizer 私自添加事实 | 误导用户 / 后续状态不一致 | NarrativeFactCheck 强制扫描；visible_facts 白名单约束 |
-| 叙事 POV 泄露隐藏事实 | 角色聚焦叙事写出该角色不可知信息 | `NarrationScope` 先决定 `SceneNarrativeView` 与 `visible_facts`，StyleConstraints.pov 不得提升可见性 |
+| SurfaceRealizer 私自添加事实 | 误导用户 / 后续状态不一致 | NarrativeFactCheck 强制扫描；narratable_facts 白名单约束 |
+| 叙事 POV 泄露隐藏事实 | 角色聚焦叙事写出该角色不可知信息 | `NarrationScope` 先决定 `SceneNarrativeView` 与 `narratable_facts`，StyleConstraints.pov 不得提升叙事披露范围 |
 | OutcomePlanner 权限过宽 | God-read 编排节点演变成直接写状态或绕过校验 | God-read 不等于提交权限；输出 StateUpdatePlan 后必须由 EffectValidator + StateCommitter 校验提交 |
 | OutcomePlanner 反复修复导致成本失控 | 单回合延迟和费用不可控 | 每回合默认最多 1 次 OutcomePlanner；校验失败时裁剪非法硬效果为 blocked_effects / soft_effects，不二次调用修复 |
 | 技能 notes 驱动硬状态 | LLM 根据自然语言即兴改伤势/位置/资源 | SkillEffectContract 定义允许状态域、目标、成本、强度和揭示权限；EffectValidator 只提交契约内硬变化 |
 | BodyReactionDelta 直写 L1 | 角色认知 LLM 绕过状态提交路径 | BodyReactionDelta 只作为候选反应；必须转成合法 CharacterBodyDelta 后经 StateCommitter 写入 |
 | 反应事件递归 | A 攻击 B，B 反击又触发 A 反应，形成无限循环 | ReactionWindow 只收集 ReactionIntent；默认 no_reaction_to_reaction + one_reaction_per_character_per_window；interrupt 必须有显式深度上限 |
-| 伙伴援护缺失或越权 | B 被攻击时伙伴不能救，或不可见角色凭空救场 | eligible_reactors 由程序按可见性、关系/姿态、距离、通道、资源与 SkillEffectContract 判定；LLM 只能在合法 ReactionOption 中选择 |
+| 伙伴援护缺失或越权 | B 被攻击时伙伴不能救，或不可观察角色凭空救场 | eligible_reactors 由程序按感知可达性、Knowledge 访问权限、关系/姿态、距离、通道、资源与 SkillEffectContract 判定；LLM 只能在合法 ReactionOption 中选择 |
 | SceneStateExtractor 权限不清 | 用户一句话触发隐藏 Knowledge 泄露或改写私密设定 | 第一版只读当前 SceneModel + 世界级约束；隐藏 Knowledge / GodOnly 默认不可读，作者编辑模式另行设计 |
 | 用户输入 LLM 解析失败 | 用户操作丢失 | 显示原始输入 + 提示重写；保留 raw_text 供 trace |
 
-### 1.2 全知与可见性
+### 1.2 全知与 Knowledge 访问权限
 
 | 坑点 | 风险 | 应对策略 |
 |---|---|---|
 | 全知泄露难检测 | 行为不符设定 | 输入过滤 + 输出验证 + 访问日志审计 |
 | Layer 1 泄露至受限 LLM | 全知 / 屎山起点 | InputAssembly 类型隔离（仅接受 Layer 2 类型）+ 单元测试断言；God-read 节点必须显式记录权限域 |
-| 可见性逻辑散落 | 多处不一致 | VisibilityResolver 是唯一入口；所有判断必须经它 |
-| 可见性索引替代 Resolver | SQL 查询结果被当成最终可见性，绕过 GodOnly / apparent / self_belief 规则 | `known_by` / `scope` 派生索引只做候选预筛；所有候选必须再经 VisibilityResolver |
-| 可见性派生索引漂移 | `visibility` JSON 与索引表不一致，导致该见的看不到或隐藏知识泄露 | KnowledgeStore / StateCommitter 同事务维护索引；提供从 JSON 全量重建并比对的校验 |
-| 可见性读取 L3 主观关系 | LLM 输出改变知识可见性，形成循环 | SocialAccessAtLeast 只读 L1 客观关系/授权等级，不读 relation_models |
+| 访问权限逻辑散落 | 多处不一致 | KnowledgeAccessResolver 是唯一入口；所有判断必须经它 |
+| 访问索引替代 Resolver | SQL 查询结果被当成最终访问权限，绕过 GodOnly / apparent / self_belief 规则 | `known_by` / `scope` 派生索引只做候选预筛；所有候选必须再经 KnowledgeAccessResolver |
+| 访问派生索引漂移 | `access_policy` JSON 与索引表不一致，导致该读的读不到或隐藏知识泄露 | KnowledgeStore / StateCommitter 同事务维护索引；提供从 JSON 全量重建并比对的校验 |
+| 访问权限读取 L3 主观关系 | LLM 输出改变知识访问权限，形成循环 | SocialAccessAtLeast 只读 L1 客观关系/授权等级，不读 relation_models |
 | Subject self-belief 被外部读 | 暴露真相 | `KnowledgeEntry.content` 与 `self_belief` 在类型层面分离；访问 API 强制经过 awareness 检查 |
-| Knowledge 揭示无追溯 | 不知何时谁知道了什么 | 所有可见性变更必须经 KnowledgeRevealEvent；持久化到独立表，包含 scope_change |
+| Knowledge 揭示无追溯 | 不知何时谁知道了什么 | 所有访问权限变更必须经 KnowledgeRevealEvent；持久化到独立表，包含 scope_change |
 | Belief 与 RelationModel 重复 | 同一命题两处存储 | 文档约定 + lint 规则：关于人的命题写 RelationModel，关于事件/世界的写 BeliefState |
 
 ### 1.3 数据 schema 与持久化
@@ -111,32 +111,35 @@
 - [ ] 导入 SillyTavern 角色卡 V3。
 - [ ] 世界书词条完整触发（含正则 / 概率 / 时间）。
 - [ ] 预设正确应用。
+- [ ] Regex 脚本按 global -> preset -> scoped 顺序运行，且 `markdownOnly` / `promptOnly` 不写回聊天 JSON。
+- [ ] 角色卡和预设内嵌 Regex 未获允许前不运行，允许状态按 avatar / preset name 正确持久化。
+- [ ] Regex 导入导出、移动作用域、Regex Preset 应用后启用状态与顺序保持 ST 兼容。
 
 ### 阶段三-六：Agent 模式（参考 `D:\Projects\RST-flutter\docs\rp_agent_filtering_example.md`）
 
-#### 感官与可见性
+#### 感官与访问权限
 
-- [ ] 失明角色 `visible_entities` 为空。
+- [ ] 失明角色 `observable_entities` 为空。
 - [ ] 狐狸精能闻到细微血腥味，普通人闻不到。
 - [ ] 凡人无法清晰感知修士气息。
 
-#### 知识可见性体系
+#### Knowledge 访问权限体系
 
 - [ ] **私密 Knowledge 仅 known_by 中的角色能访问。**
-- [ ] **`knowledge_visibility_known_by` 只作为候选索引**；删除索引命中后的 Resolver 调用会导致测试失败。
-- [ ] **`knowledge_visibility_scopes` + `character_scope_memberships` 能预筛 scope 候选**，但最终 accessible_knowledge 与 VisibilityResolver 全量扫描结果一致。
+- [ ] **`knowledge_access_known_by` 只作为候选索引**；删除索引命中后的 Resolver 调用会导致测试失败。
+- [ ] **`knowledge_access_scopes` + `character_scope_memberships` 能预筛 scope 候选**，但最终 accessible_knowledge 与 KnowledgeAccessResolver 全量扫描结果一致。
 - [ ] **GodOnly 知识不出现在任何角色的 accessible_knowledge 中。**
-- [ ] **GodOnly 即使存在于派生索引候选中，也会被 VisibilityResolver hard deny。**
+- [ ] **GodOnly 即使存在于派生索引候选中，也会被 KnowledgeAccessResolver hard deny。**
 - [ ] **GodOnly 启用态下 known_by 必须为空；若故事揭示，KnowledgeRevealEvent 必须先解除 GodOnly 再追加知情者。**
 - [ ] **subject_awareness=Unaware 时，subject 自我描述只能引用 self_belief**（如被封印记忆的狐狸精仍自称人类）。
-- [ ] **观察者通过 apparent_content 看到的伪装信息与 content 真相一致地分流**（伪装方与揭穿方分别得到不同 visible_content）。
-- [ ] **scope:faction:玄天宗 的 KnowledgeEntry 仅对该势力成员可见。**
+- [ ] **观察者通过 apparent_content 看到的伪装信息与 content 真相一致地分流**（伪装方与揭穿方分别得到不同 accessible_content）。
+- [ ] **scope:faction:玄天宗 的 KnowledgeEntry 仅对该势力成员可访问。**
 - [ ] **同场景观察可获得他人 Appearance facet，但获取不到 TrueName facet**（无关系阈值）。
-- [ ] **KnowledgeRevealEvent 触发后**，被揭示者的下一回合输入包含新可见 Knowledge。
+- [ ] **KnowledgeRevealEvent 触发后**，被揭示者的下一回合输入包含新可访问 Knowledge。
 - [ ] **GodOnly 揭示事件持久化 scope_change**，回滚后 scope 与 known_by 恢复到揭示前状态。
-- [ ] **KnowledgeEntry.visibility JSON 与派生索引全量重建结果一致**；不一致时报告存储一致性错误。
-- [ ] **SocialAccessAtLeast 只读取 L1 客观关系/授权等级**，L3 `relation_models` 改变不会影响 Knowledge 可见性。
-- [ ] **CustomPredicate 可见性条件只能使用结构化 VisibilityExpression AST，不接受自然语言表达式。**
+- [ ] **KnowledgeEntry.access_policy JSON 与派生索引全量重建结果一致**；不一致时报告存储一致性错误。
+- [ ] **SocialAccessAtLeast 只读取 L1 客观关系/授权等级**，L3 `relation_models` 改变不会影响 Knowledge 访问权限。
+- [ ] **CustomPredicate 访问条件只能使用结构化 AccessExpression AST，不接受自然语言表达式。**
 
 #### 状态与运行时
 
@@ -144,7 +147,7 @@
 - [ ] SceneStateExtractor 第一版不会读取隐藏 Knowledge / GodOnly；若请求使用这些信息，权限域检查失败。
 - [ ] 受伤状态跨回合保持。
 - [ ] `temporary_body_state` 存储在 Layer 1，并只能通过 `EmbodimentState` 派生进入 CognitivePass。
-- [ ] CharacterCognitivePass 输入只含 L2 + prior L3，不含 Layer 1 原始 SceneEvent；本回合事件使用 `VisibleEventDelta`。
+- [ ] CharacterCognitivePass 输入只含 L2 + prior L3，不含 Layer 1 原始 SceneEvent；本回合事件使用 `ObservableEventDelta`。
 - [ ] PromptBuilder 为四类 Agent LLM 节点生成固定消息布局：system 静态契约、developer/task 指令、user 单个 `{ input }` JSON；Trace 记录 prompt_template_id/version/hash。
 - [ ] 静态节点提示词不包含世界事实、角色秘密、Knowledge 内容或日志摘要；动态输入必须匹配对应 `*Input` schema。
 - [ ] 多个 active + dirty 角色的 CognitivePass 可以并行执行；并行阶段不写 Layer 1 / Layer 3 / Knowledge。
@@ -155,9 +158,9 @@
 - [ ] `BodyReactionDelta` 不直接写入 Layer 1；只有合法 `CharacterBodyDelta` 能修改 `temporary_body_state`。
 - [ ] A 攻击 B 时，B 与满足资格的伙伴/守护者会进入同一个 `ReactionWindow`，各自最多提交一个 `ReactionIntent`。
 - [ ] B 的 `ReactionIntent` 为反击时，默认不会为 A 再打开普通 ReactionWindow；只有显式 interrupt 契约且未超过 `max_reaction_depth` 时才允许第二层。
-- [ ] 不可见威胁、距离/通道不满足、资源或冷却不足的角色不会出现在 `eligible_reactors`。
+- [ ] 不可观察威胁、距离/通道不满足、资源或冷却不足的角色不会出现在 `eligible_reactors`。
 - [ ] Tier A/B 角色 `knowledge_revealed` 会触发 CognitivePass；离场角色只记录 pending knowledge，入场或被硬触发时消费。
-- [ ] `CharacterFocused` 叙事只能引用该角色可见事实；`ObjectiveCamera` 叙事不能进入任何角色内心；`DirectorView` 默认仍剔除 GodOnly。
+- [ ] `CharacterFocused` 叙事只能引用该角色可观察或可访问事实；`ObjectiveCamera` 叙事不能进入任何角色内心；`DirectorView` 默认仍剔除 GodOnly。
 - [ ] Dirty Flags 正确过滤无变化角色。
 - [ ] Primary cognitive pass 控制在每场景 0-2 次；reaction pass 只对 eligible reactors 执行，并受每窗口/每角色/深度预算限制。
 - [ ] SQLite 使用 WAL + 读连接池 + 单写提交；等待远程 LLM 时没有打开写事务。
@@ -173,6 +176,7 @@
 - [ ] 每条 Agent LLM 调用日志都记录实际 `api_config_id`、provider、model。
 - [ ] 流式输出保存原始 chunk 顺序，并生成 `assembled_text` / `readable_text`。
 - [ ] API Key、Authorization header、Provider secret、代理认证不会进入 SQLite。
+- [ ] API 适配改动覆盖一等目标：OpenAI Responses、OpenAI Chat Completions、Google Gemini、Anthropic、DeepSeek、Claude Code Interface；请求字段、流式解析、结构化输出、错误响应与日志脱敏均有对应行为。
 - [ ] CognitivePass schema 失败、程序修复、OutcomePlanner 兜底都有 Trace 与异常事件。
 - [ ] Agent 回滚后世界状态回退，运行 Logs 保留为审计记录。
 - [ ] 全局 Logs 超过 1GB 后后台清理旧运行日志。

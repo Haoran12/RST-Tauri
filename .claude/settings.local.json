@@ -10,7 +10,9 @@
       "WebFetch(domain:www.volcengine.com)",
       "WebFetch(domain:cloud.tencent.com)",
       "WebFetch(domain:api-docs.deepseek.com)",
-      "WebFetch(domain:docs.anthropic.com)"
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:platform.openai.com)",
+      "WebFetch(domain:ai.google.dev)"
     ]
   }
 }

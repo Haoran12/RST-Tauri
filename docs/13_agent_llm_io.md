@@ -66,7 +66,7 @@ pub struct AgentPromptBundle<TInput> {
 4. 结构化节点只输出符合 schema 的 JSON；不得输出 Markdown、解释性前后缀或额外字段。
 5. `llm_readable` 文本只用于解释、叙述或 trace；不得把它当作程序规则、检索键或数值依据。
 6. 若信息不足，选择保守输出：保留不确定性、降低置信度、给出候选/歧义，而不是补写新事实。
-7. 受限角色节点可以误判、偏见和不完整，但误判必须来自其可见输入与 prior L3，不能来自隐藏真相。
+7. 受限角色节点可以误判、偏见和不完整，但误判必须来自其可观察输入 / 可访问 Knowledge 与 prior L3，不能来自隐藏真相。
 8. 不从 raw 物理量或 raw 灵力值自行推导后果；只能使用程序提供的 tier / effect_hints / constraints。
 
 ### 0.2 SceneStateExtractor 提示词契约
@@ -84,7 +84,7 @@ pub struct AgentPromptBundle<TInput> {
 
 ### 0.3 CharacterCognitivePass 提示词契约
 
-节点身份：单个角色的受限主观认知与意图生成器。任务是根据该角色本回合 L2 可见世界、具身状态、可见知识和 prior L3，更新主观感知、信念倾向、情绪与意图。
+节点身份：单个角色的受限主观认知与意图生成器。任务是根据该角色本回合 L2 可观察世界、具身状态、可访问 Knowledge 和 prior L3，更新主观感知、信念倾向、情绪与意图。
 
 静态提示词必须强调：
 
@@ -111,7 +111,7 @@ Reaction pass 复用受限角色视角，但静态提示词必须额外强调：
 - 必须区分硬状态变化、软效果和被阻止效果。无法被技能契约或程序边界支持的内容进入 `blocked_effects` 或 `soft_effects`。
 - 不直接写入角色内心相信、接受、记恨；这些应成为外显事件或下一轮 CognitivePass 输入。
 - 反应窗口必须一次性结算；不得在结果规划中自由开启无限新窗口。
-- `visible_facts` 必须是 SurfaceRealizer 可叙述事实白名单，不能直接暴露 GodOnly 或超出 `NarrationScope` 的事实。
+- `narratable_facts` 必须是 SurfaceRealizer 可叙述事实白名单，不能直接暴露 GodOnly 或超出 `NarrationScope` 的事实。
 - 数值、资源、位置、伤势、冷却等硬效果必须能对应到输入中的技能契约、物理公式或已有状态。
 
 ### 0.5 SurfaceRealizer 提示词契约
@@ -121,8 +121,8 @@ Reaction pass 复用受限角色视角，但静态提示词必须额外强调：
 静态提示词必须强调：
 
 - 只叙述 `SurfaceRealizerInput` 中提供的场景视图、角色输出、OutcomePlan、StyleConstraints。
-- 不引入新事实；具体位置、伤势、资源、身份揭露、技能命中等必须来自 `outcome_plan.visible_facts` 或已通过校验的结果。
-- 严格遵守 `NarrationScope`：角色聚焦视角不能写该角色不可见的事实，客观镜头不能进入内心，DirectorView 默认仍不暴露 GodOnly。
+- 不引入新事实；具体位置、伤势、资源、身份揭露、技能命中等必须来自 `outcome_plan.narratable_facts` 或已通过校验的结果。
+- 严格遵守 `NarrationScope`：角色聚焦视角不能写该角色不可观察或不可访问的事实，客观镜头不能进入内心，DirectorView 默认仍不暴露 GodOnly。
 - 可以润色节奏、气氛、动作和对话，但不能改变已发生事件的因果。
 - `blocked_effects` 可以叙述为尝试失败、被抵消或未能奏效；不得把 blocked 的硬效果写成已经发生。
 - 输出是面向用户的自由文本，不包含 JSON、调试字段或 schema 说明。
@@ -139,21 +139,21 @@ pub struct CharacterCognitivePassInput {
     // Layer 2（每回合派生）
     pub filtered_scene_view: FilteredSceneView,
     pub embodiment_state: EmbodimentState,
-    pub accessible_knowledge: AccessibleKnowledge,    // 含世界/势力/他人 facet/历史 memory，全部经可见性过滤
+    pub accessible_knowledge: AccessibleKnowledge,    // 含世界/势力/他人 facet/历史 memory，全部经访问控制过滤
 
     // Layer 3（角色当前心智，作为先验）
     pub prior_subjective_state: CharacterSubjectiveState,
 
-    // 本回合事件 delta（程序过滤后的角色可见事件；不得使用 Layer 1 原始 SceneEvent）
-    pub recent_event_delta: Vec<VisibleEventDelta>,
+    // 本回合事件 delta（程序过滤后的角色可观察事件；不得使用 Layer 1 原始 SceneEvent）
+    pub recent_event_delta: Vec<ObservableEventDelta>,
 }
 
-pub struct VisibleEventDelta {
+pub struct ObservableEventDelta {
     pub event_id: String,
     pub scene_turn_id: String,
     pub event_kind: String,                         // semantic
-    pub involved_visible_entities: Vec<String>,     // semantic: entity_id list
-    pub visible_effects: serde_json::Value,         // semantic: 结构化后果
+    pub involved_observable_entities: Vec<String>,     // semantic: entity_id list
+    pub observable_effects: serde_json::Value,         // semantic: 结构化后果
     pub sensory_descriptors: Vec<String>,           // llm_readable: 角色可感知的声音/气味/光影等描述
     pub source_hint: AccessSource,                  // semantic / trace
 }
@@ -283,7 +283,7 @@ pub struct StyleConstraints {
     pub detail_level: DetailLevel,         // sparse / moderate / rich
     pub atmosphere: Atmosphere,            // tense / serene / ominous / melancholic / ...
     pub pacing: Pacing,                    // fast / measured / slow
-    pub pov: PointOfView,                  // omniscient / character_focused(id) / objective；不得覆盖 narration_scope 的可见性上限
+    pub pov: PointOfView,                  // omniscient / character_focused(id) / objective；不得覆盖 narration_scope 的叙事披露上限
 
     /// 自由文本字段：作者用自然语言书写的约束、参考文风、禁忌事项等。
     /// 仅供 LLM 阅读，不参与程序逻辑。
@@ -325,7 +325,7 @@ pub struct OutcomePlannerOutput {
 pub struct OutcomePlan {
     pub outward_actions: Vec<OutwardAction>,          // semantic: 已发生/尝试发生的外显行动
     pub resulting_state_changes: serde_json::Value,   // semantic: 候选硬变化摘要，真实提交以 StateUpdatePlan 为准
-    pub visible_facts: Vec<String>,                   // semantic: 按 NarrationScope 派生的叙事事实白名单
+    pub narratable_facts: Vec<String>,                   // semantic: 按 NarrationScope 派生的叙事事实白名单
     pub soft_effects: Vec<SoftEffect>,                // llm_readable: 可叙述但不写 L1
     pub blocked_effects: Vec<BlockedEffect>,          // semantic + trace: 被程序边界阻止的效果
 }
@@ -375,7 +375,7 @@ pub struct ReactionWindow {
     pub source_action_id: String,
     pub threat_source_id: String,
     pub primary_targets: Vec<String>,
-    pub observable_threat: VisibleEventDelta,
+    pub observable_threat: ObservableEventDelta,
     pub eligible_reactors: Vec<ReactionEligibility>,
     pub max_reaction_depth: u8,                 // 默认 1；只有 interrupt 契约可显式提高到 2
     pub no_reaction_to_reaction: bool,          // 默认 true
@@ -425,12 +425,12 @@ pub struct ReactionPassInput {
 2. `ReactionIntent` 只表达"打算如何反应"，不立即产生新的 `OutwardAction` 或 `StateUpdatePlan`；反应造成的反击、格挡、援护统一进入 OutcomePlanner 的一次性结算。
 3. 默认 `no_reaction_to_reaction = true`。B 的反击不再为 A 打开新的普通反应窗口；只有 SkillEffectContract 明确声明 interrupt/反制反击，且深度未超过上限时才允许进入第二层。
 4. 每个角色在同一窗口默认最多提交一个 `ReactionIntent`；未提交或 LLM 失败时，OutcomePlanner 可按 `passive`/默认防御策略兜底，但必须写 trace。
-5. 旁观者或伙伴能否反应取决于 `observable_threat` 对该角色是否可见，以及其 `ReactionOption` 是否覆盖目标、距离、通道和资源；"站在场上"本身不构成反应资格。
+5. 旁观者或伙伴能否反应取决于 `observable_threat` 对该角色是否可观察，以及其 `ReactionOption` 是否覆盖目标、距离、通道和资源；"站在场上"本身不构成反应资格。
 
 硬约束：
 
-- `OutcomePlanner` 可读 L1 / GodOnly 用于判断，但 `outcome_plan.visible_facts` 必须按 `NarrationScope` 派生，不能把 GodOnly 直接给叙事层。
-- `StateUpdatePlan` 中的数值、资源、位置、伤势、可见性变更必须能被程序公式、技能契约或 Validator 校验；校验失败时不反复调用 LLM，非法硬效果进入 `blocked_effects` 或降级为 `soft_effects`，不得写入 L1。
+- `OutcomePlanner` 可读 L1 / GodOnly 用于判断，但 `outcome_plan.narratable_facts` 必须按 `NarrationScope` 派生，不能把 GodOnly 直接给叙事层。
+- `StateUpdatePlan` 中的数值、资源、位置、伤势、访问权限变更必须能被程序公式、技能契约或 Validator 校验；校验失败时不反复调用 LLM，非法硬效果进入 `blocked_effects` 或降级为 `soft_effects`，不得写入 L1。
 - `BodyReactionDelta` 只作为候选身体反应；如需改变 `temporary_body_state`，必须由 OutcomePlanner/EffectValidator 转成合法 `CharacterBodyDelta` 后经 StateCommitter 提交。
 - 角色是否"相信 / 接受 / 记恨"不由 OutcomePlanner 直接写入 L3，除非它来自该角色本回合 `CharacterCognitivePassOutput`；否则作为外显事件进入下一轮认知输入。
 - OutcomePlanner 必须把 `reaction_windows` 中的原行动与 `reaction_intents` 一起结算；禁止在结算中再自由打开无限新窗口。
@@ -445,7 +445,7 @@ pub struct ReactionPassInput {
 pub struct SurfaceRealizerInput {
     pub scene_turn_id: String,
 
-    /// 0. 叙事可见性边界：决定 SceneNarrativeView 与 visible_facts 的生成范围。
+    /// 0. 叙事披露边界：决定 SceneNarrativeView 与 narratable_facts 的生成范围。
     pub narration_scope: NarrationScope,
 
     /// 1. 情景提取结果：本回合场景的客观状态视图（叙事层视角下的"舞台"）。
@@ -473,8 +473,8 @@ pub enum NarrationScope {
 }
 ```
 
-`SceneNarrativeView` 是 SceneModel 按 `narration_scope` 派生的叙事视图：`CharacterFocused` 只能使用该角色的 Layer 2 可见事实；`ObjectiveCamera` 只能使用外显事实；`DirectorView` 可使用编排器可见事实但默认仍剔除 `GodOnly`。
-`OutcomePlan` 包含：每个角色的 outward_action（已发生的事）、resulting_state_changes（伤势/位置/资源等候选硬变化）、visible_facts（按 `narration_scope` 生成的叙事事实白名单）、soft_effects 与 blocked_effects。SurfaceRealizer 可以叙述软效果和受阻结果，但 NarrativeFactCheck 与 StateCommitter 只承认已通过程序校验的硬变化。
+`SceneNarrativeView` 是 SceneModel 按 `narration_scope` 派生的叙事视图：`CharacterFocused` 只能使用该角色的 Layer 2 可观察事实与可访问 Knowledge；`ObjectiveCamera` 只能使用外显事实；`DirectorView` 可使用编排器可访问事实但默认仍剔除 `GodOnly`。
+`OutcomePlan` 包含：每个角色的 outward_action（已发生的事）、resulting_state_changes（伤势/位置/资源等候选硬变化）、narratable_facts（按 `narration_scope` 生成的叙事事实白名单）、soft_effects 与 blocked_effects。SurfaceRealizer 可以叙述软效果和受阻结果，但 NarrativeFactCheck 与 StateCommitter 只承认已通过程序校验的硬变化。
 
 ---
 
@@ -491,7 +491,7 @@ pub struct DirtyFlags {
     pub under_threat: bool,
     pub reaction_window_open: bool,
     pub received_new_salient_signal: bool,
-    pub knowledge_revealed: bool,    // 本回合获得了新可见知识
+    pub knowledge_revealed: bool,    // 本回合获得了新可访问 Knowledge
 }
 ```
 
