@@ -52,7 +52,8 @@ pub struct LogContext {
     pub scene_turn_id: Option<String>,
     pub character_id: Option<String>,
     pub trace_id: Option<String>,
-    pub llm_node: LlmNode,             // STChat / SceneStateExtractor / CharacterCognitivePass / ArbitrationFallback / SurfaceRealizer
+    pub llm_node: LlmNode,             // STChat / SceneStateExtractor / CharacterCognitivePass / OutcomePlanner / SurfaceRealizer
+    pub api_config_id: String,
     pub request_id: String,
 }
 ```
@@ -84,13 +85,47 @@ Wrapper 的后置条件：
 
 ## 2. Agent 模式各 LLM 节点对应的调用类型
 
-| LLM 节点 | 调用类型 | 输出 schema |
+| LLM 节点 | 调用类型 | 输出 schema | 权限类型 |
 |---|---|---|
-| SceneStateExtractor | `chat_structured` | UserInputDelta |
-| CharacterCognitivePass | `chat_structured` | CharacterCognitivePassOutput |
-| Arbitration 兜底 | `chat_structured` | IntentPlan |
-| SurfaceRealizer | `chat` 或 `chat_stream` | 自由文本叙事 |
+| SceneStateExtractor | `chat_structured` | SceneStateExtractorOutput | 场景域 God-read；默认不读隐藏 Knowledge / GodOnly |
+| CharacterCognitivePass | `chat_structured` | CharacterCognitivePassOutput | 受限：只读 L2 + prior L3 |
+| OutcomePlanner | `chat_structured` | OutcomePlannerOutput | God-read；输出候选结果与候选状态更新，不能直接提交 |
+| SurfaceRealizer | `chat` 或 `chat_stream` | 自由文本叙事 | 受限：只读 NarrationScope 派生输入 |
 
 SillyTavern 模式仅使用 `chat` / `chat_stream`，不依赖 `chat_structured`。
 
 ST 模式的 LLM 调用只写全局 `./data/logs/app_logs.sqlite`。Agent 模式的 LLM 调用写入对应 World 的 `world.sqlite`，并通过 `scene_turn_id` / `trace_id` / `request_id` 与 Agent Trace 关联。
+
+## 3. Agent LLM 节点 API 配置绑定
+
+第一版复用 ST 模式的 API 配置池（`./data/api_configs/`）。用户可以为四类 Agent LLM 节点分别选择不同的 API 配置；未显式配置的节点继承全局默认 Agent 配置。
+
+```rust
+pub enum AgentLlmNode {
+    SceneStateExtractor,
+    CharacterCognitivePass,
+    OutcomePlanner,
+    SurfaceRealizer,
+}
+
+pub struct AgentLlmConfigBinding {
+    pub node: AgentLlmNode,
+    pub api_config_id: String,      // 指向 ST/API 配置池中的配置
+    pub enabled: bool,
+}
+
+pub struct AgentLlmProfile {
+    pub profile_id: String,
+    pub name: String,
+    pub default_api_config_id: String,
+    pub bindings: Vec<AgentLlmConfigBinding>,
+}
+```
+
+约束：
+
+- API 配置只定义 Provider、model、base URL、鉴权、采样参数、超时、代理等调用参数；不得改变节点权限。
+- 节点权限由 `AgentLlmNode` 决定，不能因为用户选择了更强模型而提升可见性。
+- `chat_structured` 节点必须校验所选 API 配置支持结构化输出；不支持时只允许走文档定义的 JSON 降级路径。
+- 每次调用必须把 `api_config_id`、provider、model 写入 `llm_call_logs`，便于回放与问题定位。
+- World 可以保存自己的 `AgentLlmProfile` 引用或覆盖项；删除 API 配置前必须检查是否被 Agent profile / World 引用。

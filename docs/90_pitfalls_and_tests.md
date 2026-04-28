@@ -14,13 +14,20 @@
 | 坑点 | 风险 | 应对策略 |
 |---|---|---|
 | 模型输出非结构化 | 解析失败 | structured output / tool schema + 重试 + schema 验证 |
-| LLM 输出不符合 schema | 解析失败 / 主循环中断 | 优先使用 Provider structured output / tool schema；JSON mode 仅作降级，并必须配合 schema 校验 + 重试 + 程序容错修复 + 仲裁层 LLM 兜底 |
+| LLM 输出不符合 schema | 解析失败 / 主循环中断 | 优先使用 Provider structured output / tool schema；JSON mode 仅作降级，并必须配合 schema 校验 + 重试 + 程序容错修复；必要时由 OutcomePlanner 兜底 |
 | LLM 数值不稳定 | belief/emotion 数值跳变 | LLM 输出离散级别（ConfidenceShift），程序映射为数值 |
 | Prompt 漂移 | 模型行为变化 | 固定 prompt 版本 + A/B 测试 + 监控 |
+| 不同 Agent 节点误用同一 API 配置 | 结构化节点用到不支持 schema 的模型，或叙事节点误用低质量便宜模型 | AgentLlmProfile 按节点绑定 API 配置；调用前校验结构化能力；日志记录 api_config_id |
 | 中间数据混入可判定自由文本 | 屎山起点；规则匹配失效 | 数据形态铁律 + 类型隔离；允许 `summary_text` / `effect_hints` 等 LLM-readable 文本叶子字段，但禁止参与程序判断 |
 | SurfaceRealizer 私自添加事实 | 误导用户 / 后续状态不一致 | NarrativeFactCheck 强制扫描；visible_facts 白名单约束 |
 | 叙事 POV 泄露隐藏事实 | 角色聚焦叙事写出该角色不可知信息 | `NarrationScope` 先决定 `SceneNarrativeView` 与 `visible_facts`，StyleConstraints.pov 不得提升可见性 |
-| 仲裁层 LLM 兜底范围扩大 | 演变成"什么都让 LLM 仲裁" | 仲裁层 LLM 仅在认知输出失败时启用；物理判定永远走程序 |
+| OutcomePlanner 权限过宽 | God-read 编排节点演变成直接写状态或绕过校验 | God-read 不等于提交权限；输出 StateUpdatePlan 后必须由 EffectValidator + StateCommitter 校验提交 |
+| OutcomePlanner 反复修复导致成本失控 | 单回合延迟和费用不可控 | 每回合默认最多 1 次 OutcomePlanner；校验失败时裁剪非法硬效果为 blocked_effects / soft_effects，不二次调用修复 |
+| 技能 notes 驱动硬状态 | LLM 根据自然语言即兴改伤势/位置/资源 | SkillEffectContract 定义允许状态域、目标、成本、强度和揭示权限；EffectValidator 只提交契约内硬变化 |
+| BodyReactionDelta 直写 L1 | 角色认知 LLM 绕过状态提交路径 | BodyReactionDelta 只作为候选反应；必须转成合法 CharacterBodyDelta 后经 StateCommitter 写入 |
+| 反应事件递归 | A 攻击 B，B 反击又触发 A 反应，形成无限循环 | ReactionWindow 只收集 ReactionIntent；默认 no_reaction_to_reaction + one_reaction_per_character_per_window；interrupt 必须有显式深度上限 |
+| 伙伴援护缺失或越权 | B 被攻击时伙伴不能救，或不可见角色凭空救场 | eligible_reactors 由程序按可见性、关系/姿态、距离、通道、资源与 SkillEffectContract 判定；LLM 只能在合法 ReactionOption 中选择 |
+| SceneStateExtractor 权限不清 | 用户一句话触发隐藏 Knowledge 泄露或改写私密设定 | 第一版只读当前 SceneModel + 世界级约束；隐藏 Knowledge / GodOnly 默认不可读，作者编辑模式另行设计 |
 | 用户输入 LLM 解析失败 | 用户操作丢失 | 显示原始输入 + 提示重写；保留 raw_text 供 trace |
 
 ### 1.2 全知与可见性
@@ -28,10 +35,11 @@
 | 坑点 | 风险 | 应对策略 |
 |---|---|---|
 | 全知泄露难检测 | 行为不符设定 | 输入过滤 + 输出验证 + 访问日志审计 |
-| Layer 1 泄露至 LLM | 全知 / 屎山起点 | InputAssembly 类型隔离（仅接受 Layer 2 类型）+ 单元测试断言 |
+| Layer 1 泄露至受限 LLM | 全知 / 屎山起点 | InputAssembly 类型隔离（仅接受 Layer 2 类型）+ 单元测试断言；God-read 节点必须显式记录权限域 |
 | 可见性逻辑散落 | 多处不一致 | VisibilityResolver 是唯一入口；所有判断必须经它 |
+| 可见性读取 L3 主观关系 | LLM 输出改变知识可见性，形成循环 | SocialAccessAtLeast 只读 L1 客观关系/授权等级，不读 relation_models |
 | Subject self-belief 被外部读 | 暴露真相 | `KnowledgeEntry.content` 与 `self_belief` 在类型层面分离；访问 API 强制经过 awareness 检查 |
-| Knowledge 揭示无追溯 | 不知何时谁知道了什么 | 所有可见性变更必须经 KnowledgeRevealEvent；持久化到独立表 |
+| Knowledge 揭示无追溯 | 不知何时谁知道了什么 | 所有可见性变更必须经 KnowledgeRevealEvent；持久化到独立表，包含 scope_change |
 | Belief 与 RelationModel 重复 | 同一命题两处存储 | 文档约定 + lint 规则：关于人的命题写 RelationModel，关于事件/世界的写 BeliefState |
 
 ### 1.3 数据 schema 与持久化
@@ -49,13 +57,13 @@
 |---|---|---|
 | LLM 误读物理量数值 | 50m/s 当成微风、-30℃ 当成凉爽 | 程序在 EmbodimentResolver/SceneFilter 把 raw → tier + effect_hints；FilteredSceneView 不暴露 raw 值给 CognitivePass |
 | 物种舒适带未校准 | 同样温度对不同种族应不同感受 | BaselineBodyProfile 含 comfort_temperature_range；档位是相对该范围偏离量计算 |
-| 环境压力跨回合丢失 | 长期暴露不发生冻伤 | EnvironmentalStrain.cold_strain/heat_strain/respiration_strain 在 EmbodimentResolver 累加，仲裁层到阈值生成伤势事件 |
+| 环境压力跨回合丢失 | 长期暴露不发生冻伤 | EnvironmentalStrain.cold_strain/heat_strain/respiration_strain 在 EmbodimentResolver 累加，到阈值后经 OutcomePlanner 候选 + EffectValidator 生成伤势事件 |
 | L1 物理子字段不自洽 | 暴雨却地面不湿、沙暴但能见度 100m | SceneStateExtractor prompt 模板强制一并填齐；额外 ConsistencyRule 检查（暴雨时 wetness>=阈值，沙暴时 dust_density>=阈值） |
 | 档位阈值在两侧不一致 | body 已 Storm 但 perception 仍 Strong | 阈值表集中常量化（一份表两侧共享）；改阈值需同时跑两侧单元测试 |
 | LLM 误读灵力数值 | 8800 当成"高了点"、Δ=3000 当作"略胜" | SceneFilter 把 mana_power → ManaPotencyTier + ManaPerceptionDelta；FilteredSceneView 不暴露 raw 数值给 CognitivePass |
 | 凡人感知修士细节 | T0 观察者却给出 attribute / 具体档位 | 规则 5/6: T0 灵觉为 0 时 mana_signals 为空; T0 仅能感知 effective ≥ 1000 为"超出常理"，无具体档位 |
 | 隐匿气息被识破或装太死 | 一律识破 / 一律不识破 | concealment_suspected 由 (observer.effective vs target.effective − 200) + 灵觉敏锐度公式定 |
-| 仲裁层与感知层用同一 mana_power | 压制就直接弱化对方仲裁 | 仲裁读 effective（不含压制），感知读 displayed（含压制）；两层显式分离 |
+| 对抗解算与感知层用同一 mana_power | 压制就直接弱化实际对抗 | 对抗解算读 effective（不含压制），感知读 displayed（含压制）；两层显式分离 |
 | 大佬硬吃小弟 | 完全无视技巧/状态导致碾压式叙事 | 加算修正区 × soul_factor 可制造以弱胜强；以毒/偷袭/算计实现而非抹平 mana_power |
 | 不同世界灵力数值无法兼容 | 某些世界无修真 / 数值范围迥异 | ManaPotencyTier 边界与 Δ 桶阈值存于 world_base.yaml; 不同世界各自一份阈值表; 角色卡解析与档位翻译共用 |
 | 灵觉过载处理 | 高灵气环境失真 | 过载阈值 + 感知降级 + 验证 |
@@ -110,25 +118,41 @@
 - [ ] **scope:faction:玄天宗 的 KnowledgeEntry 仅对该势力成员可见。**
 - [ ] **同场景观察可获得他人 Appearance facet，但获取不到 TrueName facet**（无关系阈值）。
 - [ ] **KnowledgeRevealEvent 触发后**，被揭示者的下一回合输入包含新可见 Knowledge。
+- [ ] **GodOnly 揭示事件持久化 scope_change**，回滚后 scope 与 known_by 恢复到揭示前状态。
+- [ ] **SocialAccessAtLeast 只读取 L1 客观关系/授权等级**，L3 `relation_models` 改变不会影响 Knowledge 可见性。
 - [ ] **CustomPredicate 可见性条件只能使用结构化 VisibilityExpression AST，不接受自然语言表达式。**
 
 #### 状态与运行时
 
+- [ ] SceneStateExtractor 输入包含最近自由文本与当前结构化 Scene JSON，输出 `SceneStateExtractorOutput`，不直接提交 Layer 1。
+- [ ] SceneStateExtractor 第一版不会读取隐藏 Knowledge / GodOnly；若请求使用这些信息，权限域检查失败。
 - [ ] 受伤状态跨回合保持。
 - [ ] `temporary_body_state` 存储在 Layer 1，并只能通过 `EmbodimentState` 派生进入 CognitivePass。
+- [ ] CharacterCognitivePass 输入只含 L2 + prior L3，不含 Layer 1 原始 SceneEvent；本回合事件使用 `VisibleEventDelta`。
+- [ ] OutcomePlanner 可 God-read，但输出必须是 `OutcomePlannerOutput` / `StateUpdatePlan`，并在 StateCommitter 前通过 EffectValidator 硬约束校验。
+- [ ] OutcomePlanner 每回合默认最多调用一次；候选效果校验失败时不会反复调用 LLM 修复。
+- [ ] LLM 候选技能效果超出 SkillEffectContract 时，硬状态不提交，转入 `blocked_effects` 或 `soft_effects`。
+- [ ] `BodyReactionDelta` 不直接写入 Layer 1；只有合法 `CharacterBodyDelta` 能修改 `temporary_body_state`。
+- [ ] A 攻击 B 时，B 与满足资格的伙伴/守护者会进入同一个 `ReactionWindow`，各自最多提交一个 `ReactionIntent`。
+- [ ] B 的 `ReactionIntent` 为反击时，默认不会为 A 再打开普通 ReactionWindow；只有显式 interrupt 契约且未超过 `max_reaction_depth` 时才允许第二层。
+- [ ] 不可见威胁、距离/通道不满足、资源或冷却不足的角色不会出现在 `eligible_reactors`。
+- [ ] Tier A/B 角色 `knowledge_revealed` 会触发 CognitivePass；离场角色只记录 pending knowledge，入场或被硬触发时消费。
 - [ ] `CharacterFocused` 叙事只能引用该角色可见事实；`ObjectiveCamera` 叙事不能进入任何角色内心；`DirectorView` 默认仍剔除 GodOnly。
 - [ ] Dirty Flags 正确过滤无变化角色。
-- [ ] 调用预算控制在每场景 0-2 次。
+- [ ] Primary cognitive pass 控制在每场景 0-2 次；reaction pass 只对 eligible reactors 执行，并受每窗口/每角色/深度预算限制。
+- [ ] 四类 Agent LLM 节点可分别选择 `api_configs/` 中的不同配置；未配置节点继承默认 Agent 配置。
+- [ ] `chat_structured` 节点绑定到不支持结构化输出的配置时，按文档降级或报错，不静默绕过 schema 校验。
 
 #### 日志与 Trace
 
 - [ ] ST 模式 LLM 调用只写全局 `./data/logs/app_logs.sqlite`。
 - [ ] Agent 模式任意 `scene_turn_id` 能查到完整 `turn_traces` / `agent_step_traces`。
 - [ ] Agent Trace 能通过 `request_id` 跳转到对应 LLM request / response。
-- [ ] SceneStateExtractor / CognitivePass / ArbitrationFallback / SurfaceRealizer 的 request、response、schema、状态、耗时都被记录。
+- [ ] SceneStateExtractor / CognitivePass / OutcomePlanner / SurfaceRealizer 的 request、response、schema、状态、耗时都被记录。
+- [ ] 每条 Agent LLM 调用日志都记录实际 `api_config_id`、provider、model。
 - [ ] 流式输出保存原始 chunk 顺序，并生成 `assembled_text` / `readable_text`。
 - [ ] API Key、Authorization header、Provider secret、代理认证不会进入 SQLite。
-- [ ] CognitivePass schema 失败、程序修复、仲裁兜底都有 Trace 与异常事件。
+- [ ] CognitivePass schema 失败、程序修复、OutcomePlanner 兜底都有 Trace 与异常事件。
 - [ ] Agent 回滚后世界状态回退，运行 Logs 保留为审计记录。
 - [ ] 全局 Logs 超过 1GB 后后台清理旧运行日志。
 - [ ] 普通清理任务不会删除 Agent Trace 或仍被 `state_commit_records.trace_ids` 引用的记录。
@@ -136,4 +160,4 @@
 
 ### 阶段七：用户角色扮演
 
-- [ ] 用户能扮演特定角色并影响仲裁。
+- [ ] 用户能扮演特定角色并影响结果规划。

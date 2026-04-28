@@ -8,7 +8,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 ## 项目概述
 
 - **SillyTavern 模式**：复刻 SillyTavern 体验，支持角色卡 V3 + 世界书 + 预设 + API 配置，JSON 文件存储。详见 [02_st_mode.md](02_st_mode.md)。
-- **Agent 模式**：基于 RP Agent 架构的高级角色扮演系统，分层"客观世界 / 人物具身状态 / 主观认知与意图 / 仲裁与状态更新 / 叙事输出"，SQLite 存储。详见 [10_agent_data_and_simulation.md](10_agent_data_and_simulation.md) + [11_agent_runtime.md](11_agent_runtime.md)。
+- **Agent 模式**：基于 RP Agent 架构的高级角色扮演系统，分层"客观世界 / 人物具身状态 / 主观认知与意图 / 结果规划与状态更新 / 叙事输出"，SQLite 存储。详见 [10_agent_data_and_simulation.md](10_agent_data_and_simulation.md) + [11_agent_runtime.md](11_agent_runtime.md)。
 
 > **架构基础**：参考 `D:\Projects\RST-flutter\docs\rp_agent_*` 系列文档（成熟的角色扮演 Agent 架构），本项目在其基础上为 Tauri + Rust + Vue 3 技术栈做适配。
 
@@ -59,8 +59,9 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 6. CharacterSubjectiveState（Layer 3）。
 7. EmbodimentState / FilteredSceneView / AccessibleKnowledge（Layer 2 派生类型）。
 8. CognitivePass I/O 类型（含 ConfidenceShift / BodyReactionDelta）。
-9. UserInputDelta / StyleConstraints / SurfaceRealizerInput / ArbitrationResult。
+9. SceneStateExtractorOutput / UserInputDelta / StyleConstraints / OutcomePlannerOutput / SurfaceRealizerInput。
 10. Agent Trace / LLM Logs / app_event_logs 表结构。
+11. AgentLlmProfile / World Agent settings（四类 Agent LLM 节点独立绑定 API 配置）。
 
 ### 阶段四：Agent 模式 — 程序化核心
 
@@ -70,34 +71,36 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 4. EmbodimentResolver（含灵觉 + 环境档位翻译）。
 5. SceneFilter（含 visible_facets 计算 + WeatherPerception + ManaSignal）。
 6. InputAssembly（拒绝 Layer 1 原始对象）。
-7. ActionArbitration（仲裁层读 Layer 1 真相 + Mana Combat Resolution 公式）。
+7. PhysicsResolver / CombatMathResolver（Mana Combat Resolution 公式等）+ EffectValidator（技能契约与硬约束校验）。
 8. KnowledgeRevealEvent 处理。
 
 ### 阶段五：Agent 模式 — 认知与叙事层
 
 1. PromptBuilder（结构化 prompt + JSON schema 注入）。
-2. SceneStateExtractor（用户输入 → UserInputDelta，严格 schema）。
+2. SceneStateExtractor（最近自由文本 + 当前 Scene JSON → SceneStateExtractorOutput，严格 schema）。
 3. CharacterCognitivePass（融合调用，严格 schema 输出）。
 4. JSON 输出容错修复器（缺字段补默认 / 修复常见结构错误）。
-5. Arbitration LLM 兜底（认知输出修复失败时启用）。
+5. OutcomePlanner（结果规划与状态更新计划，God-read 但不直接提交）。
 6. SurfaceRealizer（叙事生成，受 visible_facts 约束）。
 7. AI Provider 的 chat_structured 实现（OpenAI/Anthropic/Gemini/Ollama/DeepSeek 各自的 structured output / tool schema / JSON 降级路径）。
 8. LLM 调用日志：request / response / schema / stream chunks / readable_text。
+9. Agent LLM 节点配置选择 UI：SceneStateExtractor / CharacterCognitivePass / OutcomePlanner / SurfaceRealizer 分别选择 API 配置。
 
 ### 阶段六：Agent 模式 — 验证与运行时
 
-1. 9 大验证规则（含 SelfAwareness / GodOnly / ApparentVsTrue / NarrativeFactCheck / SchemaConformance）。
+1. 10 大验证规则（含 SelfAwareness / GodOnly / ApparentVsTrue / ReactionWindow / NarrativeFactCheck / SchemaConformance）。
 2. AgentRuntime 主循环。
 3. Dirty Flags + Active Set。
 4. 角色 Tier 分级。
 5. 调用预算监控。
-6. Agent Trace 写入点：Active Set、Dirty Flags、Layer 2 派生、CognitivePass、验证、仲裁、提交。
+6. ReactionWindow 有界反应窗口：资格判定、ReactionIntent 收集、递归深度限制。
+7. Agent Trace 写入点：Active Set、Dirty Flags、Layer 2 派生、CognitivePass、ReactionWindow、验证、结果规划、提交。
 
 ### 阶段七：用户角色扮演
 
 1. 用户角色选择。
 2. 用户输入心理活动 / 言行。
-3. 用户对仲裁 / 文风的"导演"权（DirectorHint）。
+3. 用户对结果规划 / 文风的"导演"权（DirectorHint）。
 
 ### 阶段八：优化与扩展
 
@@ -129,7 +132,10 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 - `src-tauri/src/agent/cognitive/cognitive_pass.rs` — 融合调用。
 - `src-tauri/src/agent/simulation/scene_filter.rs` — 场景过滤（含 visible_facets）。
 - `src-tauri/src/agent/simulation/input_assembly.rs` — 拒绝 Layer 1 泄露。
-- `src-tauri/src/agent/simulation/arbitration.rs` — 仲裁层（直接读真相 + ManaCombatResolution）。
+- `src-tauri/src/agent/simulation/reaction_window.rs` — 有界反应窗口资格判定与 ReactionOption 派发。
+- `src-tauri/src/agent/simulation/physics_resolver.rs` — 物理与灵力数值骨架。
+- `src-tauri/src/agent/simulation/effect_validator.rs` — 技能契约与候选效果硬校验。
+- `src-tauri/src/agent/simulation/outcome_planner.rs` — OutcomePlanner LLM 编排候选结果。
 - `src-tauri/src/agent/validation/validator.rs` — 验证器入口。
 - `src-tauri/src/agent/models/knowledge.rs` — KnowledgeEntry 定义。
 - `src-tauri/src/agent/models/scene.rs` — 场景模型。
@@ -154,14 +160,16 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 | 主题 | 决策 | 理由 |
 |---|---|---|
 | 数据形态铁律 | 自由文本仅在三处出现：用户输入、SceneStateExtractor 输入、SurfaceRealizer 输出。其他全程结构化 JSON | 避免规则匹配失效与"屎山"起点 |
-| 三层数据语义 | Layer 1 (Truth) / Layer 2 (Per-Character Access) / Layer 3 (Subjective)，强制隔离 | LLM 永不接触 Layer 1 原始对象，杜绝全知泄露 |
+| 三层数据语义 | Layer 1 (Truth) / Layer 2 (Per-Character Access) / Layer 3 (Subjective)，强制隔离 | 受限 LLM 不接触 Layer 1 原始对象；God-read 节点只产出候选更新，防止全知泄露与直接写状态 |
 | 知识统一模型 | KnowledgeEntry 统一承载世界/势力/角色档案/记忆，按 visibility 谓词控制 | 单一可见性入口（VisibilityResolver），避免散落 |
 | 灵力档位 | 6 档（Mundane / Awakened / Adept / Master / Ascendant / Transcendent），边界对 `D:\AI\rp_cards\` 锚点校准 | 用档位识别身份，用数值差识别实力 |
-| 感知 vs 仲裁分离 | 感知用 `displayed_mana_power`（含压制），仲裁用 `effective_mana_power`（不含压制） | 压制是认知层欺骗手段，不影响真实对抗 |
-| 仲裁公式 | `combat_power = effective × max(0.1, 1 + Σ_modifiers) × soul_factor`，加算修正区 + 灵魂独立乘区 | 多因子加和可控，灵魂破损保留乘性凸显质变打击 |
-| 跨档差阈值 | 感知层 150 / 300 / 1000 / 2000；仲裁层共享 150 / 300 / 1000，1000+ 即 Crushing | 150 起感觉差距、1000+ 基本无力应对，2000+ 进入无法测度的体感描述 |
+| 感知 vs 对抗解算分离 | 感知用 `displayed_mana_power`（含压制），对抗解算用 `effective_mana_power`（不含压制） | 压制是认知层欺骗手段，不影响真实对抗 |
+| 对抗解算公式 | `combat_power = effective × max(0.1, 1 + Σ_modifiers) × soul_factor`，加算修正区 + 灵魂独立乘区 | 多因子加和可控，灵魂破损保留乘性凸显质变打击 |
+| 跨档差阈值 | 感知层 150 / 300 / 1000 / 2000；对抗解算共享 150 / 300 / 1000，1000+ 即 Crushing | 150 起感觉差距、1000+ 基本无力应对，2000+ 进入无法测度的体感描述 |
 | LLM 数值字段 | 用 ConfidenceShift 等离散级别，由程序映射为数值 | LLM 直出浮点不稳定 |
-| 仲裁层 LLM 兜底范围 | 仅在 CognitivePass 输出失败时启用；物理判定永远走程序 | 防止"什么都让 LLM 仲裁" |
+| 反应窗口 | 主动威胁打开有限 ReactionWindow；合格目标/伙伴/守护者各最多提交一个 ReactionIntent；默认 reaction 不再触发 reaction | 支持即时援护与反击，同时避免无限递归和调用成本失控 |
+| Agent LLM API 配置 | 四类 Agent LLM 节点可分别绑定 `api_configs/` 中的配置，未配置时继承默认 Agent 配置 | 不同节点对成本、速度、结构化输出能力、叙事质量要求不同 |
+| OutcomePlanner 权限 | 可 God-read 并输出实际言行、交互结果和 StateUpdatePlan 候选；EffectValidator 裁剪非法硬效果后才提交 | 支持复杂技能与叙事结果规划，同时避免 LLM 直接改写世界状态 |
 | Agent Trace 与运行 Logs | Agent Trace 随 World 保存，运行 Logs 记录应用观测；两者只通过 ID 关联，不参与业务判断 | 保证复盘、清理、审计边界清晰 |
 | 日志存储 | 全局 Logs 位于 `./data/logs/app_logs.sqlite`，Agent Trace 与世界内 LLM Logs 位于 `world.sqlite` | ST 与 Agent 生命周期不同，World 迁移需要自包含 Trace |
 | 日志清理 | 默认按 1GB 清理全局运行 Logs；Agent Trace 不自动删除；30 天未更新 World 只提示用户 | 控制空间占用，同时避免误删复盘资料 |

@@ -20,7 +20,7 @@ Agent Trace 是 Agent 世界的回合决策追踪，回答"这个回合为什么
 
 - 以 `scene_turn_id` 为主轴。
 - 随 World 保存，属于世界调试 / 回放 / 回滚定位数据。
-- 记录 Active Set、Dirty Flags、Layer 2 派生、CognitivePass、验证、仲裁、提交等 Agent 运行步骤。
+- 记录 Active Set、Dirty Flags、Layer 2 派生、CognitivePass、验证、结果规划、提交等 Agent 运行步骤。
 - 不作为 LLM 输入来源，不参与剧情状态判断。
 
 ### 1.2 运行 Logs
@@ -82,7 +82,8 @@ pub struct LogContext {
     pub scene_turn_id: Option<String>,
     pub character_id: Option<String>,
     pub trace_id: Option<String>,
-    pub llm_node: LlmNode,             // STChat / SceneStateExtractor / CharacterCognitivePass / ArbitrationFallback / SurfaceRealizer
+    pub llm_node: LlmNode,             // STChat / SceneStateExtractor / CharacterCognitivePass / OutcomePlanner / SurfaceRealizer
+    pub api_config_id: String,
     pub request_id: String,
 }
 ```
@@ -91,6 +92,7 @@ pub struct LogContext {
 
 - `request_json`：Provider 发送前的真实请求体；凭证字段必须脱敏。
 - `response_json`：Provider 返回的原始响应、结构化结果或错误响应。
+- `api_config_id`、provider、model：本次调用实际使用的 API 配置与模型。
 - `schema_json`：`chat_structured` 使用的 JSON Schema。
 - `stream_chunks`：流式输出的原始 chunk，按序保存。
 - `assembled_text`：按 chunk 顺序直接拼接后的完整文本。
@@ -123,9 +125,9 @@ Agent Trace 记录 Agent 模式下"程序如何判断"与"模型如何输出"。
 - 身体 / 资源 / 状态 / 冷却的机械演化摘要。
 - Active Set + Dirty Flags 的触发项与跳过原因。
 - EmbodimentResolver、SceneFilter、KnowledgeAccess、InputAssembly 的关键 Layer 2 派生摘要。
-- CharacterCognitivePass 输入输出、schema 校验、程序修复、仲裁层兜底触发。
+- CharacterCognitivePass 输入输出、schema 校验、程序修复、OutcomePlanner 兜底触发。
 - Validator 各规则结果。
-- ActionArbitration 的程序判定摘要与物理后果。
+- OutcomePlanner 的 God-read 输入域、候选 StateUpdatePlan、EffectValidator 裁剪摘要与物理后果。
 - SurfaceRealizer 请求、流式响应拼接、NarrativeFactCheck 结果。
 - StateCommitter 的提交记录、rollback patch 和 trace 关联。
 
@@ -163,7 +165,7 @@ Agent Trace 记录 Agent 模式下"程序如何判断"与"模型如何输出"。
 - Provider 请求失败、限流、超时、取消。
 - LLM 输出 schema 校验失败。
 - 程序容错修复失败。
-- 仲裁层 LLM 兜底启用或失败。
+- OutcomePlanner 启用、兜底使用、God-read 权限域异常或失败。
 - NarrativeFactCheck 失败。
 - SQLite 写入失败或事务回滚。
 - Agent 世界回滚。

@@ -3,7 +3,7 @@
 Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 
 - **SillyTavern 模式**：复刻 SillyTavern 体验，角色卡 V3 + 世界书 + 预设，JSON 存储。
-- **Agent 模式**：基于 RP Agent 架构的高级角色扮演系统，分层"客观世界 / 人物具身状态 / 主观认知与意图 / 仲裁"，SQLite 存储。
+- **Agent 模式**：基于 RP Agent 架构的高级角色扮演系统，分层"客观世界 / 人物具身状态 / 主观认知与意图 / 结果规划与状态更新"，SQLite 存储。
 
 ## 文档结构
 
@@ -12,7 +12,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 | [implementation_plan.md](docs/implementation_plan.md) | 项目概述 + 技术栈选型 + 阶段路线图 + 里程碑 + 关键决策 | 想知道"项目到了哪一步、下一步做什么" |
 | [01_architecture.md](docs/01_architecture.md) | 总体架构图 + 设计原则 + 前/后端模块结构 + LLM/程序边界总表 + 8 大铁律 + 数据形态铁律 | 想理解整体架构与跨系统约束 |
 | [02_st_mode.md](docs/02_st_mode.md) | SillyTavern 模式：角色卡 V3 + 世界书 + 注入流程 | 实现 ST 兼容功能 |
-| [10_agent_data_and_simulation.md](docs/10_agent_data_and_simulation.md) | Agent 三层语义 + KnowledgeEntry + 全部 struct + 程序化档位翻译 + 仲裁公式 + SQLite | Agent 数据契约与程序化派生 |
+| [10_agent_data_and_simulation.md](docs/10_agent_data_and_simulation.md) | Agent 三层语义 + KnowledgeEntry + 全部 struct + 程序化档位翻译 + 结果规划 / 技能契约 + SQLite | Agent 数据契约与程序化派生 |
 | [11_agent_runtime.md](docs/11_agent_runtime.md) | CognitivePass + Prompt 指南 + 主循环 + Active Set + Dirty Flags + UserInput 解析 + Realizer + 9 条验证规则 + 调用预算 | Agent 运行时与 LLM 调用 |
 | [20_backend_contracts.md](docs/20_backend_contracts.md) | AIProvider trait + chat_structured + 多 Provider 实现 | 后端 AI 调用层 |
 | [30_logging_and_observability.md](docs/30_logging_and_observability.md) | Agent Trace + 运行 Logs + LLM 请求响应还原 + 异常事件 + 定期清理 | 日志、调试与可观测性 |

@@ -5,7 +5,7 @@
 - 三层数据语义（L1 Truth / L2 Per-Character Access / L3 Subjective）
 - 全部 Agent 模式 struct / enum 定义（KnowledgeEntry、Cognitive I/O、UserInput、StyleConstraints、Realizer Input 等）
 - 程序化派生：场景 / 物理 / 灵力档位翻译公式
-- 仲裁公式（加算修正区 + soul_factor）
+- 对抗解算公式（加算修正区 + soul_factor）
 - SQLite 表结构
 
 LLM 调用流程、主循环、验证规则见 [11_agent_runtime.md](11_agent_runtime.md)。LLM/程序边界铁律见 [01_architecture.md](01_architecture.md)。
@@ -18,13 +18,14 @@ LLM 调用流程、主循环、验证规则见 [11_agent_runtime.md](11_agent_ru
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  Layer 1 — Truth Store（客观真相，仅编排器与仲裁/验证层访问）│
+│  Layer 1 — Truth Store（客观真相，仅编排器与结果规划/验证层访问）│
 │  ├── SceneModel              场景客观状态                    │
 │  ├── KnowledgeEntry[*]       统一知识库（含世界/势力/角色档 │
 │  │                           案/记忆，带可见性谓词）         │
 │  └── 角色 baseline_body_profile（物种/感官基线/灵觉基线）    │
 │      + temporary_body_state  伤势/疲惫/痛感/灵力消耗等当前态 │
-│  约束：LLM 永远不直接读取此层；CognitivePassInput 不出现     │
+│  约束：只有声明 God-read 的编排类节点可读此层；              │
+│        CognitivePassInput / SurfaceRealizerInput 不出现       │
 │        Layer 1 原始对象。                                    │
 └──────────────────────────────────────────────────────────────┘
                   │ 经 VisibilityResolver + SceneFilter 派生
@@ -57,17 +58,21 @@ LLM 调用流程、主循环、验证规则见 [11_agent_runtime.md](11_agent_ru
 **信息流向（线性，单向）**：
 
 ```
-World Truth (L1)
+最近用户自由文本 + 当前 SceneModel(L1)
+    → SceneStateExtractor(LLM, 场景域 God-read) → SceneUpdate / UserInputDelta 候选
+    → Validator + StateApplier → World Truth (L1)
     → Embodiment 计算 (L1 baseline + L1 temp + L1 scene → L2 embodiment)
     → SceneFilter (L1 scene + L2 embodiment → L2 filtered_view)
     → KnowledgeAccess (L1 knowledge_store + 角色身份/属性 → L2 accessible_knowledge)
     → InputAssembly (L2 全部 + L3 prior → CognitivePassInput)
     → CognitivePass(LLM) → Output(perception/belief/intent)
     → Validator (扫描 Output 引用是否 ⊆ L2 输入)
-    → Arbitration (读 L1 真相 + 多角色意图 → 行为后果)
+    → OutcomePlanner (LLM 可 God-read + 技能契约/程序硬约束 → 候选行为后果 / 状态更新计划)
     → SurfaceRealizer (渲染叙事)
     → StateCommitter (更新 L1 + L3，处理 KnowledgeRevealEvent)
 ```
+
+God-read 只表示可读取客观真相用于编排，不表示可直接写入 Layer 1。所有写入必须落成结构化 delta / plan，并由程序校验后提交。
 
 ---
 
@@ -96,7 +101,7 @@ pub struct SceneModel {
 
 ### 2.2 Physical Conditions（物理环境）
 
-承载客观、可量化、直接影响行动与感知的物理量。属于 Layer 1 真相，由 `SceneStateExtractor` 与仲裁层维护，凡人/修士均可被影响。
+承载客观、可量化、直接影响行动与感知的物理量。属于 Layer 1 真相，由 `SceneStateExtractor` 候选更新与 StateCommitter 提交维护，凡人/修士均可被影响。
 
 ```rust
 pub struct PhysicalConditions {
@@ -246,7 +251,7 @@ pub enum VisibilityScope {
 
 pub enum VisibilityCondition {
     InSameSceneVisible,                                    // 同场景且能感知
-    RelationAtLeast { target: String, threshold: f64 },    // 与目标关系阈值
+    SocialAccessAtLeast { target: String, threshold: f64 }, // L1 客观关系/授权阈值；禁止读取 L3 relation_models
     HasSkill(String),                                      // 拥有特定技能
     CultivationAtLeast(String),                            // 修为达到
     CustomPredicate(VisibilityExpression),                 // 结构化 DSL AST 扩展点；禁止自然语言表达式
@@ -289,7 +294,7 @@ pub struct KnowledgeMetadata {
 3. `apparent_content` 存在时：观察者（非 subject）默认看到 `apparent_content`；只有满足"揭穿条件"或在 `known_by` 中的角色才看到 `content`。
 4. `visibility.scope` 含 `GodOnly` 表示仅编排器可读，对所有角色不可见；`VisibilityResolver` 必须先检查 `GodOnly`，命中后直接拒绝，不再计算 `known_by` / 其他 scope / conditions。
 5. `GodOnly` 启用态下 `visibility.known_by` 必须为空；Validator / StateCommitter 自动检查并拒绝 `GodOnly + known_by 非空` 的状态。
-6. 若故事推进后仲裁确认某条 `GodOnly` 知识可被角色获知，必须通过 `KnowledgeRevealEvent` 先移除 `GodOnly` 或降级为其他 scope，再追加 `known_by`；禁止在 `GodOnly` 仍存在时直接写入 `known_by`。
+6. 若故事推进后 OutcomePlanner 候选 + EffectValidator 确认某条 `GodOnly` 知识可被角色获知，必须通过 `KnowledgeRevealEvent` 先移除 `GodOnly` 或降级为其他 scope，再追加 `known_by`；禁止在 `GodOnly` 仍存在时直接写入 `known_by`。
 7. `MemoryEntry` 不再独立存在；历史事件以 `KnowledgeEntry { kind: Memory }` 形式统一存储。
 8. Layer 1 的 Knowledge 内容由编排器/作者/StateCommitter 写入；CognitivePass 不可写。
 
@@ -383,7 +388,7 @@ pub struct KnowledgeRevealEvent {
 }
 
 pub enum VisibilityScopeChange {
-    RemoveGodOnly,                     // 仲裁确认该知识已可进入角色可知范围
+    RemoveGodOnly,                     // 结果规划 + 程序校验确认该知识已可进入角色可知范围
     ReplaceScopes(Vec<VisibilityScope>),
 }
 ```
@@ -404,8 +409,8 @@ pub enum VisibilityScopeChange {
 pub struct CharacterRecord {
     pub character_id: String,
     pub baseline_body_profile: BaselineBodyProfile,    // 物种/感官基线/灵觉基线/灵力数值（用于 EmbodimentResolver 与 SceneFilter）
-    pub mind_model_card: MindModelCard,                // 自我形象/世界观/恐惧触发/防御模式（属于 subject 自我认知，默认 Aware）
-    pub temporary_body_state: TemporaryBodyState,       // 当前客观身体/资源状态；每回合由机械演化、仲裁、BodyReactionDelta 更新
+    pub mind_model_card_knowledge_id: String,          // 指向 KnowledgeEntry 中的 MindModelCard，避免双写漂移
+    pub temporary_body_state: TemporaryBodyState,       // 当前客观身体/资源状态；每回合由机械演化与 StateCommitter 更新
     pub schema_version: String,
 }
 
@@ -427,7 +432,7 @@ pub struct ManaSenseBaseline {
 
 注意：
 
-- `MindModelCard` 在 Layer 1 也以 `KnowledgeEntry` 形式存在（subject 自我认知层），这里只是冗余索引以便 EmbodimentResolver 直接读取，**不允许它脱离 Knowledge 入口被外部读取**。
+- `MindModelCard` 只以 `KnowledgeEntry` 形式保存（subject 自我认知层）；`CharacterRecord` 仅保存 `mind_model_card_knowledge_id` 指针，避免同一事实在角色表和知识表双写漂移。
 - `temporary_body_state` 主要归入 Layer 1：伤势、疲惫、痛感、灵力消耗、冷却、毒素、短暂身体反应等都属于当前客观/半客观运行态。CognitivePass 只能通过 Layer 2 的 `EmbodimentState` 看到其派生结果，不直接读取原始状态。
 - `base_mana_power` 是 raw 数值；当前**有效灵力**还需叠加 L1 中的伤势/压制/突破修正后再喂给 `ManaPotencyTier::from_power`。raw 永远不进入 CognitivePass。
 - `comfort_temperature_range` 与 `base_mana_power` 的默认值在角色卡解析时从对应种族卡（如 `humanbeing.yaml` / `yaoguai.yaml`）读取并可被角色级覆盖。
@@ -592,7 +597,7 @@ pub struct EnvironmentalStrain {
     pub respiration_tier: RespirationImpactTier,
     pub movement_penalty: f64,           // 0.0-1.0
     pub balance_penalty: f64,            // 0.0-1.0
-    pub cold_strain: f64,                // 累积冷损耗（按时间累加，到阈值由仲裁层生成冻伤事件）
+    pub cold_strain: f64,                // 累积冷损耗（按时间累加，到阈值由 OutcomePlanner 候选 + EffectValidator 生成冻伤事件）
     pub heat_strain: f64,
     pub respiration_strain: f64,         // 累积呼吸损耗（沙暴/浓烟久留触发咳嗽/缺氧伤害）
     pub disrupted_actions: Vec<String>,  // 具体限制说明，例 "无法施展持续吟唱的法术"、"远程瞄准命中-40%"
@@ -626,7 +631,7 @@ pub enum PrecipitationKind {
 1. CognitivePass 的 LLM **只读 tier + effect_hints**，不应从 raw 数值推断后果。`FilteredSceneView` 中不放 raw 数值。
 2. 物种差异在档位翻译时已校准（用 `BaselineBodyProfile.comfort_temperature_range`），下游不用再判断"对该角色冷不冷"。
 3. 灵力升温/冰寒（`TemperatureModifier.kind = 灵力*`）已在 `Temperature.felt_celsius` 中合并；档位只看最终 felt 值。
-4. `cold_strain` / `heat_strain` 跨回合累积；到阈值由 `Arbitration` 生成具体伤势事件（冻伤/中暑），写回 Layer 1。
+4. `cold_strain` / `heat_strain` 跨回合累积；到阈值由 OutcomePlanner 候选 + EffectValidator 生成具体伤势事件（冻伤/中暑），写回 Layer 1。
 5. `disrupted_actions` 是 LLM 选择行动时的硬约束（在 IntentPlan 验证阶段比对），不是建议。
 6. SurfaceRealizer 如需在叙事中提到风速/温度的具体数字，应通过 `SurfaceRealizerInput` 单独传入 raw 值（叙事用），不经 `FilteredSceneView`。
 7. **L1 字段须保持自洽**：`physical_conditions` 各子字段间存在因果（暴雨 → wetness↑ → slipperiness↑；沙暴 → dust_density↑ → visibility↓ + respiration 受影响）。`SceneStateExtractor` 在产出 L1 时由 prompt 模板要求一并填齐；档位翻译层只负责把 L1 翻译成档位，不补全 L1 缺失。
@@ -636,7 +641,7 @@ pub enum PrecipitationKind {
 
 ## 5. 程序化派生：灵力档位翻译
 
-灵力的"档位"用于身份识别（"是凡人/修士/超凡/传说"），灵力的"数值差"用于实力对比（感知层是体感强弱，仲裁层是实际胜负）。两者都不让 LLM 自己估算 raw 数值。
+灵力的"档位"用于身份识别（"是凡人/修士/超凡/传说"），灵力的"数值差"用于实力对比（感知层是体感强弱，对抗解算层是实际胜负）。两者都不让 LLM 自己估算 raw 数值。
 
 档位边界数值参考 `D:\AI\rp_cards\` 锚点（凡人 100 / 入门 500–800 / 瓶颈 1300–1450 / 大成 2400 / 仙灵修行瓶颈 5000 / 神祇 苍角 8800 / 高阶仙灵 NaN），可在 `world_base.yaml` 中按世界重写。
 
@@ -667,12 +672,12 @@ pub enum ManaPerceptionDelta {
     Indistinguishable,       // |Δ| < 150          相若, 难分高下
     SlightlyBelow,           // Δ ∈ [-300, -150)   略弱
     NotablyBelow,            // Δ ∈ [-1000, -300)  显著弱
-    FarBelow,                // Δ ∈ [-2000, -1000) 远不及, 基本无力应对（仲裁=Crushing）
-    Crushed,                 // Δ < -2000          蝼蚁差距, 无法测度（仲裁=Crushing）
+    FarBelow,                // Δ ∈ [-2000, -1000) 远不及, 基本无力应对（对抗解算=Crushing）
+    Crushed,                 // Δ < -2000          蝼蚁差距, 无法测度（对抗解算=Crushing）
     SlightlyAbove,           // Δ ∈ [150, 300)     略胜
     NotablyAbove,            // Δ ∈ [300, 1000)    显著强
-    FarAbove,                // Δ ∈ [1000, 2000)   远胜, 守方基本无力应对（仲裁=Crushing）
-    Overwhelming,            // Δ ≥ 2000           压顶, 无法测度（仲裁=Crushing）
+    FarAbove,                // Δ ∈ [1000, 2000)   远胜, 守方基本无力应对（对抗解算=Crushing）
+    Overwhelming,            // Δ ≥ 2000           压顶, 无法测度（对抗解算=Crushing）
 }
 
 pub struct PerceivedManaProfile {
@@ -732,16 +737,16 @@ pub struct ManaEnvironmentSense {
 
 ---
 
-## 6. Mana Combat Resolution（仲裁层灵力对抗解算）
+## 6. Mana Combat Resolution（程序化灵力对抗解算）
 
-仲裁层与感知层用的是**不同**输入：
+对抗解算层与感知层用的是**不同**输入：
 
 - 感知层：`displayed_mana_power`（含压制）→ 角色"觉得"对方多强。
-- 仲裁层：`effective_mana_power`（不含压制；压制只是没主动用全力）→ 实际对抗按真实底力 + 技能 + 身体状态计算。
+- 对抗解算层：`effective_mana_power`（不含压制；压制只是没主动用全力）→ 实际对抗按真实底力 + 技能 + 身体状态计算。
 
 ```rust
 pub struct ManaCombatResolution {
-    // 仲裁层使用，不进入 CognitivePass
+    // 对抗解算层使用，不进入 CognitivePass
     pub actor_id: String,
     pub target_id: String,
     pub actor_combat_power: f64,         // = effective_mana_power × max(0.1, 1 + Σ_modifiers) × soul_factor
@@ -753,7 +758,7 @@ pub struct ManaCombatResolution {
 
 pub enum CombatOutcomeTier {
     // 由 |combat_delta| 桶映射；与感知层 ManaPerceptionDelta 共享 150/300/1000 三个阈值
-    // 仲裁层不再细分 1000 以上：到了"无力应对"就够用了
+    // 对抗解算层不再细分 1000 以上：到了"无力应对"就够用了
     Indistinguishable,       // |Δ| < 150       势均力敌, 胜负看临场发挥/技巧
     SlightEdge,              // Δ ∈ [150, 300)  攻方略占上风
     MarkedEdge,              // Δ ∈ [300, 1000) 攻方明显优势
@@ -762,7 +767,7 @@ pub enum CombatOutcomeTier {
 }
 ```
 
-### 6.1 仲裁公式（程序化）
+### 6.1 对抗解算公式（程序化）
 
 ```
 combat_power = effective_mana_power × max(0.1, 1 + Σ_modifiers) × soul_factor
@@ -785,7 +790,7 @@ combat_power = effective_mana_power × max(0.1, 1 + Σ_modifiers) × soul_factor
    - **身体重伤 / 灵力枯竭：-0.20 ~ -0.50**（按伤势严重度落区间）
    - `EnvironmentalStrain.disrupted_actions` 按 disrupted 程度：-0.10 ~ -0.40
 
-   **心境**（来自 Layer 3 EmotionState 与 L1 突发情绪事件，按已有情绪标签程序化映射，不让 LLM 在仲裁时即兴选择）：
+   **心境**（来自 Layer 3 EmotionState 与 L1 突发情绪事件，按已有情绪标签程序化映射，不让 LLM 在对抗解算时即兴选择）：
    - **自信 / 愤怒：+0.05 ~ +0.10**
    - 恐惧 / 迟疑：-0.05 ~ -0.15
    - 崩溃：-0.20 ~ -0.40
@@ -804,14 +809,14 @@ combat_power = effective_mana_power × max(0.1, 1 + Σ_modifiers) × soul_factor
 
 5. **outcome_tier** 按 `combat_delta = actor_combat_power − target_combat_power` 落桶（150 / 300 / 1000，1000 以上即 Crushing）；细化由 `disrupting_factors` 列出（程序生成的具体说明，例 ["攻方显著疲惫 -0.20", "守方身体重伤 -0.40 + 恐惧 -0.10 + 灵魂破损 ×0.5"]）。
 
-6. 仲裁结果只决定**物理后果**（伤势 / 法力消耗 / 位置变化）写回 L1；**社会层后果**（恐惧 / 屈服 / 记仇）由下游角色 LLM 自行解读。
+6. 程序化对抗解算只决定**可验证物理后果**（伤势 / 法力消耗 / 位置变化）是否可写回 L1；公开退让、站队、敌对升级等外显社会事件可由 OutcomePlanner 候选输出，但内心恐惧 / 屈服 / 记仇仍由下游角色 CognitivePass 解读。
 
 ### 6.2 关键不变量
 
-1. 仲裁公式只读 L1 的 `effective_mana_power`、L1 的身体状态、L1 的技能/属性数据；**不读 displayed_mana_power**（压制是认知层的事，不影响真实对抗）。
-2. `combat_delta` 与 `ManaPerceptionDelta` 共享 150/300/1000 三个阈值，保证"我感觉略胜"与"实际略胜"在同一刻度上。仲裁层在 1000 以上不再细分（结果都是 Crushing）；感知层仍区分 `FarAbove(1000-2000)` 与 `Overwhelming(≥2000)`，但两者**对应的对抗结论一致**（皆为"基本无力应对"），区别只在体感（"远胜，难敌" vs "无法测度，压顶之势"）与是否可识别 tier。
+1. 对抗解算公式只读 L1 的 `effective_mana_power`、L1 的身体状态、L1 的技能/属性数据；**不读 displayed_mana_power**（压制是认知层的事，不影响真实对抗）。
+2. `combat_delta` 与 `ManaPerceptionDelta` 共享 150/300/1000 三个阈值，保证"我感觉略胜"与"实际略胜"在同一刻度上。对抗解算层在 1000 以上不再细分（结果都是 Crushing）；感知层仍区分 `FarAbove(1000-2000)` 与 `Overwhelming(≥2000)`，但两者**对应的对抗结论一致**（皆为"基本无力应对"），区别只在体感（"远胜，难敌" vs "无法测度，压顶之势"）与是否可识别 tier。
 3. 当 `disrupting_factors` 与 `outcome_tier` 出现"违和"（例如攻方 base_mana_power 高但身体状态极差导致 combat_delta 反而为负），SurfaceRealizer 必须在叙事中体现这种反差，而不是按"谁灵力高谁赢"硬写。
-4. **以弱胜强**在该框架下要求**多个加算修正叠加 + 可能的灵魂状态打击**：守方若同时陷入"显著疲惫 (-0.20) + 身体重伤 (-0.40) + 恐惧 (-0.10) = Σ = -0.70"，加算系数 = max(0.1, 0.30) = 0.30；再叠加灵魂破损 soul_factor = 0.5，总系数 0.15，足以让基础灵力差 1500 的弱者翻盘。"算计 / 偷袭 / 中毒 / 惊扰魂魄"必须落到具体的 L1 状态字段上，由公式自然得出，不允许 LLM 在仲裁口径上手抹平差距。
+4. **以弱胜强**在该框架下要求**多个加算修正叠加 + 可能的灵魂状态打击**：守方若同时陷入"显著疲惫 (-0.20) + 身体重伤 (-0.40) + 恐惧 (-0.10) = Σ = -0.70"，加算系数 = max(0.1, 0.30) = 0.30；再叠加灵魂破损 soul_factor = 0.5，总系数 0.15，足以让基础灵力差 1500 的弱者翻盘。"算计 / 偷袭 / 中毒 / 惊扰魂魄"必须落到具体的 L1 状态字段上，由公式自然得出，不允许 LLM 在对抗解算口径上手抹平差距。
 
 ---
 
@@ -852,15 +857,25 @@ pub struct CharacterCognitivePassInput {
     // Layer 3（角色当前心智，作为先验）
     pub prior_subjective_state: CharacterSubjectiveState,
 
-    // 本回合事件 delta（仅该角色可见的部分）
-    pub recent_event_delta: Vec<SceneEvent>,
+    // 本回合事件 delta（程序过滤后的角色可见事件；不得使用 Layer 1 原始 SceneEvent）
+    pub recent_event_delta: Vec<VisibleEventDelta>,
+}
+
+pub struct VisibleEventDelta {
+    pub event_id: String,
+    pub scene_turn_id: String,
+    pub event_kind: String,                         // semantic
+    pub involved_visible_entities: Vec<String>,     // semantic: entity_id list
+    pub visible_effects: serde_json::Value,         // semantic: 结构化后果
+    pub sensory_descriptors: Vec<String>,           // llm_readable: 角色可感知的声音/气味/光影等描述
+    pub source_hint: AccessSource,                  // semantic / trace
 }
 
 pub struct CharacterCognitivePassOutput {
     pub perception_delta: PerceptionDelta,
     pub belief_update: BeliefUpdate,
     pub intent_plan: IntentPlan,
-    pub body_reaction_delta: Option<BodyReactionDelta>,  // 情绪驱动的身体反应（手抖/脸红/失语）
+    pub body_reaction_delta: Option<BodyReactionDelta>,  // 情绪驱动的候选身体反应（手抖/脸红/失语）；不直接写 L1
 }
 
 /// 信念变化使用离散级别，避免 LLM 直接输出浮点数。
@@ -890,9 +905,38 @@ CognitivePassOutput **必须为严格 schema JSON**，优先由 Provider structu
 
 ---
 
-## 9. UserInputDelta（用户输入解析结果）
+## 9. SceneStateExtractor I/O 与 UserInputDelta
 
-用户的所有自由文本输入由 SceneStateExtractor (LLM) 转为统一的结构化 delta。
+用户的最近一轮自由文本输入由 SceneStateExtractor (LLM) 结合当前结构化场景信息解析。它不是普通角色认知节点，而是场景域编排节点：可读取当前 `SceneModel`，输出候选 `SceneUpdate` 与 `UserInputDelta`，但不直接写入 Layer 1。
+
+第一版权限采用保守规则：
+
+- 可读：最近一轮自由文本、当前 `SceneModel`、世界级 schema / 枚举 / 物理约束、与当前场景直接相关的公开设定。
+- 默认不可读：隐藏角色 Knowledge、GodOnly Knowledge、非当前场景的私密历史，除非后续明确引入"作者编辑 / 导演模式"。
+- 不可写：数据库和持久状态；只能输出候选 delta，由程序校验后应用。
+
+```rust
+pub struct SceneStateExtractorInput {
+    pub scene_turn_id: String,
+    pub recent_free_text: String,              // 用户最新输入或最近一轮聊天自由文本
+    pub current_scene: SceneModel,             // 当前结构化场景 JSON
+    pub world_constraints: serde_json::Value,  // semantic: 枚举、schema、物理边界、世界级规则
+}
+
+pub struct SceneStateExtractorOutput {
+    pub scene_update: Option<SceneUpdate>,     // 候选场景更新
+    pub user_input_delta: UserInputDelta,      // 结构化用户意图 / 扮演 / 元指令
+    pub ambiguity_report: Vec<String>,         // llm_readable: 需要用户澄清但不阻塞的歧义
+}
+
+pub struct SceneUpdate {
+    pub scene_turn_id: String,
+    pub scene_delta: SceneDelta,
+    pub update_reason: Vec<String>,            // trace_only / llm_readable
+}
+```
+
+用户输入统一落为 `UserInputDelta`：
 
 ```rust
 pub struct UserInputDelta {
@@ -916,8 +960,25 @@ pub enum UserInputKind {
     /// 元指令：跳过时间 / 切场景 / 重置 / 暂停。
     MetaCommand { command: MetaCommandKind },
 
-    /// 引导仲裁与文风（用户对当前回合的"导演"权）。
-    DirectorHint { arbitration_bias: Option<String>, style_override: Option<StyleConstraints> },
+    /// 引导结果规划与文风（用户对当前回合的"导演"权）。
+    /// outcome_bias 必须结构化；自由文本导演说明只能进入 style_override.explicit_guidelines 或 trace。
+    DirectorHint { outcome_bias: Option<OutcomeBias>, style_override: Option<StyleConstraints> },
+}
+
+pub struct OutcomeBias {
+    pub preferred_tone: Option<String>,             // semantic enum in implementation
+    pub outcome_pressure: Option<OutcomePressure>,  // semantic
+    pub protected_entities: Vec<String>,            // semantic entity_id list
+    pub forbidden_outcomes: Vec<String>,            // semantic enum in implementation
+    pub notes: Vec<String>,                         // llm_readable; 不参与程序硬判断
+}
+
+pub enum OutcomePressure {
+    PreserveStatusQuo,
+    EscalateConflict,
+    DeescalateConflict,
+    FavorPlayerIntent,
+    FavorSimulationStrictness,
 }
 ```
 
@@ -946,7 +1007,150 @@ pub struct StyleConstraints {
 
 ---
 
-## 11. SurfaceRealizerInput（叙事层输入）
+## 11. OutcomePlanner I/O（结果规划与状态更新计划）
+
+OutcomePlanner 是编排类 LLM 节点，可以拥有 God 读取权限。它负责把场景真相、人物情绪与言行意图、技能契约/设定约束综合成"实际可能发生什么"和"候选需要更新哪些数据"。但它不直接写入数据库；输出必须被 EffectValidator 按技能契约和程序硬边界裁剪后，再交给 StateCommitter。
+
+```rust
+pub struct OutcomePlannerInput {
+    pub scene_turn_id: String,
+
+    // God-read: 结果规划需要的 L1 真相与规则
+    pub scene_model: SceneModel,
+    pub character_records: Vec<CharacterRecord>,
+    pub relevant_knowledge: Vec<KnowledgeEntry>,
+    pub skills: Vec<Skill>,
+
+    // 来自受限认知节点或用户扮演输入
+    pub character_outputs: Vec<CharacterCognitivePassOutput>,
+    pub user_roleplay_intents: Vec<IntentPlan>,
+    pub reaction_windows: Vec<ReactionWindow>,
+    pub reaction_intents: Vec<ReactionIntent>,
+    pub director_hint: Option<OutcomeBias>,
+}
+
+pub struct OutcomePlannerOutput {
+    pub outcome_plan: OutcomePlan,
+    pub state_update_plan: StateUpdatePlan,
+    pub knowledge_reveal_events: Vec<KnowledgeRevealEvent>,
+}
+
+pub struct OutcomePlan {
+    pub outward_actions: Vec<OutwardAction>,          // semantic: 已发生/尝试发生的外显行动
+    pub resulting_state_changes: serde_json::Value,   // semantic: 候选硬变化摘要，真实提交以 StateUpdatePlan 为准
+    pub visible_facts: Vec<String>,                   // semantic: 按 NarrationScope 派生的叙事事实白名单
+    pub soft_effects: Vec<SoftEffect>,                // llm_readable: 可叙述但不写 L1
+    pub blocked_effects: Vec<BlockedEffect>,          // semantic + trace: 被程序边界阻止的效果
+}
+
+pub struct StateUpdatePlan {
+    pub scene_delta: Option<SceneDelta>,
+    pub character_body_deltas: Vec<CharacterBodyDelta>,
+    pub subjective_update_refs: Vec<String>,       // semantic: 对应角色 cognitive output / fallback output
+    pub new_memory_entries: Vec<KnowledgeEntry>,   // kind 必须为 Memory
+    pub soft_effects: Vec<SoftEffect>,             // llm_readable: 可叙述但不写入 L1 的软效果
+    pub blocked_effects: Vec<BlockedEffect>,       // semantic + trace: 因超出契约/硬规则被阻止的效果
+    pub validation_warnings: Vec<String>,          // trace_only: 程序裁剪或降级原因
+    pub consistency_notes: Vec<String>,            // llm_readable / trace_only
+}
+
+pub struct CharacterBodyDelta {
+    pub character_id: String,
+    pub temporary_body_state_delta: serde_json::Value, // semantic: 伤势/疲惫/资源/冷却等结构化变更
+    pub outward_body_signals: Vec<String>,             // llm_readable: 可被叙事层使用的外显身体反应
+}
+
+pub struct SoftEffect {
+    pub source_id: String,
+    pub target_id: Option<String>,
+    pub effect_kind: String,             // semantic enum in implementation
+    pub description: String,             // llm_readable
+}
+
+pub struct BlockedEffect {
+    pub source_id: String,
+    pub target_id: Option<String>,
+    pub attempted_state_domain: String,  // semantic enum in implementation
+    pub reason_code: String,             // semantic enum in implementation
+    pub fallback_soft_effect: Option<SoftEffect>,
+}
+```
+
+### 11.1 ReactionWindow（有限反应窗口）
+
+ReactionWindow 解决"被攻击者及其伙伴是否能即时反应"的问题，但它不是递归事件链。程序打开窗口后，只收集合格角色的 `ReactionIntent`，再由同一次 OutcomePlanner 调用把原行动与所有反应意图一起结算。
+
+```rust
+pub struct ReactionWindow {
+    pub window_id: String,
+    pub scene_turn_id: String,
+    pub source_event_id: String,
+    pub source_action_id: String,
+    pub threat_source_id: String,
+    pub primary_targets: Vec<String>,
+    pub observable_threat: VisibleEventDelta,
+    pub eligible_reactors: Vec<ReactionEligibility>,
+    pub max_reaction_depth: u8,                 // 默认 1；只有 interrupt 契约可显式提高到 2
+    pub no_reaction_to_reaction: bool,          // 默认 true
+    pub one_reaction_per_character: bool,       // 默认 true
+}
+
+pub struct ReactionEligibility {
+    pub character_id: String,
+    pub reason: ReactionEligibilityReason,      // target / ally_guard / area_protector / passive_field / interrupt_skill
+    pub available_reaction_options: Vec<ReactionOption>,
+    pub sensory_basis: Vec<AccessSource>,       // 看见/听见/灵觉/链接等结构化依据
+    pub constraints: Vec<String>,               // semantic: distance / line_of_effect / cooldown / control_state 等
+}
+
+pub struct ReactionOption {
+    pub option_id: String,
+    pub skill_id: Option<String>,
+    pub reaction_kind: ReactionKind,             // dodge / block / counter / protect_ally / interrupt / passive_mitigation
+    pub target_scope: Vec<String>,
+    pub cost_preview: CostProfile,
+    pub legality_basis: Vec<String>,            // trace_only: 由哪个技能契约/姿态/被动规则允许
+}
+
+pub struct ReactionIntent {
+    pub window_id: String,
+    pub character_id: String,
+    pub chosen_option_id: String,
+    pub target_ids: Vec<String>,
+    pub intent_rationale: String,                // llm_readable
+}
+
+pub struct ReactionPassInput {
+    pub character_id: String,
+    pub scene_turn_id: String,
+    pub filtered_scene_view: FilteredSceneView,
+    pub embodiment_state: EmbodimentState,
+    pub accessible_knowledge: AccessibleKnowledge,
+    pub prior_subjective_state: CharacterSubjectiveState,
+    pub reaction_window: ReactionWindow,
+    pub available_reaction_options: Vec<ReactionOption>,
+}
+```
+
+不变量：
+
+1. ReactionWindow 的开启、资格、距离/视线/感官、资源、冷却、援护关系与 `max_reaction_depth` 全由程序判定；LLM 不能自行把旁观者加入窗口。
+2. `ReactionIntent` 只表达"打算如何反应"，不立即产生新的 `OutwardAction` 或 `StateUpdatePlan`；反应造成的反击、格挡、援护统一进入 OutcomePlanner 的一次性结算。
+3. 默认 `no_reaction_to_reaction = true`。B 的反击不再为 A 打开新的普通反应窗口；只有 SkillEffectContract 明确声明 interrupt/反制反击，且深度未超过上限时才允许进入第二层。
+4. 每个角色在同一窗口默认最多提交一个 `ReactionIntent`；未提交或 LLM 失败时，OutcomePlanner 可按 `passive`/默认防御策略兜底，但必须写 trace。
+5. 旁观者或伙伴能否反应取决于 `observable_threat` 对该角色是否可见，以及其 `ReactionOption` 是否覆盖目标、距离、通道和资源；"站在场上"本身不构成反应资格。
+
+硬约束：
+
+- `OutcomePlanner` 可读 L1 / GodOnly 用于判断，但 `outcome_plan.visible_facts` 必须按 `NarrationScope` 派生，不能把 GodOnly 直接给叙事层。
+- `StateUpdatePlan` 中的数值、资源、位置、伤势、可见性变更必须能被程序公式、技能契约或 Validator 校验；校验失败时不反复调用 LLM，非法硬效果进入 `blocked_effects` 或降级为 `soft_effects`，不得写入 L1。
+- `BodyReactionDelta` 只作为候选身体反应；如需改变 `temporary_body_state`，必须由 OutcomePlanner/EffectValidator 转成合法 `CharacterBodyDelta` 后经 StateCommitter 提交。
+- 角色是否"相信 / 接受 / 记恨"不由 OutcomePlanner 直接写入 L3，除非它来自该角色本回合 `CharacterCognitivePassOutput`；否则作为外显事件进入下一轮认知输入。
+- OutcomePlanner 必须把 `reaction_windows` 中的原行动与 `reaction_intents` 一起结算；禁止在结算中再自由打开无限新窗口。
+
+---
+
+## 12. SurfaceRealizerInput（叙事层输入）
 
 叙事层 LLM 仅接受以下四类结构化输入，**不再读取角色档案 / 世界设定 / 角色心智**（它们已体现在情景与认知结果中）。
 
@@ -963,8 +1167,8 @@ pub struct SurfaceRealizerInput {
     /// 2. 各角色 Agent 的认知和意图结果（仅 Tier A/B 中实际进行了 cognitive pass 的角色）。
     pub character_outputs: Vec<CharacterCognitivePassOutput>,
 
-    /// 3. 仲裁结果：本回合的物理后果与最终行动顺序。
-    pub arbitration_result: ArbitrationResult,
+    /// 3. 结果计划：本回合的外显行动、合法硬后果摘要、软效果与受阻效果。
+    pub outcome_plan: OutcomePlan,
 
     /// 文风约束（含自由文本指引）。
     pub style: StyleConstraints,
@@ -983,11 +1187,11 @@ pub enum NarrationScope {
 ```
 
 `SceneNarrativeView` 是 SceneModel 按 `narration_scope` 派生的叙事视图：`CharacterFocused` 只能使用该角色的 Layer 2 可见事实；`ObjectiveCamera` 只能使用外显事实；`DirectorView` 可使用编排器可见事实但默认仍剔除 `GodOnly`。
-`ArbitrationResult` 包含：每个角色的 outward_action（已发生的事）、resulting_state_changes（伤势/位置/资源等）、visible_facts（按 `narration_scope` 生成的叙事事实白名单）。
+`OutcomePlan` 包含：每个角色的 outward_action（已发生的事）、resulting_state_changes（伤势/位置/资源等候选硬变化）、visible_facts（按 `narration_scope` 生成的叙事事实白名单）、soft_effects 与 blocked_effects。SurfaceRealizer 可以叙述软效果和受阻结果，但 NarrativeFactCheck 与 StateCommitter 只承认已通过程序校验的硬变化。
 
 ---
 
-## 12. Dirty Flags（调用预算控制）
+## 13. Dirty Flags（调用预算控制）
 
 ```rust
 pub struct DirtyFlags {
@@ -1008,7 +1212,7 @@ pub struct DirtyFlags {
 
 ---
 
-## 13. Skill Model（最小灵活版）
+## 14. Skill Model（契约 + LLM）
 
 ```rust
 pub struct Skill {
@@ -1017,7 +1221,23 @@ pub struct Skill {
     pub trigger_mode: TriggerMode,         // active / reaction / passive / channeled
     pub delivery_channel: DeliveryChannel, // gaze / voice / touch / projectile / scent / spiritual_link / ritual / field
     pub impact_scope: ImpactScope,         // body / perception / mind / soul / scene
-    pub notes: String,
+    pub effect_contract: SkillEffectContract,
+    pub notes: String,                     // llm_readable: 技能意象、限制、常见表现；不直接参与程序判断
+}
+
+pub struct SkillEffectContract {
+    pub allowed_target_kinds: Vec<TargetKind>,
+    pub allowed_state_domains: Vec<StateDomain>,      // body / resource / position / perception / mind / soul / scene / knowledge_reveal
+    pub cost_profile: CostProfile,                    // semantic: 法力/体力/冷却/材料等成本
+    pub max_intensity_tier: EffectIntensityTier,      // 程序校验硬效果强度上限
+    pub allows_injury: bool,
+    pub allows_position_change: bool,
+    pub allows_knowledge_reveal: bool,
+    pub requires_line_of_effect: bool,
+    pub duration_policy: DurationPolicy,
+    pub opens_reaction_window: bool,
+    pub allows_interrupt: bool,
+    pub max_reaction_depth_override: Option<u8>,  // 默认 None；若 Some(2) 必须由 EffectValidator 校验
 }
 
 pub struct CharacterSkillUseProfile {
@@ -1028,11 +1248,11 @@ pub struct CharacterSkillUseProfile {
 }
 ```
 
-技能的"该角色掌握哪些技能"以 `KnowledgeEntry { kind: CharacterFacet, facet: KnownAbility | HiddenAbility }` 表达，统一受可见性约束。
+技能的"该角色掌握哪些技能"以 `KnowledgeEntry { kind: CharacterFacet, facet: KnownAbility | HiddenAbility }` 表达，统一受可见性约束。OutcomePlanner 可以读取 `notes` 理解复杂效果，但硬状态变化只能落在 `effect_contract` 允许的范围内；超出范围的候选效果由 EffectValidator 转入 `blocked_effects` 或 `soft_effects`。
 
 ---
 
-## 14. SQLite 表结构
+## 15. SQLite 表结构
 
 按三层语义组织。Layer 2 不持久化（每回合重建）；Layer 1 / Layer 3 / Trace 各自独立。Agent 模式以 World 为故事连续性单元，聊天记录删除 / 回退必须从目标回合开始截断后续全部回合，并回滚到一致的世界状态，因此每个回合提交都必须有可追溯记录。
 
@@ -1101,16 +1321,17 @@ CREATE TABLE knowledge_reveal_events (
     knowledge_id TEXT NOT NULL,
     newly_known_by TEXT NOT NULL,          -- JSON array
     trigger TEXT NOT NULL,                 -- JSON: RevealTrigger
+    scope_change TEXT,                     -- JSON: VisibilityScopeChange；GodOnly 揭示时必须有值
     scene_turn_id TEXT NOT NULL,
     created_at TEXT NOT NULL,
     FOREIGN KEY (knowledge_id) REFERENCES knowledge_entries(knowledge_id)
 );
 
--- 角色基本档案（仅 baseline_body_profile + mind_model_card 索引；其余事实在 knowledge_entries 中）
+-- 角色基本档案（仅 baseline_body_profile + mind_model_card_knowledge_id 指针；其余事实在 knowledge_entries 中）
 CREATE TABLE character_records (
     character_id TEXT PRIMARY KEY,
     baseline_body_profile TEXT NOT NULL,   -- JSON
-    mind_model_card TEXT NOT NULL,         -- JSON（同时在 knowledge_entries 有冗余条目）
+    mind_model_card_knowledge_id TEXT NOT NULL,
     temporary_body_state TEXT NOT NULL,    -- JSON: Layer 1 当前身体/资源状态
     schema_version TEXT NOT NULL DEFAULT '0.1',
     created_at TEXT NOT NULL,
@@ -1150,7 +1371,7 @@ CREATE TABLE agent_step_traces (
     trace_id TEXT NOT NULL,
     scene_turn_id TEXT NOT NULL,
     character_id TEXT,                     -- NULL 表示全局步骤
-    step_name TEXT NOT NULL,               -- active_set / dirty_flags / scene_filter / cognitive_pass / validation / arbitration / state_commit 等
+    step_name TEXT NOT NULL,               -- active_set / dirty_flags / scene_filter / cognitive_pass / validation / outcome_planning / effect_validation / state_commit 等
     step_status TEXT NOT NULL,             -- started / skipped / succeeded / failed / fallback_used
     input_summary TEXT,                    -- JSON: 结构化输入摘要
     output_summary TEXT,                   -- JSON: 结构化输出摘要
@@ -1169,7 +1390,8 @@ CREATE TABLE llm_call_logs (
     scene_turn_id TEXT,
     trace_id TEXT,
     character_id TEXT,
-    llm_node TEXT NOT NULL,                -- STChat / SceneStateExtractor / CharacterCognitivePass / ArbitrationFallback / SurfaceRealizer
+    llm_node TEXT NOT NULL,                -- STChat / SceneStateExtractor / CharacterCognitivePass / OutcomePlanner / SurfaceRealizer
+    api_config_id TEXT NOT NULL,           -- 调用时实际使用的 API 配置
     provider TEXT NOT NULL,
     model TEXT NOT NULL,
     call_type TEXT NOT NULL,               -- chat / chat_structured / chat_stream
@@ -1188,6 +1410,25 @@ CREATE TABLE llm_call_logs (
     completed_at TEXT,
     FOREIGN KEY (scene_turn_id) REFERENCES world_turns(scene_turn_id),
     FOREIGN KEY (trace_id) REFERENCES turn_traces(trace_id)
+);
+
+-- Agent LLM 节点配置档案；api_config_id 指向 ./data/api_configs/ 中的 ST/API 配置池
+CREATE TABLE agent_llm_profiles (
+    profile_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    default_api_config_id TEXT NOT NULL,
+    bindings TEXT NOT NULL,                -- JSON: Vec<AgentLlmConfigBinding>
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+-- World 级 Agent LLM 配置选择；允许每个 World 使用不同的四节点配置
+CREATE TABLE world_agent_settings (
+    world_id TEXT PRIMARY KEY,
+    agent_llm_profile_id TEXT NOT NULL,
+    profile_overrides TEXT,                -- JSON: 可选 World 级覆盖
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (agent_llm_profile_id) REFERENCES agent_llm_profiles(profile_id)
 );
 
 CREATE TABLE llm_stream_chunks (
@@ -1242,6 +1483,7 @@ CREATE INDEX idx_step_traces_turn ON agent_step_traces(scene_turn_id);
 CREATE INDEX idx_step_traces_trace ON agent_step_traces(trace_id);
 CREATE INDEX idx_llm_logs_turn ON llm_call_logs(scene_turn_id);
 CREATE INDEX idx_llm_logs_trace ON llm_call_logs(trace_id);
+CREATE INDEX idx_llm_logs_api_config ON llm_call_logs(api_config_id);
 CREATE INDEX idx_llm_logs_created ON llm_call_logs(created_at);
 CREATE INDEX idx_stream_chunks_request ON llm_stream_chunks(request_id, chunk_index);
 CREATE INDEX idx_app_events_context ON app_event_logs(world_id, scene_turn_id, trace_id);
@@ -1256,6 +1498,7 @@ CREATE INDEX idx_app_events_created ON app_event_logs(created_at);
 - 没有"memory_records"表，记忆作为 `knowledge_entries.kind = 'memory'` 统一存储。
 - `world_turns.parent_turn_id` 定义故事线顺序；用户删除某条 Agent 聊天记录时，必须将该回合及其后续全部回合标记为 `rolled_back`，禁止单独删除中间消息，并按 `state_commit_records.rollback_patch` 恢复到目标父回合的一致 Layer 1 / Layer 3 状态。
 - Agent Trace 以 `scene_turn_id` 为主轴，解释回合如何演化；运行 Logs 以 `request_id` / `event_id` 为主轴，解释应用运行时发生了什么。两者可互相关联，但日志不得作为 Agent 判断或 LLM 输入来源。
+- Agent 模式允许四类 LLM 节点绑定不同 API 配置；`agent_llm_profiles.bindings` 保存用户选择，`llm_call_logs.api_config_id` 保存每次调用实际使用的配置。
 - `llm_call_logs.request_json`、`response_json`、`llm_stream_chunks.raw_chunk` 尽量还原 Provider 原貌；`readable_text` 仅用于流式响应的段落化查看，不替代原始响应。
 - `app_event_logs` 同表结构可用于 `./data/logs/app_logs.sqlite`。ST 模式只写全局运行 Logs；Agent 模式与回合相关的记录写入对应 `world.sqlite`，同时可在全局异常日志中保留带 `world_id` / `scene_turn_id` 的索引事件。
 - 默认清理上限为 1GB。自动清理只处理全局运行 Logs；Agent Trace 和仍被 `state_commit_records.trace_ids` 引用的记录不自动删除。30 天以上未更新且日志体积较大的 World 只产生提示事件，等待用户确认。

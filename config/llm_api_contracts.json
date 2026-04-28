@@ -1,0 +1,844 @@
+{
+  "schema_version": 1,
+  "researched_at": "2026-04-28",
+  "purpose": "RST AI Provider API interaction contracts. Used to decide which fields may be sent, which fields must be present, and which response fields should be parsed or ignored.",
+  "conventions": {
+    "field_status": {
+      "required": "Must be present for this protocol or object shape.",
+      "optional": "May be sent when the target model/provider supports it.",
+      "conditional": "May or must be sent only when the condition is true.",
+      "forbidden": "Do not send for this protocol/provider shape.",
+      "ignored": "Provider accepts or tolerates it but documents that it has no effect."
+    },
+    "path_syntax": "Dotted paths use [] for array items, such as messages[].content or choices[].message.content.",
+    "implementation_rule": "Provider adapters should whitelist fields from allowed_request_fields and conditional_request_fields. Do not forward unknown UI fields directly to remote APIs."
+  },
+  "sources": [
+    {
+      "id": "openai_responses",
+      "title": "OpenAI Responses API Reference",
+      "url": "https://platform.openai.com/docs/api-reference/responses/create"
+    },
+    {
+      "id": "openai_chat",
+      "title": "OpenAI Chat Completions API Reference",
+      "url": "https://platform.openai.com/docs/api-reference/chat/create-chat-completion"
+    },
+    {
+      "id": "anthropic_messages",
+      "title": "Anthropic Messages API Reference",
+      "url": "https://docs.anthropic.com/en/api/messages"
+    },
+    {
+      "id": "anthropic_openai_sdk",
+      "title": "Anthropic OpenAI SDK Compatibility",
+      "url": "https://docs.anthropic.com/en/api/openai-sdk"
+    },
+    {
+      "id": "gemini_generate_content",
+      "title": "Gemini API models.generateContent",
+      "url": "https://ai.google.dev/api/generate-content"
+    },
+    {
+      "id": "deepseek_chat",
+      "title": "DeepSeek Create Chat Completion",
+      "url": "https://api-docs.deepseek.com/api/create-chat-completion"
+    },
+    {
+      "id": "aliyun_qwen_openai_chat",
+      "title": "Alibaba Cloud Model Studio OpenAI Chat API Reference",
+      "url": "https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions"
+    },
+    {
+      "id": "aliyun_coding_plan",
+      "title": "Alibaba Cloud Model Studio Coding Plan",
+      "url": "https://www.alibabacloud.com/help/zh/model-studio/coding-plan-quickstart"
+    },
+    {
+      "id": "aliyun_coding_plan_tools",
+      "title": "Alibaba Cloud Coding Plan Other Tools",
+      "url": "https://www.alibabacloud.com/help/zh/model-studio/other-tools-coding-plan"
+    },
+    {
+      "id": "aliyun_claude_code_coding_plan",
+      "title": "Alibaba Cloud Coding Plan for Claude Code",
+      "url": "https://help.aliyun.com/zh/model-studio/claude-code-coding-plan"
+    },
+    {
+      "id": "xfyun_astron_coding_plan",
+      "title": "讯飞星辰 MaaS Astron Coding Plan 使用文档",
+      "url": "https://www.xfyun.cn/doc/spark/CodingPlan.html"
+    }
+  ],
+  "contracts": {
+    "openai_responses": {
+      "provider": "openai",
+      "wire_api": "responses",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/responses",
+        "default_base_url": "https://api.openai.com"
+      },
+      "headers": {
+        "required": ["Authorization: Bearer <api_key>", "Content-Type: application/json"],
+        "optional": []
+      },
+      "allowed_request_fields": [
+        {"path": "model", "status": "required", "type": "string", "notes": "Model ID."},
+        {"path": "input", "status": "optional", "type": "string | array", "notes": "Text or input item list. In normal chat calls RST should send this unless using conversation-only continuation."},
+        {"path": "input[].type", "status": "conditional", "type": "string", "allowed_values": ["message", "item_reference", "function_call_output", "custom_tool_call_output"], "notes": "Required for typed input items."},
+        {"path": "input[].role", "status": "conditional", "type": "string", "allowed_values": ["user", "assistant", "system", "developer"], "notes": "Required for message input items."},
+        {"path": "input[].content", "status": "conditional", "type": "string | array", "notes": "Required for message input items."},
+        {"path": "input[].content[].type", "status": "conditional", "type": "string", "allowed_values": ["input_text", "input_image", "input_file"], "notes": "Required for content parts."},
+        {"path": "input[].content[].text", "status": "conditional", "type": "string", "notes": "Required when content part type is input_text."},
+        {"path": "input[].content[].detail", "status": "conditional", "type": "string", "allowed_values": ["auto", "low", "high"], "notes": "Required for input_image by current reference; default is auto."},
+        {"path": "input[].content[].image_url", "status": "conditional", "type": "string", "notes": "One image source option for input_image."},
+        {"path": "input[].content[].file_id", "status": "conditional", "type": "string", "notes": "One file/image source option."},
+        {"path": "input[].content[].file_url", "status": "conditional", "type": "string", "notes": "One file source option for input_file."},
+        {"path": "input[].content[].file_data", "status": "conditional", "type": "string", "notes": "One file source option for input_file."},
+        {"path": "input[].content[].filename", "status": "conditional", "type": "string", "notes": "Optional file name for input_file."},
+        {"path": "instructions", "status": "optional", "type": "string", "notes": "System/developer instruction inserted into model context. Does not carry over automatically when previous_response_id is used."},
+        {"path": "previous_response_id", "status": "optional", "type": "string", "notes": "Use for stateful continuation."},
+        {"path": "conversation", "status": "optional", "type": "string | object", "notes": "Conversation ID or object."},
+        {"path": "store", "status": "optional", "type": "boolean", "notes": "Whether to store the response."},
+        {"path": "stream", "status": "optional", "type": "boolean"},
+        {"path": "background", "status": "optional", "type": "boolean"},
+        {"path": "include", "status": "optional", "type": "array<string>", "notes": "Only documented include values should be sent."},
+        {"path": "max_output_tokens", "status": "optional", "type": "integer"},
+        {"path": "max_tool_calls", "status": "optional", "type": "integer"},
+        {"path": "metadata", "status": "optional", "type": "object"},
+        {"path": "parallel_tool_calls", "status": "optional", "type": "boolean"},
+        {"path": "reasoning", "status": "optional", "type": "object", "notes": "Reasoning options for reasoning-capable models."},
+        {"path": "service_tier", "status": "optional", "type": "string"},
+        {"path": "temperature", "status": "optional", "type": "number"},
+        {"path": "top_p", "status": "optional", "type": "number"},
+        {"path": "truncation", "status": "optional", "type": "string"},
+        {"path": "text", "status": "optional", "type": "object", "notes": "Text output configuration, including structured output format on supported models."},
+        {"path": "tools", "status": "optional", "type": "array<object>", "notes": "Built-in tools, function tools, or custom tools per OpenAI Responses schema."},
+        {"path": "tool_choice", "status": "optional", "type": "string | object"}
+      ],
+      "conditional_request_fields": [
+        {"path": "input[].call_id", "status": "required", "when": "input item is function_call_output or custom_tool_call_output"},
+        {"path": "input[].output", "status": "required", "when": "input item is function_call_output or custom_tool_call_output"},
+        {"path": "tools[].type", "status": "required", "when": "tools[] item is present"},
+        {"path": "tool_choice", "status": "conditional", "when": "Only choose a tool name/type that is present in tools."}
+      ],
+      "forbidden_request_fields": [
+        {"path": "messages", "reason": "Responses API uses input, not Chat Completions messages."},
+        {"path": "max_tokens", "reason": "Use max_output_tokens for Responses API."},
+        {"path": "max_completion_tokens", "reason": "Chat Completions field; use max_output_tokens."},
+        {"path": "response_format", "reason": "Chat Completions field; use text.format in Responses."},
+        {"path": "functions", "reason": "Legacy Chat Completions function field; use tools."},
+        {"path": "function_call", "reason": "Legacy Chat Completions function field; use tool_choice/tools."}
+      ],
+      "response_fields": {
+        "required_or_core": ["id", "object", "created_at", "model", "status", "output"],
+        "optional_or_conditional": ["background", "completed_at", "conversation", "error", "incomplete_details", "instructions", "max_output_tokens", "metadata", "parallel_tool_calls", "previous_response_id", "reasoning", "service_tier", "store", "temperature", "text", "tool_choice", "tools", "top_p", "truncation", "usage"],
+        "output_item_shapes": ["message", "reasoning", "function_call", "custom_tool_call", "web_search_call", "file_search_call", "computer_call", "code_interpreter_call"]
+      },
+      "streaming": {
+        "transport": "SSE",
+        "terminal_event": "response.completed or response.failed; SDKs may expose typed events",
+        "parse_policy": "Assemble response.output_text.delta for display, but persist raw events for logs."
+      }
+    },
+    "openai_chat_completions": {
+      "provider": "openai_compatible",
+      "wire_api": "chat_completions",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "default_base_url": "https://api.openai.com"
+      },
+      "headers": {
+        "required": ["Authorization: Bearer <api_key>", "Content-Type: application/json"],
+        "optional": []
+      },
+      "allowed_request_fields": [
+        {"path": "model", "status": "required", "type": "string"},
+        {"path": "messages", "status": "required", "type": "array<object>"},
+        {"path": "messages[].role", "status": "required", "type": "string", "allowed_values": ["system", "developer", "user", "assistant", "tool", "function"], "notes": "Actual accepted roles vary by model and compatibility provider."},
+        {"path": "messages[].content", "status": "conditional", "type": "string | array | null", "notes": "Required for most messages; assistant may use null when tool_calls are present."},
+        {"path": "messages[].name", "status": "optional", "type": "string"},
+        {"path": "messages[].tool_call_id", "status": "conditional", "type": "string", "notes": "Required for tool role messages."},
+        {"path": "messages[].tool_calls", "status": "conditional", "type": "array<object>", "notes": "Assistant message tool calls."},
+        {"path": "frequency_penalty", "status": "optional", "type": "number"},
+        {"path": "presence_penalty", "status": "optional", "type": "number"},
+        {"path": "logit_bias", "status": "optional", "type": "object"},
+        {"path": "logprobs", "status": "optional", "type": "boolean"},
+        {"path": "top_logprobs", "status": "conditional", "type": "integer", "notes": "Only send when logprobs is true."},
+        {"path": "max_completion_tokens", "status": "optional", "type": "integer", "notes": "Preferred over deprecated max_tokens for newer OpenAI models."},
+        {"path": "max_tokens", "status": "optional", "type": "integer", "notes": "Deprecated in OpenAI docs but still common in compatible providers."},
+        {"path": "metadata", "status": "optional", "type": "object"},
+        {"path": "modalities", "status": "optional", "type": "array<string>"},
+        {"path": "audio", "status": "conditional", "type": "object", "notes": "Required when requesting audio output with modalities including audio."},
+        {"path": "n", "status": "optional", "type": "integer"},
+        {"path": "parallel_tool_calls", "status": "optional", "type": "boolean"},
+        {"path": "prediction", "status": "optional", "type": "object"},
+        {"path": "prompt_cache_key", "status": "optional", "type": "string"},
+        {"path": "prompt_cache_retention", "status": "optional", "type": "string"},
+        {"path": "reasoning_effort", "status": "optional", "type": "string"},
+        {"path": "response_format", "status": "optional", "type": "object", "notes": "Use json_schema when supported; json_object is weaker JSON mode."},
+        {"path": "safety_identifier", "status": "optional", "type": "string"},
+        {"path": "seed", "status": "optional", "type": "integer", "notes": "Beta/deprecated behavior in OpenAI docs."},
+        {"path": "service_tier", "status": "optional", "type": "string"},
+        {"path": "stop", "status": "optional", "type": "string | array<string>"},
+        {"path": "store", "status": "optional", "type": "boolean"},
+        {"path": "stream", "status": "optional", "type": "boolean"},
+        {"path": "stream_options", "status": "conditional", "type": "object", "notes": "Only set when stream is true."},
+        {"path": "temperature", "status": "optional", "type": "number"},
+        {"path": "tool_choice", "status": "optional", "type": "string | object"},
+        {"path": "tools", "status": "optional", "type": "array<object>"},
+        {"path": "top_p", "status": "optional", "type": "number"},
+        {"path": "user", "status": "optional", "type": "string", "notes": "Older OpenAI abuse-monitoring identifier; safety_identifier is preferred by newer docs."}
+      ],
+      "conditional_request_fields": [
+        {"path": "audio.format", "status": "required", "when": "audio is present"},
+        {"path": "audio.voice", "status": "required", "when": "audio is present"},
+        {"path": "response_format.type", "status": "required", "when": "response_format is present", "allowed_values": ["text", "json_object", "json_schema"]},
+        {"path": "response_format.json_schema", "status": "required", "when": "response_format.type is json_schema"},
+        {"path": "tools[].type", "status": "required", "when": "tools[] item is present", "allowed_values": ["function"]},
+        {"path": "tools[].function.name", "status": "required", "when": "function tool is present"},
+        {"path": "tools[].function.parameters", "status": "optional", "when": "function tool is present"},
+        {"path": "stream_options.include_usage", "status": "optional", "when": "stream is true"}
+      ],
+      "forbidden_request_fields": [
+        {"path": "input", "reason": "Responses API field; Chat Completions uses messages."},
+        {"path": "instructions", "reason": "Responses API field; use system/developer message."},
+        {"path": "previous_response_id", "reason": "Responses API state field."},
+        {"path": "conversation", "reason": "Responses API state field."},
+        {"path": "max_output_tokens", "reason": "Responses API field; use max_completion_tokens or max_tokens."}
+      ],
+      "model_specific_forbidden_or_limited": [
+        {"path": "stop", "condition": "latest OpenAI reasoning models such as o3/o4-mini", "reason": "OpenAI docs mark stop as unsupported for latest reasoning models."}
+      ],
+      "response_fields": {
+        "required_or_core": ["id", "object", "created", "model", "choices"],
+        "choice_fields": ["choices[].index", "choices[].message", "choices[].finish_reason", "choices[].logprobs"],
+        "message_fields": ["choices[].message.role", "choices[].message.content", "choices[].message.tool_calls", "choices[].message.function_call", "choices[].message.refusal", "choices[].message.audio"],
+        "optional_or_conditional": ["request_id", "system_fingerprint", "service_tier", "usage", "prompt_filter_results"],
+        "usage_fields": ["usage.prompt_tokens", "usage.completion_tokens", "usage.total_tokens", "usage.prompt_tokens_details", "usage.completion_tokens_details"]
+      },
+      "streaming": {
+        "transport": "SSE",
+        "chunk_object": "chat.completion.chunk",
+        "terminal_event": "data: [DONE]",
+        "core_chunk_fields": ["id", "object", "created", "model", "choices[].delta", "choices[].finish_reason", "usage"]
+      }
+    },
+    "anthropic_messages": {
+      "provider": "anthropic",
+      "wire_api": "messages",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/messages",
+        "default_base_url": "https://api.anthropic.com"
+      },
+      "headers": {
+        "required": ["x-api-key: <api_key>", "anthropic-version: 2023-06-01", "Content-Type: application/json"],
+        "optional": ["anthropic-beta"]
+      },
+      "allowed_request_fields": [
+        {"path": "model", "status": "required", "type": "string"},
+        {"path": "max_tokens", "status": "required", "type": "integer", "notes": "Anthropic native Messages requires explicit max_tokens."},
+        {"path": "messages", "status": "required", "type": "array<object>", "notes": "Stateless conversation history; limit documented as 100,000 messages."},
+        {"path": "messages[].role", "status": "required", "type": "string", "allowed_values": ["user", "assistant"]},
+        {"path": "messages[].content", "status": "required", "type": "string | array<object>"},
+        {"path": "messages[].content[].type", "status": "conditional", "type": "string", "allowed_values": ["text", "image", "tool_use", "tool_result", "document", "thinking", "redacted_thinking"]},
+        {"path": "system", "status": "optional", "type": "string | array<object>", "notes": "Top-level system prompt. Do not put system role in messages."},
+        {"path": "container", "status": "optional", "type": "string | null"},
+        {"path": "mcp_servers", "status": "optional", "type": "array<object>"},
+        {"path": "metadata", "status": "optional", "type": "object"},
+        {"path": "service_tier", "status": "optional", "type": "string"},
+        {"path": "stop_sequences", "status": "optional", "type": "array<string>"},
+        {"path": "stream", "status": "optional", "type": "boolean"},
+        {"path": "temperature", "status": "optional", "type": "number"},
+        {"path": "thinking", "status": "optional", "type": "object"},
+        {"path": "tool_choice", "status": "optional", "type": "object"},
+        {"path": "tools", "status": "optional", "type": "array<object>"},
+        {"path": "top_k", "status": "optional", "type": "integer"},
+        {"path": "top_p", "status": "optional", "type": "number"}
+      ],
+      "conditional_request_fields": [
+        {"path": "tools[].name", "status": "required", "when": "client tool is present"},
+        {"path": "tools[].input_schema", "status": "required", "when": "client tool is present"},
+        {"path": "messages[].content[].source", "status": "required", "when": "content part type is image"},
+        {"path": "messages[].content[].text", "status": "required", "when": "content part type is text"}
+      ],
+      "forbidden_request_fields": [
+        {"path": "messages[].role=system", "reason": "Anthropic native API uses top-level system, not system messages."},
+        {"path": "messages[].role=tool", "reason": "Tool results are user message content blocks, not tool-role messages."},
+        {"path": "response_format", "reason": "Native structured output should use tool use or prompt/schema validation; no OpenAI response_format field."},
+        {"path": "functions", "reason": "OpenAI legacy field."},
+        {"path": "function_call", "reason": "OpenAI legacy field."},
+        {"path": "max_completion_tokens", "reason": "OpenAI Chat field; Anthropic native uses max_tokens."},
+        {"path": "n", "reason": "Anthropic native Messages returns one assistant message."},
+        {"path": "logprobs", "reason": "OpenAI Chat field."},
+        {"path": "top_logprobs", "reason": "OpenAI Chat field."}
+      ],
+      "response_fields": {
+        "required_or_core": ["id", "type", "role", "content", "model", "stop_reason", "stop_sequence", "usage"],
+        "content_block_fields": ["content[].type", "content[].text", "content[].id", "content[].name", "content[].input"],
+        "stop_reason_values": ["end_turn", "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal"],
+        "usage_fields": ["usage.input_tokens", "usage.output_tokens", "usage.cache_creation_input_tokens", "usage.cache_read_input_tokens", "usage.server_tool_use"]
+      },
+      "streaming": {
+        "transport": "SSE",
+        "event_types": ["message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop", "ping", "error"],
+        "parse_policy": "Assemble text_delta from content_block_delta; read final stop_reason from message_delta."
+      }
+    },
+    "anthropic_openai_compatible": {
+      "provider": "anthropic",
+      "wire_api": "chat_completions",
+      "inherits": "openai_chat_completions",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "default_base_url": "https://api.anthropic.com"
+      },
+      "compatibility_overrides": {
+        "allowed_but_ignored_request_fields": ["logprobs", "metadata", "response_format", "prediction", "presence_penalty", "frequency_penalty", "seed", "service_tier", "audio", "logit_bias", "store", "user", "modalities", "top_logprobs", "reasoning_effort"],
+        "limited_request_fields": [
+          {"path": "temperature", "rule": "0..1; values above 1 are capped to 1."},
+          {"path": "n", "rule": "Must be exactly 1."},
+          {"path": "stop", "rule": "Non-whitespace stop sequences work."}
+        ],
+        "response_notes": ["choices[] length is always 1.", "usage.completion_tokens_details and usage.prompt_tokens_details are always empty.", "service_tier and system_fingerprint are always empty."]
+      }
+    },
+    "gemini_generate_content": {
+      "provider": "google_gemini",
+      "wire_api": "generate_content",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1beta/{model=models/*}:generateContent",
+        "default_base_url": "https://generativelanguage.googleapis.com"
+      },
+      "auth": {
+        "supported": ["API key query parameter: ?key=<api_key>", "OAuth scope https://www.googleapis.com/auth/generative-language"]
+      },
+      "headers": {
+        "required": ["Content-Type: application/json"],
+        "optional": []
+      },
+      "allowed_path_fields": [
+        {"path": "model", "status": "required", "type": "string", "notes": "Path parameter in the form models/{model}."}
+      ],
+      "allowed_request_fields": [
+        {"path": "contents", "status": "required", "type": "array<object>"},
+        {"path": "contents[].role", "status": "optional", "type": "string", "allowed_values": ["user", "model"], "notes": "Chat history uses user/model roles."},
+        {"path": "contents[].parts", "status": "required", "type": "array<object>"},
+        {"path": "contents[].parts[].text", "status": "conditional", "type": "string"},
+        {"path": "contents[].parts[].inlineData", "status": "conditional", "type": "object"},
+        {"path": "contents[].parts[].fileData", "status": "conditional", "type": "object"},
+        {"path": "contents[].parts[].functionCall", "status": "conditional", "type": "object"},
+        {"path": "contents[].parts[].functionResponse", "status": "conditional", "type": "object"},
+        {"path": "tools", "status": "optional", "type": "array<object>", "notes": "Function and codeExecution tools."},
+        {"path": "toolConfig", "status": "optional", "type": "object"},
+        {"path": "safetySettings", "status": "optional", "type": "array<object>", "notes": "At most one setting per safety category."},
+        {"path": "systemInstruction", "status": "optional", "type": "object", "notes": "Text only according to current docs."},
+        {"path": "generationConfig", "status": "optional", "type": "object"},
+        {"path": "generationConfig.temperature", "status": "optional", "type": "number"},
+        {"path": "generationConfig.topP", "status": "optional", "type": "number"},
+        {"path": "generationConfig.topK", "status": "optional", "type": "integer"},
+        {"path": "generationConfig.candidateCount", "status": "optional", "type": "integer"},
+        {"path": "generationConfig.maxOutputTokens", "status": "optional", "type": "integer"},
+        {"path": "generationConfig.stopSequences", "status": "optional", "type": "array<string>"},
+        {"path": "generationConfig.responseMimeType", "status": "optional", "type": "string"},
+        {"path": "generationConfig.responseSchema", "status": "optional", "type": "object", "notes": "Use for structured JSON output when supported."},
+        {"path": "cachedContent", "status": "optional", "type": "string"},
+        {"path": "serviceTier", "status": "optional", "type": "string"},
+        {"path": "store", "status": "optional", "type": "boolean"}
+      ],
+      "conditional_request_fields": [
+        {"path": "contents[].parts[].inlineData.mimeType", "status": "required", "when": "inlineData is present"},
+        {"path": "contents[].parts[].inlineData.data", "status": "required", "when": "inlineData is present"},
+        {"path": "contents[].parts[].fileData.mimeType", "status": "required", "when": "fileData is present"},
+        {"path": "contents[].parts[].fileData.fileUri", "status": "required", "when": "fileData is present"},
+        {"path": "systemInstruction.parts", "status": "required", "when": "systemInstruction is present"}
+      ],
+      "forbidden_request_fields": [
+        {"path": "model in JSON body", "reason": "Gemini REST model is a path parameter, not a JSON body field."},
+        {"path": "messages", "reason": "Gemini uses contents, not OpenAI messages."},
+        {"path": "messages[].role=system", "reason": "Use top-level systemInstruction."},
+        {"path": "max_tokens", "reason": "Use generationConfig.maxOutputTokens."},
+        {"path": "max_completion_tokens", "reason": "Use generationConfig.maxOutputTokens."},
+        {"path": "response_format", "reason": "Use generationConfig.responseMimeType/responseSchema."},
+        {"path": "stream", "reason": "Use the streamGenerateContent endpoint instead of a stream field on generateContent."},
+        {"path": "tools[].type=function", "reason": "Gemini tool schema is not OpenAI function-tool shape."}
+      ],
+      "response_fields": {
+        "required_or_core": ["candidates", "usageMetadata", "modelVersion", "responseId"],
+        "optional_or_conditional": ["promptFeedback", "modelStatus"],
+        "candidate_fields": ["candidates[].content", "candidates[].finishReason", "candidates[].safetyRatings", "candidates[].citationMetadata", "candidates[].groundingMetadata", "candidates[].index", "candidates[].avgLogprobs", "candidates[].logprobsResult"],
+        "usage_fields": ["usageMetadata.promptTokenCount", "usageMetadata.cachedContentTokenCount", "usageMetadata.candidatesTokenCount", "usageMetadata.totalTokenCount", "usageMetadata.thoughtsTokenCount"],
+        "blocked_prompt_policy": "If promptFeedback.blockReason is set, candidates may be absent."
+      },
+      "streaming": {
+        "transport": "REST streaming endpoint",
+        "endpoint_path": "/v1beta/{model=models/*}:streamGenerateContent",
+        "parse_policy": "Parse GenerateContentResponse chunks and assemble candidates[].content.parts[].text."
+      }
+    },
+    "deepseek_chat": {
+      "provider": "deepseek",
+      "wire_api": "chat_completions",
+      "endpoint": {
+        "method": "POST",
+        "path": "/chat/completions",
+        "default_base_url": "https://api.deepseek.com"
+      },
+      "headers": {
+        "required": ["Authorization: Bearer <api_key>", "Content-Type: application/json"],
+        "optional": []
+      },
+      "allowed_request_fields": [
+        {"path": "model", "status": "required", "type": "string", "allowed_values_sample": ["deepseek-v4-flash", "deepseek-v4-pro"]},
+        {"path": "messages", "status": "required", "type": "array<object>"},
+        {"path": "messages[].role", "status": "required", "type": "string", "allowed_values": ["system", "user", "assistant", "tool"]},
+        {"path": "messages[].content", "status": "required", "type": "string | null", "notes": "Assistant content may be null when tool calls are present."},
+        {"path": "messages[].name", "status": "optional", "type": "string"},
+        {"path": "messages[].prefix", "status": "conditional", "type": "boolean", "notes": "Beta prefix completion; requires beta base URL."},
+        {"path": "messages[].reasoning_content", "status": "conditional", "type": "string | null", "notes": "Beta thinking prefix input; requires prefix=true."},
+        {"path": "messages[].tool_call_id", "status": "conditional", "type": "string", "notes": "Required for tool messages."},
+        {"path": "thinking", "status": "optional", "type": "object"},
+        {"path": "thinking.type", "status": "optional", "type": "string", "allowed_values": ["enabled", "disabled"]},
+        {"path": "reasoning_effort", "status": "optional", "type": "string", "allowed_values": ["high", "max"], "notes": "low/medium map to high; xhigh maps to max."},
+        {"path": "frequency_penalty", "status": "optional", "type": "number", "range": [-2, 2]},
+        {"path": "presence_penalty", "status": "optional", "type": "number", "range": [-2, 2]},
+        {"path": "max_tokens", "status": "optional", "type": "integer"},
+        {"path": "response_format", "status": "optional", "type": "object", "allowed_values": [{"type": "text"}, {"type": "json_object"}]},
+        {"path": "stop", "status": "optional", "type": "string | array<string>", "notes": "Up to 16 sequences."},
+        {"path": "stream", "status": "optional", "type": "boolean"},
+        {"path": "stream_options", "status": "conditional", "type": "object", "notes": "Only set when stream is true."},
+        {"path": "stream_options.include_usage", "status": "optional", "type": "boolean"},
+        {"path": "temperature", "status": "optional", "type": "number", "range": [0, 2]},
+        {"path": "top_p", "status": "optional", "type": "number", "range": [0, 1]},
+        {"path": "tools", "status": "optional", "type": "array<object>", "notes": "Function tools only; max 128."},
+        {"path": "tool_choice", "status": "optional", "type": "string | object", "allowed_values": ["none", "auto", "required"]},
+        {"path": "logprobs", "status": "optional", "type": "boolean"},
+        {"path": "top_logprobs", "status": "conditional", "type": "integer", "notes": "Requires logprobs=true; 0..20."}
+      ],
+      "conditional_request_fields": [
+        {"path": "response_format.type", "status": "required", "when": "response_format is present", "allowed_values": ["text", "json_object"]},
+        {"path": "tools[].type", "status": "required", "when": "tools[] item is present", "allowed_values": ["function"]},
+        {"path": "tools[].function", "status": "required", "when": "tools[] item is present"},
+        {"path": "tools[].function.name", "status": "required", "when": "function tool is present"},
+        {"path": "tool_choice.function.name", "status": "required", "when": "forcing a named function tool"}
+      ],
+      "forbidden_request_fields": [
+        {"path": "input", "reason": "Responses API field; DeepSeek chat uses messages."},
+        {"path": "instructions", "reason": "Responses API field; use system message."},
+        {"path": "max_completion_tokens", "reason": "Not documented in DeepSeek Chat reference; use max_tokens."},
+        {"path": "max_output_tokens", "reason": "Responses API field."},
+        {"path": "response_format.type=json_schema", "reason": "DeepSeek documented values are text and json_object."},
+        {"path": "tools[].type other than function", "reason": "Only function tools are documented."},
+        {"path": "stream_options without stream=true", "reason": "Documented as only set when stream is true."}
+      ],
+      "response_fields": {
+        "required_or_core": ["id", "choices", "created", "model", "object", "system_fingerprint"],
+        "choice_fields": ["choices[].finish_reason", "choices[].index", "choices[].message", "choices[].logprobs"],
+        "message_fields": ["choices[].message.role", "choices[].message.content", "choices[].message.reasoning_content", "choices[].message.tool_calls"],
+        "finish_reason_values": ["stop", "length", "content_filter", "tool_calls", "insufficient_system_resource"],
+        "usage_fields": ["usage.prompt_tokens", "usage.completion_tokens", "usage.total_tokens", "usage.prompt_cache_hit_tokens", "usage.prompt_cache_miss_tokens", "usage.completion_tokens_details.reasoning_tokens"]
+      },
+      "streaming": {
+        "transport": "SSE",
+        "chunk_object": "chat.completion.chunk",
+        "terminal_event": "data: [DONE]",
+        "core_chunk_fields": ["id", "choices[].delta.content", "choices[].delta.reasoning_content", "choices[].finish_reason", "created", "model", "object", "usage"]
+      }
+    },
+    "aliyun_qwen_openai_chat": {
+      "provider": "aliyun_model_studio",
+      "wire_api": "chat_completions",
+      "inherits": "openai_chat_completions",
+      "endpoint": {
+        "method": "POST",
+        "path": "/compatible-mode/v1/chat/completions",
+        "base_urls": {
+          "cn_beijing": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "intl_singapore": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+          "us_virginia": "https://dashscope-us.aliyuncs.com/compatible-mode/v1"
+        }
+      },
+      "headers": {
+        "required": ["Authorization: Bearer <DASHSCOPE_API_KEY>", "Content-Type: application/json"],
+        "optional": []
+      },
+      "additional_allowed_request_fields": [
+        {"path": "top_k", "status": "optional", "type": "integer", "notes": "Non-OpenAI field; use SDK extra_body when needed."},
+        {"path": "repetition_penalty", "status": "optional", "type": "number", "notes": "Non-OpenAI field."},
+        {"path": "enable_thinking", "status": "optional", "type": "boolean", "notes": "Qwen thinking mode control on supported models."},
+        {"path": "thinking_budget", "status": "optional", "type": "integer", "notes": "Thinking budget on supported models."},
+        {"path": "enable_search", "status": "optional", "type": "boolean", "notes": "Non-OpenAI field for web search."},
+        {"path": "search_options", "status": "conditional", "type": "object", "notes": "Only meaningful when enable_search is true."},
+        {"path": "search_options.forced_search", "status": "optional", "type": "boolean"},
+        {"path": "search_options.search_strategy", "status": "optional", "type": "string", "allowed_values": ["turbo", "max", "agent", "agent_max"]},
+        {"path": "search_options.enable_search_extension", "status": "optional", "type": "boolean"},
+        {"path": "vl_high_resolution_images", "status": "optional", "type": "boolean", "notes": "Vision-only non-OpenAI field."},
+        {"path": "messages[].content[].type=video", "status": "conditional", "type": "string", "notes": "Aliyun extension for image-list video input."},
+        {"path": "messages[].content[].type=video_url", "status": "conditional", "type": "string", "notes": "Aliyun extension for video file input on supported models."},
+        {"path": "messages[].content[].type=input_audio", "status": "conditional", "type": "string", "notes": "Aliyun extension for audio-capable models."},
+        {"path": "messages[].content[].cache_control", "status": "conditional", "type": "object", "notes": "Explicit cache control; type must be ephemeral."}
+      ],
+      "conditional_or_limited_request_fields": [
+        {"path": "messages[].role=system", "rule": "Optional; QwQ not recommended, QVQ system message does not take effect."},
+        {"path": "n", "rule": "Range 1..4 only on documented supported models; set n=1 when tools is present."},
+        {"path": "tool_choice named function", "rule": "Thinking-mode models do not support forcing a specific tool."},
+        {"path": "stream_options", "rule": "Only valid when stream=true."},
+        {"path": "modalities/audio", "rule": "Only for Qwen-Omni; audio.format only supports wav in current docs."},
+        {"path": "response_format.type=json_object", "rule": "Prompt must explicitly request JSON or provider may error."}
+      ],
+      "forbidden_request_fields": [
+        {"path": "Qwen-Audio through OpenAI compatible protocol", "reason": "Aliyun docs say Qwen-Audio does not support OpenAI compatible protocol; use DashScope protocol."},
+        {"path": "input", "reason": "Chat endpoint uses messages; use /responses for Aliyun Responses compatibility if needed."},
+        {"path": "max_output_tokens", "reason": "Chat endpoint uses max_tokens."},
+        {"path": "stream_options without stream=true", "reason": "Only effective when stream is true."}
+      ],
+      "response_fields": {
+        "required_or_core": ["id", "choices", "created", "model", "object", "usage"],
+        "fixed_null_fields": ["service_tier", "system_fingerprint"],
+        "choice_fields": ["choices[].finish_reason", "choices[].index", "choices[].message", "choices[].logprobs"],
+        "message_fields": ["choices[].message.role", "choices[].message.content", "choices[].message.reasoning_content", "choices[].message.tool_calls", "choices[].message.audio"],
+        "usage_fields": ["usage.prompt_tokens", "usage.completion_tokens", "usage.total_tokens", "usage.prompt_tokens_details", "usage.completion_tokens_details"]
+      },
+      "streaming": {
+        "transport": "SSE",
+        "chunk_object": "chat.completion.chunk",
+        "usage_policy": "usage appears only in the final chunk when stream_options.include_usage=true."
+      }
+    },
+    "aliyun_coding_plan_openai": {
+      "provider": "aliyun_coding_plan",
+      "wire_api": "chat_completions",
+      "inherits": "openai_chat_completions",
+      "compatibility_level": "coding_tool_openai_chat_subset",
+      "endpoint": {
+        "method": "POST",
+        "path": "/chat/completions",
+        "base_urls_for_openai_sdk": {
+          "intl_current": "https://coding-intl.dashscope.aliyuncs.com/v1",
+          "cn_current": "https://coding.dashscope.aliyuncs.com/v1"
+        },
+        "final_url_pattern": "{base_url_for_openai_sdk}/chat/completions",
+        "do_not_append_v1_twice": true
+      },
+      "headers": {
+        "required": ["Authorization: Bearer <Coding Plan API Key>", "Content-Type: application/json"],
+        "optional": []
+      },
+      "model_policy": {
+        "source": "Coding Plan console/package docs",
+        "examples": ["qwen3.6-plus", "qwen3.5-plus", "qwen3-coder-plus", "qwen3-coder-next", "glm-5", "kimi-k2.5", "MiniMax-M2.5"],
+        "notes": "Available model list depends on the subscribed Coding Plan package and region."
+      },
+      "strict_request_whitelist": [
+        {"path": "model", "status": "required", "type": "string", "notes": "Must be one of the models enabled by the Coding Plan package."},
+        {"path": "messages", "status": "required", "type": "array<object>"},
+        {"path": "messages[].role", "status": "required", "type": "string", "allowed_values": ["system", "user", "assistant"]},
+        {"path": "messages[].content", "status": "required", "type": "string"},
+        {"path": "stream", "status": "optional", "type": "boolean", "recommended": true},
+        {"path": "temperature", "status": "optional", "type": "number"},
+        {"path": "top_p", "status": "optional", "type": "number"},
+        {"path": "max_tokens", "status": "optional", "type": "integer"}
+      ],
+      "adapter_policy": {
+        "default_to_strict_whitelist": true,
+        "drop_unknown_fields": true,
+        "drop_null_optional_fields": true,
+        "coerce_developer_role_to_system": true,
+        "coerce_max_completion_tokens_to_max_tokens": true,
+        "prefer_streaming_probe": true,
+        "prefer_claude_code_anthropic_profile_when_available": true,
+        "notes": "Coding Plan is a coding-tool package, not the general Model Studio pay-as-you-go API. Treat OpenAI compatibility as a narrow tool-facing subset unless a selected tool/model explicitly documents more fields."
+      },
+      "recommended_minimal_probe": {
+        "model": "qwen3.6-plus",
+        "messages": [
+          {"role": "user", "content": "Say hello."}
+        ],
+        "stream": true
+      },
+      "suspect_or_forbidden_request_fields": [
+        {"path": "messages[].role=developer", "status": "forbidden", "reason": "Coding Plan OpenAI-compatible tool endpoints may reject newer OpenAI roles. Merge developer content into system."},
+        {"path": "messages[].role=tool", "status": "suspect", "reason": "Tool round-trips depend on the coding tool and selected model; do not send until verified."},
+        {"path": "messages[].role=function", "status": "forbidden", "reason": "Legacy OpenAI function role is not part of the safe Coding Plan subset."},
+        {"path": "messages[].content as array", "status": "suspect", "reason": "Multimodal content parts are not part of the safe Coding Plan subset."},
+        {"path": "max_completion_tokens", "status": "forbidden", "reason": "Use max_tokens for the Coding Plan OpenAI subset."},
+        {"path": "response_format", "status": "suspect", "reason": "Structured output support is not documented for the Coding Plan package endpoint; validate before enabling."},
+        {"path": "tools", "status": "suspect", "reason": "Function calling support is tool/model dependent; omit until verified."},
+        {"path": "tool_choice", "status": "suspect", "reason": "Only meaningful if tools are verified as supported."},
+        {"path": "parallel_tool_calls", "status": "forbidden", "reason": "OpenAI-specific extension; not part of the safe Coding Plan subset."},
+        {"path": "stream_options", "status": "suspect", "reason": "Start without stream_options even when stream=true; add only after provider verification."},
+        {"path": "reasoning_effort", "status": "forbidden", "reason": "OpenAI reasoning-model field; not documented for Coding Plan OpenAI endpoint."},
+        {"path": "metadata", "status": "forbidden", "reason": "OpenAI storage/metadata field; not documented for Coding Plan package endpoint."},
+        {"path": "store", "status": "forbidden", "reason": "OpenAI storage field; not documented for Coding Plan package endpoint."},
+        {"path": "service_tier", "status": "forbidden", "reason": "OpenAI service-tier field; not documented for Coding Plan package endpoint."},
+        {"path": "prediction", "status": "forbidden", "reason": "OpenAI predicted output field; not documented for Coding Plan package endpoint."},
+        {"path": "modalities", "status": "forbidden", "reason": "OpenAI multimodal output field; not documented for Coding Plan package endpoint."},
+        {"path": "audio", "status": "forbidden", "reason": "OpenAI audio output field; not documented for Coding Plan package endpoint."},
+        {"path": "logprobs", "status": "forbidden", "reason": "OpenAI token logprob field; not documented for Coding Plan package endpoint."},
+        {"path": "top_logprobs", "status": "forbidden", "reason": "OpenAI token logprob field; not documented for Coding Plan package endpoint."},
+        {"path": "seed", "status": "forbidden", "reason": "OpenAI beta determinism field; not documented for Coding Plan package endpoint."},
+        {"path": "user", "status": "forbidden", "reason": "OpenAI abuse-monitoring field; not documented for Coding Plan package endpoint."}
+      ],
+      "usage_constraints": [
+        "Official docs state Coding Plan is limited to AI coding tools/OpenClaw-like agents and must not be used for automated scripts, custom app backends, workflow platforms, or non-interactive batch calls.",
+        "Coding Plan API keys are package-specific and use sk-sp-* format; do not mix them with pay-as-you-go Model Studio keys or base URLs."
+      ],
+      "forbidden_request_fields": [
+        {"path": "responses API via Codex new wire_api=responses", "reason": "Aliyun Codex Coding Plan docs say new Codex Responses API is not supported for Coding Plan; use Chat/Completions API in compatible tools."},
+        {"path": "non-interactive automated/batch backend use", "reason": "Explicitly forbidden by Coding Plan usage docs."},
+        {"path": "full OpenAI Chat Completions parameter passthrough", "reason": "This contract deliberately narrows the inherited OpenAI Chat surface; adapters must apply strict_request_whitelist before sending requests."}
+      ],
+      "compatibility_notes": "Do not treat inherits=openai_chat_completions as permission to forward every OpenAI field. Prefer aliyun_coding_plan_anthropic with the claude_code_anthropic profile when integrating through a Claude Code-like tool surface."
+    },
+    "aliyun_coding_plan_anthropic": {
+      "provider": "aliyun_coding_plan",
+      "wire_api": "anthropic_messages",
+      "inherits": "anthropic_messages",
+      "compatibility_level": "claude_code_anthropic_compatible",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/messages",
+        "base_urls_for_anthropic_client": {
+          "intl_current": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
+          "cn_current": "https://coding.dashscope.aliyuncs.com/apps/anthropic"
+        },
+        "final_url_pattern": "{base_url_for_anthropic_client}/v1/messages",
+        "do_not_append_apps_anthropic_twice": true
+      },
+      "headers": {
+        "required": ["x-api-key or Authorization bearer as required by the client/tool", "anthropic-version when client sends native Anthropic requests"],
+        "optional": []
+      },
+      "client_compatibility_profiles": {
+        "claude_code_anthropic": {
+          "purpose": "Emit Anthropic Messages-compatible requests in the same shape used by Claude Code configuration documented by the provider.",
+          "identity_spoofing": false,
+          "do_not_set_fake_user_agent": true,
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "<Coding Plan API Key>",
+            "ANTHROPIC_BASE_URL": {
+              "intl_current": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
+              "cn_current": "https://coding.dashscope.aliyuncs.com/apps/anthropic"
+            },
+            "ANTHROPIC_MODEL": "<Coding Plan supported model>",
+            "ANTHROPIC_SMALL_FAST_MODEL": "<optional Coding Plan supported model>",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "<optional Coding Plan supported model>",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "<optional Coding Plan supported model>",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "<optional Coding Plan supported model>",
+            "CLAUDE_CODE_SUBAGENT_MODEL": "<optional Coding Plan supported model>"
+          },
+          "request_shape": {
+            "model": "Use ANTHROPIC_MODEL or the selected Coding Plan model.",
+            "max_tokens": "required",
+            "system": "top-level system field; do not send messages[].role=system",
+            "messages": "array of user/assistant turns only",
+            "stream": "optional boolean"
+          },
+          "recommended_minimal_probe": {
+            "model": "qwen3.6-plus",
+            "max_tokens": 128,
+            "system": "You are a concise coding assistant.",
+            "messages": [
+              {"role": "user", "content": "Say hello."}
+            ],
+            "stream": true
+          },
+          "notes": "Use this profile when an integration needs Claude Code-compatible behavior. This means Anthropic Messages wire format and documented Claude Code environment variables, not falsifying client identity."
+        }
+      },
+      "adapter_policy": {
+        "prefer_for_claude_code_like_tools": true,
+        "default_to_anthropic_messages_rules": true,
+        "coerce_system_messages_to_top_level_system": true,
+        "drop_openai_only_fields": true,
+        "notes": "If an OpenAI-compatible request is rejected by Coding Plan, retrying through this Anthropic-compatible profile is the safer tool-facing path when the user has configured a Claude Code-like integration."
+      },
+      "usage_constraints": [
+        "Same Coding Plan restrictions as aliyun_coding_plan_openai.",
+        "Some tools may append /v1; use the exact base URL required by the client/tool."
+      ],
+      "compatibility_notes": "Use Anthropic Messages field rules when the client emits native Anthropic requests."
+    },
+    "xfyun_astron_coding_plan_openai": {
+      "provider": "xfyun_astron_coding_plan",
+      "wire_api": "chat_completions",
+      "inherits": "openai_chat_completions",
+      "compatibility_level": "narrow_openai_chat_subset",
+      "endpoint": {
+        "method": "POST",
+        "path": "/chat/completions",
+        "default_base_url_for_openai_sdk": "https://maas-coding-api.cn-huabei-1.xf-yun.com/v2",
+        "final_url_pattern": "{default_base_url_for_openai_sdk}/chat/completions",
+        "do_not_append_v2_twice": true
+      },
+      "headers": {
+        "required": ["Authorization: Bearer <Coding Plan API Key>", "Content-Type: application/json"],
+        "optional": []
+      },
+      "model_policy": {
+        "required_model": "astron-code-latest",
+        "notes": "Official Coding Plan doc says all requests should use model=astron-code-latest; underlying model is selected in the MaaS package page and takes 1-3 minutes to apply."
+      },
+      "strict_request_whitelist": [
+        {"path": "model", "status": "required", "type": "string", "required_value": "astron-code-latest"},
+        {"path": "messages", "status": "required", "type": "array<object>"},
+        {"path": "messages[].role", "status": "required", "type": "string", "allowed_values": ["system", "user", "assistant"]},
+        {"path": "messages[].content", "status": "required", "type": "string"},
+        {"path": "stream", "status": "optional", "type": "boolean", "recommended": true},
+        {"path": "temperature", "status": "optional", "type": "number"},
+        {"path": "top_p", "status": "optional", "type": "number"},
+        {"path": "max_tokens", "status": "optional", "type": "integer"}
+      ],
+      "adapter_policy": {
+        "default_to_strict_whitelist": true,
+        "drop_unknown_fields": true,
+        "drop_null_optional_fields": true,
+        "coerce_developer_role_to_system": true,
+        "coerce_max_completion_tokens_to_max_tokens": true,
+        "prefer_streaming_probe": true,
+        "notes": "Although this endpoint is documented as OpenAI protocol, observed compatibility should be treated as a narrow Chat Completions subset. Start from the whitelist and add fields only after provider-specific verification."
+      },
+      "recommended_minimal_probe": {
+        "model": "astron-code-latest",
+        "messages": [
+          {"role": "user", "content": "Say hello."}
+        ],
+        "stream": true
+      },
+      "suspect_or_forbidden_request_fields": [
+        {"path": "messages[].role=developer", "status": "forbidden", "reason": "Many OpenAI-compatible coding-plan endpoints only accept system/user/assistant roles. Merge developer content into a system message."},
+        {"path": "messages[].role=tool", "status": "suspect", "reason": "Tool round-trips are not documented in Astron Coding Plan; do not send until verified."},
+        {"path": "messages[].role=function", "status": "forbidden", "reason": "Legacy OpenAI function role is not documented for this endpoint."},
+        {"path": "messages[].content as array", "status": "suspect", "reason": "Multimodal OpenAI content parts are not documented for Astron Coding Plan."},
+        {"path": "max_completion_tokens", "status": "forbidden", "reason": "Narrow compatible endpoints commonly only accept max_tokens; adapter should coerce to max_tokens."},
+        {"path": "response_format", "status": "suspect", "reason": "Structured output support is not documented for Astron Coding Plan OpenAI endpoint."},
+        {"path": "tools", "status": "suspect", "reason": "Function calling support is not documented for Astron Coding Plan; omit until verified."},
+        {"path": "tool_choice", "status": "suspect", "reason": "Only meaningful if tools are verified as supported."},
+        {"path": "parallel_tool_calls", "status": "forbidden", "reason": "OpenAI-specific extension; not documented for Astron Coding Plan."},
+        {"path": "stream_options", "status": "suspect", "reason": "Start without stream_options even when stream=true; add only after provider verification."},
+        {"path": "reasoning_effort", "status": "forbidden", "reason": "OpenAI reasoning-model field; not documented for Astron Coding Plan."},
+        {"path": "metadata", "status": "forbidden", "reason": "OpenAI storage/metadata field; not documented for Astron Coding Plan."},
+        {"path": "store", "status": "forbidden", "reason": "OpenAI storage field; not documented for Astron Coding Plan."},
+        {"path": "service_tier", "status": "forbidden", "reason": "OpenAI service-tier field; not documented for Astron Coding Plan."},
+        {"path": "prediction", "status": "forbidden", "reason": "OpenAI predicted output field; not documented for Astron Coding Plan."},
+        {"path": "modalities", "status": "forbidden", "reason": "OpenAI multimodal output field; not documented for Astron Coding Plan."},
+        {"path": "audio", "status": "forbidden", "reason": "OpenAI audio output field; not documented for Astron Coding Plan."},
+        {"path": "logprobs", "status": "forbidden", "reason": "OpenAI token logprob field; not documented for Astron Coding Plan."},
+        {"path": "top_logprobs", "status": "forbidden", "reason": "OpenAI token logprob field; not documented for Astron Coding Plan."},
+        {"path": "seed", "status": "forbidden", "reason": "OpenAI beta determinism field; not documented for Astron Coding Plan."},
+        {"path": "user", "status": "forbidden", "reason": "OpenAI abuse-monitoring field; not documented for Astron Coding Plan."},
+        {"path": "prompt_cache_key", "status": "forbidden", "reason": "OpenAI prompt cache field; not documented for Astron Coding Plan."},
+        {"path": "prompt_cache_retention", "status": "forbidden", "reason": "OpenAI prompt cache field; not documented for Astron Coding Plan."}
+      ],
+      "forbidden_request_fields": [
+        {"path": "model values other than astron-code-latest", "reason": "Official Coding Plan doc declares a unified model ID."},
+        {"path": "base URL for non-Coding MaaS inference", "reason": "Coding Plan uses maas-coding-api; do not mix with regular MaaS API endpoints."},
+        {"path": "full OpenAI Chat Completions parameter passthrough", "reason": "This contract deliberately narrows the inherited OpenAI Chat surface; adapters must apply strict_request_whitelist before sending requests."}
+      ],
+      "compatibility_notes": "Do not treat inherits=openai_chat_completions as permission to forward every OpenAI field. For this provider, strict_request_whitelist and suspect_or_forbidden_request_fields override the inherited contract."
+    },
+    "xfyun_astron_coding_plan_anthropic": {
+      "provider": "xfyun_astron_coding_plan",
+      "wire_api": "anthropic_messages",
+      "inherits": "anthropic_messages",
+      "compatibility_level": "claude_code_anthropic_compatible",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/messages",
+        "default_base_url_for_anthropic_client": "https://maas-coding-api.cn-huabei-1.xf-yun.com/anthropic",
+        "final_url_pattern": "{default_base_url_for_anthropic_client}/v1/messages",
+        "do_not_append_anthropic_twice": true
+      },
+      "headers": {
+        "required": ["ANTHROPIC_AUTH_TOKEN / x-api-key equivalent carrying the Coding Plan API Key", "Content-Type: application/json"],
+        "optional": ["anthropic-version if sent by the client/tool"]
+      },
+      "client_compatibility_profiles": {
+        "claude_code_anthropic": {
+          "purpose": "Emit Anthropic Messages-compatible requests in the same shape used by Claude Code configuration documented by the provider.",
+          "identity_spoofing": false,
+          "do_not_set_fake_user_agent": true,
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "<Coding Plan API Key>",
+            "ANTHROPIC_BASE_URL": "https://maas-coding-api.cn-huabei-1.xf-yun.com/anthropic",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": 1,
+            "API_TIMEOUT_MS": 600000,
+            "ANTHROPIC_MODEL": "astron-code-latest",
+            "ANTHROPIC_SMALL_FAST_MODEL": "astron-code-latest"
+          },
+          "request_shape": {
+            "model": "astron-code-latest",
+            "max_tokens": "required",
+            "system": "top-level system field; do not send messages[].role=system",
+            "messages": "array of user/assistant turns only",
+            "stream": "optional boolean"
+          },
+          "recommended_minimal_probe": {
+            "model": "astron-code-latest",
+            "max_tokens": 128,
+            "system": "You are a concise coding assistant.",
+            "messages": [
+              {"role": "user", "content": "Say hello."}
+            ],
+            "stream": true
+          },
+          "notes": "Use this profile when an integration needs Claude Code-compatible behavior. This means Anthropic Messages wire format and documented Claude Code environment variables, not falsifying client identity."
+        }
+      },
+      "adapter_policy": {
+        "prefer_for_claude_code_like_tools": true,
+        "default_to_anthropic_messages_rules": true,
+        "coerce_system_messages_to_top_level_system": true,
+        "drop_openai_only_fields": true,
+        "notes": "For Claude Code-like integrations, use the /anthropic endpoint and Astron's documented Claude Code env shape instead of the OpenAI-compatible /v2 endpoint."
+      },
+      "model_policy": {
+        "required_model": "astron-code-latest",
+        "small_fast_model": "astron-code-latest"
+      },
+      "forbidden_request_fields": [
+        {"path": "messages[].role=system", "reason": "When using Anthropic protocol, system prompt must be top-level system."},
+        {"path": "model values other than astron-code-latest", "reason": "Official Coding Plan doc declares a unified model ID."},
+        {"path": "regular MaaS API base URL", "reason": "Coding Plan uses maas-coding-api only."}
+      ],
+      "compatibility_notes": "Use Anthropic Messages field rules when the client emits native Anthropic requests."
+    }
+  },
+  "adapter_defaults": {
+    "structured_output_strategy": {
+      "openai_responses": "Use text.format/json_schema or tools where supported.",
+      "openai_chat_completions": "Use response_format.type=json_schema when supported; otherwise json_object plus schema validation.",
+      "anthropic_messages": "Use tool use with a schema-bearing virtual tool.",
+      "gemini_generate_content": "Use generationConfig.responseMimeType=application/json and generationConfig.responseSchema when supported.",
+      "deepseek_chat": "Use response_format.type=json_object plus prompt instruction and local schema validation.",
+      "aliyun_qwen_openai_chat": "Use response_format.type=json_object or documented structured output support, then validate locally.",
+      "coding_plan": "Prefer the protocol emitted by the coding tool. For Claude Code-like integrations, prefer the provider's Anthropic-compatible Coding Plan endpoint and its claude_code_anthropic profile. Validate responses locally because Coding Plan docs specify compatibility endpoints rather than full per-field schema."
+    },
+    "coding_plan_protocol_selection": {
+      "default_rule": "Do not use general-purpose OpenAI/Anthropic adapters unchanged against Coding Plan endpoints.",
+      "openai_compatible": "Use only the provider-specific strict_request_whitelist and avoid full OpenAI Chat parameter passthrough.",
+      "claude_code_like": "Use the Anthropic-compatible endpoint, top-level system, user/assistant messages only, max_tokens, and the documented Claude Code environment variables.",
+      "identity_rule": "Do not spoof a false User-Agent or client identity. 'Claude Code-compatible' means request shape and documented environment mapping, not pretending to be a different client."
+    },
+    "sampling_policy": {
+      "rule": "Expose temperature/top_p but warn users that many providers recommend changing only one at a time.",
+      "provider_limits": {
+        "anthropic_messages": "temperature/top_p are 0..1 in native API.",
+        "openai_chat_completions": "temperature is normally 0..2.",
+        "deepseek_chat": "temperature <= 2 and top_p <= 1.",
+        "aliyun_qwen_openai_chat": "temperature range is [0,2); top_p range is (0,1]."
+      }
+    },
+    "logging_policy": {
+      "redact_request_fields": ["Authorization", "x-api-key", "api_key", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "DASHSCOPE_API_KEY"],
+      "persist_raw_stream_chunks": true,
+      "persist_assembled_text": true,
+      "persist_usage_if_present": true
+    }
+  }
+}
