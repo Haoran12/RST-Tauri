@@ -50,6 +50,8 @@ ST 角色卡可能通过两种方式携带 lore：
 
 若角色卡同时存在内嵌 `character_book` 和 `extensions.world` 绑定，RST 按 ST 兼容目标优先使用绑定的外部世界书；内嵌书仍保留在导入数据中，避免导出时丢失。
 
+角色卡世界书绑定与 API 配置无关。`data.extensions.world`、内嵌 `data.character_book` 和角色 scoped Regex 授权不得以 Provider、model、endpoint 或 `active_api_config_id` 分组；切换 API 配置不能改写角色卡、切换角色绑定世界书或重新请求 scoped Regex 授权。
+
 ## 4. 导入导出规则
 
 - 导入 PNG / JSON 角色卡时，解析出完整 TavernCard V3 JSON，并把原始未知字段保存在对应 `extensions` 或原始对象中。

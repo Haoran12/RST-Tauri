@@ -3,7 +3,7 @@
 本文档承载 Agent 模式的数据语义与结构化模型：
 
 - 三层数据语义（L1 Truth / L2 Per-Character Access / L3 Subjective）
-- Layer 1 客观真相：SceneModel / KnowledgeEntry / CharacterRecord
+- Layer 1 客观真相：SceneModel / LocationGraph / KnowledgeEntry / CharacterRecord
 - Layer 2 逐角色可触及视图：EmbodimentState / FilteredSceneView / AccessibleKnowledge
 - Layer 3 主观状态：Belief / Emotion / Relation / Goals
 
@@ -19,6 +19,7 @@
 ┌──────────────────────────────────────────────────────────────┐
 │  Layer 1 — Truth Store（客观真相，仅编排器与结果规划/验证层访问）│
 │  ├── SceneModel              场景客观状态                    │
+│  ├── LocationGraph           地点层级、别名、路线边与路程估算 │
 │  ├── KnowledgeEntry[*]       统一知识库（含世界/势力/角色档 │
 │  │                           案/记忆，带访问策略）           │
 │  └── 角色 baseline_body_profile（物种/感官基线/灵觉基线）    │
@@ -61,6 +62,12 @@ SceneSeed + 公开世界 / 地点 / 人物上下文
     → SceneInitializer(LLM, 公开上下文受控补全) → SceneInitializationDraft 候选
     → Validator + StateCommitter → 新 SceneModel(L1)
 
+地点名称 / 场景锚点
+    → LocationResolver(LocationGraph) → LocationNode + ancestors / ambiguity
+    → LocationFactResolver(LocationGraph + LocationSpatialRelation + RegionFact + KnowledgeAccessResolver)
+    → RoutePlanner(LocationEdge 带权图)
+    → LocationContext(运行时输入的一部分，不持久化)
+
 最近用户自由文本 + 当前 SceneModel(L1)
     → SceneStateExtractor(LLM, 场景域 God-read) → SceneUpdate / UserInputDelta 候选
     → Validator + StateApplier → World Truth (L1)
@@ -97,10 +104,41 @@ pub struct SceneModel {
     pub mana_field: ManaField,                 // 灵力场（玄幻扩展）
     pub entities: Vec<SceneEntity>,            // 在场实体（id + 位置 + 姿态）
     pub observable_signals: ObservableSignals,
+    pub private_state: ScenePrivateState,       // 隐藏实体/机关/伪装/连续性秘密；仅场景域 God-read 与验证层可读
     pub event_stream: Vec<SceneEvent>,
     pub uncertainty_notes: Vec<String>,
 }
+
+pub struct ScenePrivateState {
+    pub hidden_facts: Vec<ScenePrivateFact>,
+    pub reveal_triggers: Vec<SceneRevealTrigger>,
+    pub source_constraint_ids: Vec<String>,
+}
+
+pub struct ScenePrivateFact {
+    pub fact_id: String,
+    pub source_knowledge_id: Option<String>,
+    pub applies_to: Vec<String>,              // scene_id / entity_id / location_id / participant_id
+    pub fact_kind: String,                    // hidden_presence / trap / disguise / sealed_area / continuity_secret ...
+    pub structured_payload: serde_json::Value,
+    pub summary_text: String,                 // llm_readable；只供场景域编排一致性
+}
+
+pub struct SceneRevealTrigger {
+    pub trigger_id: String,
+    pub private_fact_id: String,
+    pub condition_refs: Vec<String>,          // semantic refs；由程序/技能契约/KnowledgeRevealEvent 校验
+    pub reveal_target: RevealTarget,
+}
+
+pub enum RevealTarget {
+    PublicSceneFact,
+    KnowledgeEntry(String),
+    CharacterKnownBy(Vec<String>),
+}
 ```
+
+`ScenePrivateState` 属于 Layer 1，但不是公开场景事实。`SceneFilter` 默认不得把它派生进 `FilteredSceneView`；`SurfaceRealizerInput` 默认不得携带它；只有 `SceneInitializer` / `SceneStateExtractor` 的场景域 God-read 输入、`OutcomePlanner`、Validator 与 StateCommitter 可按权限读取。私有事实若被故事揭示，必须转换为公开 `SceneDelta`、`KnowledgeRevealEvent` 或合法 `StateUpdatePlan` 后提交。
 
 ### 2.2 Physical Conditions（物理环境）
 
@@ -184,9 +222,151 @@ pub enum ManaSourceType {
 }
 ```
 
+### 2.3.1 LocationGraph（地点层级、自然地理与路线图）
+
+`LocationGraph` 是 Layer 1 的结构化地点真相，完整规则见 [15_agent_location_system.md](15_agent_location_system.md)。它由两类关系组成：
+
+- **层级关系**：`LocationNode.parent_id` 表达包含 / 归属，例如 `临水县 -> 云北州 -> 大梁国`。这是地区事实继承和地点消歧的基础。
+- **空间覆盖关系**：`LocationSpatialRelation` 表达自然地理地带覆盖、穿过、重叠或邻接行政区 / 聚居地 / 场所。
+- **路线关系**：`LocationEdge` 表达相邻、道路、河道、山口、传送阵等可通行或邻接关系。路程估算只基于路线图，不能只因同属一个父级就写成硬距离。
+
+```rust
+pub struct LocationNode {
+    pub location_id: String,
+    pub name: String,
+    pub aliases: Vec<LocationAlias>,
+    pub polity_id: Option<String>,
+    pub parent_id: Option<String>,
+    pub canonical_level: LocationLevel,
+    pub type_label: String,
+    pub tags: Vec<String>,
+    pub status: LocationStatus,
+    pub metadata: serde_json::Value,
+    pub schema_version: String,
+}
+
+pub enum LocationLevel {
+    WorldRoot,
+    Realm,
+    Continent,
+    NaturalRegion,
+    Polity,
+    MajorRegion,
+    LocalRegion,
+    Settlement,
+    DistrictOrSite,
+    RoomOrSubsite,
+}
+
+pub struct LocationEdge {
+    pub edge_id: String,
+    pub from_location_id: String,
+    pub to_location_id: String,
+    pub relation: LocationEdgeRelation,
+    pub bidirectional: bool,
+    pub distance_km: Option<DistanceEstimate>,
+    pub travel_time: Option<TravelTimeEstimate>,
+    pub terrain_cost: f32,
+    pub safety_cost: f32,
+    pub seasonal_modifiers: Vec<SeasonalRouteModifier>,
+    pub allowed_modes: Vec<TravelMode>,
+    pub confidence: FactConfidence,
+    pub source: FactSource,
+    pub schema_version: String,
+}
+
+pub struct LocationSpatialRelation {
+    pub relation_id: String,
+    pub source_location_id: String,
+    pub target_location_id: String,
+    pub relation: LocationSpatialRelationKind,
+    pub coverage: Option<CoverageEstimate>,
+    pub confidence: FactConfidence,
+    pub source: FactSource,
+    pub schema_version: String,
+}
+
+pub enum LocationSpatialRelationKind {
+    Overlaps,
+    Crosses,
+    SourceContainsPartOfTarget,
+    SourcePartlyWithinTarget,
+    AdjacentTo,
+    WithinNaturalBand,
+}
+```
+
+`WorldRoot` 是技术根节点，每个 Agent World 只能有一个。`Realm` 是根节点之下最高叙事地理域，可表示界域、大陆、位面、星球、大世界、梦境层等。`NaturalRegion` 是自然地理地带，例如山脉、平原、丘陵、高原、荒漠、流域或海域；它可通过 `LocationSpatialRelation` 覆盖或穿过多个行政节点，不靠多重 `parent_id` 表达。`Settlement` 指有稳定居民、社会功能或常驻组织的聚居地，例如城市、镇、乡、村、寨、集市镇、边堡、驿站聚落、宗门外围坊市或长期营地；它不是行政区域，县 / 郡 / 领属于 `LocalRegion`。
+
+`LocationNode.aliases` 是运行时 hydrate 视图；持久化权威是 SQLite 的 `location_aliases` 表。`LocationSpatialRelationKind` 的方向均以 `source_location_id -> target_location_id` 解释：`SourceContainsPartOfTarget` 表示 source 包含 target 的一部分，`SourcePartlyWithinTarget` 表示 source 的一部分位于 target 内，`WithinNaturalBand` 表示 source 位于 target 自然地理带影响范围内。
+
+### 2.3.2 时间锚点、会话与正史资格
+
+Agent World 使用一条 canonical Truth 作为正史。多份聊天记录不是多套世界状态，而是同一 World 下的 `AgentSession`：用户选择特定时期、地点、扮演人物和叙事视角进入世界。
+
+```rust
+pub struct WorldMainlineCursor {
+    pub world_id: String,
+    pub timeline_id: String,                 // 第一版固定为 "main"
+    pub mainline_head_turn_id: Option<String>,
+    pub mainline_time_anchor: TimeAnchor,
+    pub updated_at: DateTime,
+}
+
+pub struct AgentSession {
+    pub session_id: String,
+    pub world_id: String,
+    pub title: String,
+    pub session_kind: AgentSessionKind,
+    pub period_anchor: TimeAnchor,
+    pub player_character_id: Option<String>,
+    pub canon_status: SessionCanonStatus,
+    pub conflict_policy: Option<ConflictPolicyDecision>,
+    pub created_at: DateTime,
+    pub updated_at: DateTime,
+}
+
+pub enum AgentSessionKind {
+    Mainline,
+    Retrospective,       // period_anchor < WorldMainlineCursor.mainline_time_anchor
+    FuturePreview,       // period_anchor > WorldMainlineCursor.mainline_time_anchor；默认不入正史
+}
+
+pub enum SessionCanonStatus {
+    CanonCandidate,      // 尚未发生硬冲突，候选细节可经校验提升
+    PartiallyCanon,      // 冲突前可提升，冲突回合及之后非正史
+    NonCanon,            // 整条会话非正史
+}
+
+pub enum TurnCanonStatus {
+    CanonCandidate,
+    CanonPromoted,
+    ConflictWarned,
+    NonCanon,
+}
+
+pub enum ConflictPolicyDecision {
+    NonCanonAfterConflict,
+    WholeSessionNonCanon,
+}
+```
+
+`TimeAnchor` 必须是程序可比较的结构化时间锚点，而不是只给 LLM 阅读的自然语言。不同 World 可在 `world_base.yaml` 中定义日历，但编译后的运行时必须能比较同一 World 内两个锚点的先后：
+
+```rust
+pub struct TimeAnchor {
+    pub calendar_id: String,
+    pub ordinal: i64,                         // World 内可排序时间刻度
+    pub precision: TimePrecision,             // exact / day / period / era
+    pub display_text: String,                 // llm_readable；不参与排序
+}
+```
+
+可变化的 Layer 1 事实必须支持有效时间，至少在写入元数据中保存 `valid_from` / `valid_until` 或来源事件时间。角色位置、伤势、临时状态、关系授权、Knowledge 揭示、地点状态和历史事件结果不得只覆盖“当前值”。运行时通过 `WorldStateAt(period_anchor)` 构建某一会话的工作视图，禁止过去线读取未来状态。
+
 ### 2.4 KnowledgeEntry（统一知识模型）
 
-`KnowledgeEntry` 是 Layer 1 的核心，承载世界设定 / 地区设定 / 势力设定 / 角色档案分面 / 历史事件（Memory）。所有"谁能读取什么 Knowledge"的判断由它的 `access_policy` 字段决定，由 `KnowledgeAccessResolver` 统一计算。
+`KnowledgeEntry` 是 Layer 1 的核心，承载世界设定 / 地点与地区设定 / 势力设定 / 角色档案分面 / 历史事件约束 / 角色记忆。所有"谁能读取什么 Knowledge"的判断由它的 `access_policy` 字段决定，由 `KnowledgeAccessResolver` 统一计算。
 
 ```rust
 pub struct KnowledgeEntry {
@@ -203,15 +383,16 @@ pub struct KnowledgeEntry {
 
 pub enum KnowledgeKind {
     WorldFact,        // 世界级设定（宇宙规则、修真体系）
-    RegionFact,       // 地区设定（北境地理、风俗）
+    RegionFact,       // 地点/地区设定（地理、风俗、气候、禁令；subject_id 指向 LocationNode）
     FactionFact,      // 势力设定（玄天宗内规、口诀）
     CharacterFacet,   // 角色档案分面（外貌/身份/能力/血脉/...）
+    HistoricalEvent,  // 正史事件约束；用于过去线 Truth 引导与冲突检测
     Memory,           // 历史事件（亲历或传闻）
 }
 
 pub enum KnowledgeSubject {
     World,
-    Region(String),
+    Region(String),   // LocationNode.location_id；保留 Region 命名表示地理主体
     Faction(String),
     Character { id: String, facet: CharacterFacetType },
     Event { event_id: String },
@@ -230,6 +411,7 @@ pub enum CharacterFacetType {
     Background,        // 出身背景
     Motivation,        // 真实动机
     Trauma,            // 创伤
+    MindModelCard,     // 认知基线卡：注意力、风险偏好、常用推理模式、价值排序
     // 可扩展
 }
 
@@ -283,6 +465,11 @@ pub enum SubjectAwareness {
 pub struct KnowledgeMetadata {
     pub created_at: DateTime,
     pub updated_at: DateTime,
+    pub valid_from: Option<TimeAnchor>,
+    pub valid_until: Option<TimeAnchor>,
+    pub source_session_id: Option<String>,
+    pub source_scene_turn_id: Option<String>,
+    pub derived_from_event_id: Option<String>,
     // Memory 专用（其他 kind 留空）
     pub emotional_weight: Option<f64>,
     pub last_accessed_at: Option<DateTime>,
@@ -298,8 +485,9 @@ pub struct KnowledgeMetadata {
 4. `access_policy.scope` 含 `GodOnly` 表示仅编排器可读，对所有角色拒绝访问；`KnowledgeAccessResolver` 必须先检查 `GodOnly`，命中后直接拒绝，不再计算 `known_by` / 其他 scope / conditions。
 5. `GodOnly` 启用态下 `access_policy.known_by` 必须为空；Validator / StateCommitter 自动检查并拒绝 `GodOnly + known_by 非空` 的状态。
 6. 若故事推进后 OutcomePlanner 候选 + EffectValidator 确认某条 `GodOnly` 知识可被角色获知，必须通过 `KnowledgeRevealEvent` 先移除 `GodOnly` 或降级为其他 scope，再追加 `known_by`；禁止在 `GodOnly` 仍存在时直接写入 `known_by`。
-7. `MemoryEntry` 不再独立存在；历史事件以 `KnowledgeEntry { kind: Memory }` 形式统一存储。
+7. `HistoricalEvent` 表示正史层面的事件约束与已知结果；`Memory` 表示某个角色亲历、听闻或推断出的主观记忆。两者不能混用。
 8. Layer 1 的 Knowledge 内容由编排器/作者/StateCommitter 写入；CognitivePass 不可写。
+9. `summary_text` 只供 LLM 阅读，不参与过去线硬约束判断；过去线仲裁只能读取 `HistoricalEvent` 的结构化字段。
 
 #### 2.4.1 访问策略存储与查询索引
 
@@ -378,6 +566,40 @@ pub struct KnowledgeMetadata {
 }
 ```
 
+**示例：CharacterFacet::MindModelCard**
+
+```json
+{
+  "summary_text": "谨慎、重承诺、遇到未知威胁时先保护同伴再试探",
+  "attention_biases": ["protect_allies", "notice_hidden_threats"],
+  "risk_tolerance": "low",
+  "default_social_strategy": "polite_probe",
+  "value_priorities": ["promise", "ally_safety", "truth"],
+  "extensions": {}
+}
+```
+
+**示例：KnowledgeKind::RegionFact**
+
+```json
+{
+  "summary_text": "云北州民风尚武",
+  "fact_type": "customs",
+  "applies_to_location_id": "yunbei_state",
+  "inheritance": {
+    "inheritable": true,
+    "applies_to_descendants": true,
+    "max_depth": null,
+    "blocked_location_ids": [],
+    "override_policy": "child_overrides_parent"
+  },
+  "confidence": "asserted",
+  "extensions": {}
+}
+```
+
+`RegionFact` 的 `applies_to_location_id` 必须指向 `LocationNode.location_id`。继承只沿 `LocationNode.parent_id` 链计算；继承会扩大候选事实范围，但不会绕过 `KnowledgeAccessResolver`，也不会把父级事实复制成子地点的新 KnowledgeEntry。
+
 **示例：KnowledgeKind::Memory**
 
 ```json
@@ -393,7 +615,71 @@ pub struct KnowledgeMetadata {
 }
 ```
 
+**示例：KnowledgeKind::HistoricalEvent**
+
+```json
+{
+  "summary_text": "十年前，乙在青石镇背叛丙，导致丙失去宗门信物。",
+  "event_id": "betrayal_qingshi_10y_ago",
+  "time_window": {
+    "start": {"calendar_id": "main", "ordinal": 12000, "precision": "day", "display_text": "十年前春末"},
+    "end": {"calendar_id": "main", "ordinal": 12003, "precision": "day", "display_text": "三日内"}
+  },
+  "participants": [
+    {"character_id": "yi", "role": "betrayer"},
+    {"character_id": "bing", "role": "victim"}
+  ],
+  "required_outcomes": [
+    {"outcome_id": "yi_betrays_bing", "domain": "relationship", "subject_id": "yi", "target_id": "bing"},
+    {"outcome_id": "token_lost", "domain": "item_state", "subject_id": "sect_token"}
+  ],
+  "forbidden_outcomes": [
+    {"outcome_id": "yi_never_betrays", "domain": "event_negation"},
+    {"outcome_id": "bing_dies_here", "domain": "character_life_state", "subject_id": "bing"}
+  ],
+  "known_after_effects": [
+    {"fact_ref": "bing_missing_sect_token", "valid_from_ordinal": 12004}
+  ],
+  "open_detail_slots": ["betrayal_motive", "exact_dialogue", "who_witnessed"]
+}
+```
+
+`HistoricalEvent` 的 `required_outcomes` / `forbidden_outcomes` / `known_after_effects` 是过去线冲突检测的结构化依据。`open_detail_slots` 表示允许过去线补完但尚未定死的过程、动机、见证者、对白或局部支线。
+
 **核心字段表**（所有 facet/fact 类型应预定义最小集）由 `models/knowledge_schemas.rs` 维护，每种类型一个 struct。`extensions` 总是 `serde_json::Map<String, serde_json::Value>` 兜底。
+
+### 2.5.1 TruthGuidance（过去线引导输入）
+
+`HistoricalTruthResolver` 根据 `period_anchor + location + participants` 收集相关 `HistoricalEvent`、当时可见状态、后续已知结果与禁止矛盾项，生成只读的 `TruthGuidance`。它不是新的持久事实，只是运行时输入。
+
+```rust
+pub struct TruthGuidance {
+    pub session_id: String,
+    pub period_anchor: TimeAnchor,
+    pub related_event_ids: Vec<String>,
+    pub hard_constraints: Vec<TruthConstraint>,
+    pub soft_context: Vec<String>,                 // llm_readable
+    pub open_detail_slots: Vec<OpenDetailSlot>,
+    pub future_knowledge_warnings: Vec<String>,    // trace_only；不得进入受限角色节点
+}
+
+pub struct TruthConstraint {
+    pub constraint_id: String,
+    pub source_knowledge_id: String,
+    pub constraint_kind: String,                   // required_outcome / forbidden_outcome / known_after_effect
+    pub applies_to_refs: Vec<String>,
+    pub structured_payload: serde_json::Value,
+}
+
+pub struct OpenDetailSlot {
+    pub slot_id: String,
+    pub source_event_id: String,
+    pub detail_kind: String,                       // motive / dialogue / witness / route / local_cause ...
+    pub promotion_policy: String,                  // promote_if_consistent / trace_only
+}
+```
+
+`TruthGuidance` 可进入 SceneInitializer、SceneStateExtractor、OutcomePlanner 和冲突检测器的 God-read 输入域，但不得进入 `CharacterCognitivePassInput`。SurfaceRealizer 只能通过 `NarrationScope` 派生出的可叙述事实接触其中允许披露的部分。
 
 ### 2.6 KnowledgeRevealEvent（访问权限扩展）
 
@@ -449,6 +735,44 @@ pub struct ManaSenseBaseline {
     pub acuity: f64,                               // 0.0-1.0；凡人 0.0；普通修士 0.4-0.6；高阶仙灵 ~1.0
     pub overload_threshold: f64,                   // 触发感知过载的环境密度阈值（与档位相关）
     pub attribute_bias: Option<ManaAttribute>,     // 天生敏感的属性
+}
+
+pub struct TemporaryBodyState {
+    pub injuries: Vec<InjuryState>,
+    pub fatigue: f64,                              // 0.0-1.0
+    pub pain_load: f64,                            // 0.0-1.0
+    pub mana_reserve_current: Option<f64>,
+    pub mana_suppression: Vec<ManaSuppressionState>,
+    pub active_conditions: Vec<BodyCondition>,     // poison / stun / restraint / bleeding / overheating ...
+    pub cooldowns: Vec<CooldownState>,
+    pub transient_signals: Vec<String>,            // llm_readable: 手抖/脸红/气息紊乱等外显短态
+    pub schema_version: String,
+}
+
+pub struct InjuryState {
+    pub injury_id: String,
+    pub body_region: String,
+    pub severity: String,                          // bruise / light / moderate / severe / critical
+    pub effect_tags: Vec<String>,                  // mobility_penalty / bleeding / pain / mana_flow_blocked ...
+    pub source_event_id: Option<String>,
+}
+
+pub struct ManaSuppressionState {
+    pub source_id: String,
+    pub multiplier: f64,
+    pub expires_at_turn: Option<String>,
+}
+
+pub struct BodyCondition {
+    pub condition_id: String,
+    pub condition_kind: String,
+    pub intensity: f64,
+    pub source_id: Option<String>,
+}
+
+pub struct CooldownState {
+    pub ability_id: String,
+    pub remaining_turns: u32,
 }
 ```
 

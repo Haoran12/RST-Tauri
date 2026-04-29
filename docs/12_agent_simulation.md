@@ -134,7 +134,7 @@ pub enum PrecipitationKind {
 
 灵力的"档位"用于身份识别（"是凡人/修士/超凡/传说"），灵力的"数值差"用于实力对比（感知层是体感强弱，对抗解算层是实际胜负）。两者都不让 LLM 自己估算 raw 数值。
 
-档位边界数值参考 `rp_cards\` 锚点（凡人 100 / 入门 500–800 / 瓶颈 1300–1450 / 大成 2400 / 仙灵修行瓶颈 5000 / 神祇 苍角 8800 / 高阶仙灵 NaN），可在 `world_base.yaml` 中按世界重写。
+档位边界数值参考 `rp_cards\` 锚点（凡人 100 / 入门 500–800 / 瓶颈 1300–1450 / 大成 2400 / 仙灵修行瓶颈 5000 / 神祇 苍角 8800 / 高阶仙灵 NaN）。默认值来自版本化配置，World 可在 `./data/worlds/<world_id>/world_base.yaml` 中重写；运行时由 `ConfigCompiler` 编译成 `WorldRulesSnapshot`，`SceneFilter` 只读快照，不在感知派生过程中读取配置文件。
 
 ```rust
 pub enum ManaPotencyTier {
@@ -221,7 +221,7 @@ pub struct ManaEnvironmentSense {
 **关键不变量**：
 
 1. CognitivePass 永远不读 raw `mana_power`，只读 tier / delta / descriptors。`FilteredSceneView` 中不暴露 raw 数值。
-2. 档位边界、Δ 桶边界、压制破绽阈值都是**世界配置项**（默认值同上，对 rp_cards 锚点校准），改边界需同时更新角色卡解析与单元测试。
+2. 档位边界、Δ 桶边界、压制破绽阈值都是**世界配置项**（默认值同上，对 rp_cards 锚点校准），由 `WorldRulesSnapshot` 同时供角色卡解析、`SceneFilter::derive_mana_perception(...)`、`CombatMathResolver` 使用；改边界需同时更新配置 schema、迁移规则与单元测试。
 3. 感知层只写**事实级感受**（"远胜 / 难测 / 似有压制"），**不写信念**（"他一定是神祇 / 他在装弱 / 他没安好心"）。这些信念由 CognitivePass 的 LLM 基于感受 + `prior_subjective_state` 自行生成。
 4. ManaPotencyTier 同时为 `KnowledgeEntry { facet: CultivationRealm }` 的内部表征：`access_policy` 决定"谁能读取这一档", 跨档感知精度决定"感知到的是真档还是被压制的档"。
 5. SurfaceRealizer 如需在叙事中提到"修为相差一筹/远胜/碾压"等具体差距文字，从 `ManaSignal.perceived.delta` 与 `tier_assessment` 取，不回查 raw mana_power。
@@ -298,14 +298,14 @@ combat_power = effective_mana_power × max(0.1, 1 + Σ_modifiers) × soul_factor
 
 4. **下限保护**：加算系数以 `max(0.1, 1 + Σ_modifiers)` 截下限，避免修正过深导致 combat_power 趋零或为负而引发除零 / 碾压判定异常。
 
-5. **outcome_tier** 按 `combat_delta = actor_combat_power − target_combat_power` 落桶（150 / 300 / 1000，1000 以上即 Crushing）；细化由 `disrupting_factors` 列出（程序生成的具体说明，例 ["攻方显著疲惫 -0.20", "守方身体重伤 -0.40 + 恐惧 -0.10 + 灵魂破损 ×0.5"]）。
+5. **outcome_tier** 按 `combat_delta = actor_combat_power − target_combat_power` 落桶（默认 150 / 300 / 1000，1000 以上即 Crushing）；桶边界来自 `WorldRulesSnapshot.combat_delta_thresholds`，细化由 `disrupting_factors` 列出（程序生成的具体说明，例 ["攻方显著疲惫 -0.20", "守方身体重伤 -0.40 + 恐惧 -0.10 + 灵魂破损 ×0.5"]）。
 
 6. 程序化对抗解算只决定**可验证物理后果**（伤势 / 法力消耗 / 位置变化）是否可写回 L1；公开退让、站队、敌对升级等外显社会事件可由 OutcomePlanner 候选输出，但内心恐惧 / 屈服 / 记仇仍由下游角色 CognitivePass 解读。
 
 ### 3.2 关键不变量
 
 1. 对抗解算公式只读 L1 的 `effective_mana_power`、L1 的身体状态、L1 的技能/属性数据；**不读 displayed_mana_power**（压制是认知层的事，不影响真实对抗）。
-2. `combat_delta` 与 `ManaPerceptionDelta` 共享 150/300/1000 三个阈值，保证"我感觉略胜"与"实际略胜"在同一刻度上。对抗解算层在 1000 以上不再细分（结果都是 Crushing）；感知层仍区分 `FarAbove(1000-2000)` 与 `Overwhelming(≥2000)`，但两者**对应的对抗结论一致**（皆为"基本无力应对"），区别只在体感（"远胜，难敌" vs "无法测度，压顶之势"）与是否可识别 tier。
+2. `combat_delta` 与 `ManaPerceptionDelta` 共享同一份 `WorldRulesSnapshot` 中的 150/300/1000 默认阈值，保证"我感觉略胜"与"实际略胜"在同一刻度上。对抗解算层在 Crushing 阈值以上不再细分；感知层仍可额外配置 `far` / `overwhelming` 边界（默认 2000），但两者**对应的对抗结论一致**（皆为"基本无力应对"），区别只在体感（"远胜，难敌" vs "无法测度，压顶之势"）与是否可识别 tier。
 3. 当 `disrupting_factors` 与 `outcome_tier` 出现"违和"（例如攻方 base_mana_power 高但身体状态极差导致 combat_delta 反而为负），SurfaceRealizer 必须在叙事中体现这种反差，而不是按"谁灵力高谁赢"硬写。
 4. **以弱胜强**在该框架下要求**多个加算修正叠加 + 可能的灵魂状态打击**：守方若同时陷入"显著疲惫 (-0.20) + 身体重伤 (-0.40) + 恐惧 (-0.10) = Σ = -0.70"，加算系数 = max(0.1, 0.30) = 0.30；再叠加灵魂破损 soul_factor = 0.5，总系数 0.15，足以让基础灵力差 1500 的弱者翻盘。"算计 / 偷袭 / 中毒 / 惊扰魂魄"必须落到具体的 L1 状态字段上，由公式自然得出，不允许 LLM 在对抗解算口径上手抹平差距。
 

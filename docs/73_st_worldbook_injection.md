@@ -30,6 +30,8 @@
 
 角色卡内嵌 `data.character_book` 不直接作为 `CharacterBook` 参与扫描；必须先转换为外部 `WorldInfoEntry` 形态。若角色卡已经绑定 `data.extensions.world`，优先使用绑定的外部世界书。
 
+世界书来源合并不得读取 `active_api_config_id`。切换 API 配置后，Chat lore、Persona lore、Global lore、Character lore 的选择、去重、排序、递归和预算规则保持不变；只有最终 Provider 请求映射可能变化。
+
 ## 3. 排序与装饰器
 
 排序规则：

@@ -11,6 +11,8 @@ SillyTavern 有两套相关但不同的数据形态：
 
 RST 必须同时支持两者，并在导入 / 导出时保留未知字段和 `extensions`。
 
+世界书身份与 API 配置无关。外部世界书文件名 / 内部稳定 ID、角色卡 `data.extensions.world` 绑定、聊天 `chat_metadata.world_info` 绑定和全局 `world_info.globalSelect` 都不得以 `apiId`、Provider 类型、model 或 connection profile 作为命名空间。切换 API 配置不会复制、重命名、迁移、启用、禁用或重新选择任何世界书。
+
 ## 2. 外部世界书文件
 
 ```typescript

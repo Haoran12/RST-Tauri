@@ -23,6 +23,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 | [12_agent_simulation.md](docs/12_agent_simulation.md) | 环境 / 灵力档位翻译 + Mana Combat Resolution + Skill Model 契约 | Agent 程序化派生与硬规则解算 |
 | [13_agent_llm_io.md](docs/13_agent_llm_io.md) | PromptBuilder + CognitivePass / SceneStateExtractor / OutcomePlanner / SurfaceRealizer I/O + Dirty Flags | Agent LLM 节点提示词与结构化契约 |
 | [14_agent_persistence.md](docs/14_agent_persistence.md) | Agent SQLite 表结构、索引与持久化边界 | Agent 存储实现 |
+| [15_agent_location_system.md](docs/15_agent_location_system.md) | Agent 地点系统：地点层级、自然地理地带、地区事实继承、相邻 / 路线图与路程估算 | Agent 地点图谱与场景地点上下文 |
 | [20_backend_contracts.md](docs/20_backend_contracts.md) | AIProvider trait + chat_structured + OpenAI/Gemini/Anthropic/DeepSeek/Claude Code Interface 适配范围 | 后端 AI 调用层 |
 | [30_logging_and_observability.md](docs/30_logging_and_observability.md) | Agent Trace + 运行 Logs + LLM 请求响应还原 + 异常事件 + 定期清理 | 日志、调试与可观测性 |
 | [90_pitfalls_and_tests.md](docs/90_pitfalls_and_tests.md) | 潜在坑点 + 测试用例 / 验证方案 | 风险登记与质量门禁 |

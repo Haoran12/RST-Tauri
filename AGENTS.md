@@ -19,6 +19,7 @@ This is currently a documentation-first Tauri project for Ran's SmartTavern (RST
 - `docs/12_agent_simulation.md`: deterministic derived state, environment/mana tiers, combat resolution, and skill contracts.
 - `docs/13_agent_llm_io.md`: structured I/O contracts for Agent LLM nodes.
 - `docs/14_agent_persistence.md`: Agent SQLite tables, indexes, and persistence boundaries.
+- `docs/15_agent_location_system.md`: Agent location hierarchy, natural regions, inherited region facts, route graph, and travel estimates.
 - `docs/20_backend_contracts.md`: backend AI provider contracts.
 - `docs/30_logging_and_observability.md`: Agent Trace, runtime logs, retention, and observability rules.
 - `docs/90_pitfalls_and_tests.md`: risk register and verification plans.

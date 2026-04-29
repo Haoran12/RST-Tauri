@@ -176,13 +176,14 @@ Agent Trace 记录 Agent 模式下"程序如何判断"与"模型如何输出"。
 
 ## 6. 定期删除机制
 
-默认开启按大小清理运行 Logs，上限为 **1GB**。清理只针对运行 Logs；Agent Trace 默认随 World 保留。
+默认开启按大小清理运行 Logs，默认上限为 **1GB**，实际值来自 `./data/settings/app_runtime.yaml` 编译后的 `RuntimeConfigSnapshot.log_retention`。清理只针对运行 Logs；Agent Trace 默认随 World 保留。
 
 ### 6.1 触发时机
 
 - 应用启动后后台检查一次。
 - 应用运行中最多每日检查一次。
-- 写入日志后如果超过 1GB，只标记需要清理，由后台任务执行，禁止阻塞聊天或 Agent 回合。
+- 写入日志后如果超过当前快照中的 `global_size_limit_bytes`，只标记需要清理，由后台任务执行，禁止阻塞聊天或 Agent 回合。
+- 日志写入路径只读内存中的 retention 快照和近似体积计数，不扫描文件、不解析配置、不打开额外配置查询。
 
 ### 6.2 清理范围
 
@@ -211,6 +212,8 @@ Agent Trace 记录 Agent 模式下"程序如何判断"与"模型如何输出"。
 ### 6.4 长期未更新 World 提示
 
 如果某个 World 超过 30 天未更新，且其日志 / trace 体积较大，系统只产生提示事件，询问用户是否清理或导出，不自动删除。
+
+`30 天` 和“体积较大”的阈值同样来自 `RuntimeConfigSnapshot.log_retention.world_stale_prompt`，默认值分别为 30 天和全局上限的一定比例。修改这些值后从下一次后台 retention 检查开始生效。
 
 提示必须包含：
 
@@ -245,6 +248,6 @@ Agent Trace 记录 Agent 模式下"程序如何判断"与"模型如何输出"。
 - Agent Trace 能跳转到对应 LLM request / response。
 - 流式响应能查看原始 chunk，也能查看拼接后的可读文本。
 - API Key、Authorization header、Provider secret 不会进入数据库。
-- 全局 Logs 超过 1GB 后后台清理旧运行日志。
+- 全局 Logs 超过当前配置上限（默认 1GB）后后台清理旧运行日志。
 - 普通清理任务不会删除 Agent Trace。
 - 30 天未更新且日志较大的 World 只产生提示，不自动删除。

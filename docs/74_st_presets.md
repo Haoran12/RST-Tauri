@@ -1,6 +1,6 @@
 # 74 ST 预设系统
 
-本文定义 ST 模式预设类型、导入导出、自动选择，以及 RST 相对 SillyTavern 的唯一有意偏离：Preset 与 API Provider 解耦。运行时如何把预设与 API 配置组装为请求见 [75_st_runtime_assembly.md](75_st_runtime_assembly.md)。
+本文定义 ST 模式预设类型、导入导出、自动选择，以及 RST 相对 SillyTavern 的核心偏离：Preset 与 API Provider 解耦。运行时如何把预设与 API 配置组装为请求见 [75_st_runtime_assembly.md](75_st_runtime_assembly.md)。
 
 ## 1. 设计原则
 
@@ -15,10 +15,13 @@ SillyTavern 原设计中，预设按 API 类型（kobold / novel / openai / text
 
 - 同一预设可用于不同 API 配置。
 - 切换 API 配置无需重新选择预设。
+- 切换 API 配置不得触发自动选择预设、改写 active preset、改写 preset 文件、清空 provider_overrides 或改变预设内嵌 Regex 授权。
 - 预设可跨 Provider 共享与迁移。
 - 导入 ST 预设时保留原始 JSON 字段，额外记录 `source_api_id` / `source_preset_type` 作为迁移信息。
 - 导出为 ST 兼容格式时，可按目标 `apiId` 重新写入 ST 期望目录 / 文件结构。
 - RST 运行时不从 preset 读取 endpoint、key、model、connection profile；这些字段若出现在导入文件中，只作为原始扩展数据保留或在 Master Import 时剔除。
+
+`source_api_id` 和导出目标 `apiId` 只用于 ST 兼容迁移，不参与 RST 运行时身份判断。运行时预设身份使用 RST 的稳定 `preset_key`（稳定 ID 或规范化路径）；`preset_key` 不随当前 API 配置变化。
 
 ## 2. 预设类型
 
@@ -243,6 +246,8 @@ function autoSelectPreset(characterName: string, group: string | null): void;
 ```
 
 匹配优先级：精确 `groupName + characterName` > 精确 `characterName` > 精确 `groupName`。若同一优先级命中多条，以列表后项覆盖前项。
+
+自动选择只由角色 / 群组上下文、用户显式启用状态和绑定列表触发。切换 API 配置不是自动选择输入，不得因为 Provider、model、endpoint 或 `source_api_id` 匹配而切换预设。
 
 ## 6. 默认预设
 

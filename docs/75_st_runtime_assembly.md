@@ -4,7 +4,7 @@
 
 ## 1. 全局应用状态
 
-API 配置与预设完全独立，用户可随时切换，不与会话绑定：
+API 配置与预设、世界书选择完全独立，用户可随时切换，不与会话绑定：
 
 ```typescript
 interface GlobalAppState {
@@ -54,6 +54,8 @@ interface STWorldInfoSettings {
 
 `STRegexExtensionSettings` 结构见 [76_st_regex.md](76_st_regex.md)，包含全局脚本、Regex Preset、角色内嵌脚本 allow list 和预设内嵌脚本 allow list。
 
+`active_api_config_id` 只选择连接配置。它不得作为 preset、world_info、charLore、Regex allow list、聊天 metadata 或角色卡扩展字段的命名空间，也不得参与这些资源的自动选择和持久化身份。
+
 ## 2. 会话数据
 
 会话数据存储聊天记录、角色卡引用和 ST 兼容的聊天元数据，不存储 API 配置或预设引用：
@@ -70,6 +72,7 @@ interface SessionData {
 
   // 不存储 API 配置或预设引用。
   // API 配置和预设由全局状态管理，用户随时可切换。
+  // chat_metadata.world_info 是会话自己的世界书绑定，不随 API 配置切换。
 }
 
 interface STChatMetadata {
@@ -141,7 +144,13 @@ interface STChatMetadata {
 
 - 立即更新全局应用状态。
 - 下次生成请求自动使用新配置。
-- 无需切换会话或保存任何设置。
+- 无需切换会话。
+
+切换 API 配置的副作用边界：
+
+- 可以改变：Provider 类型、endpoint、model、鉴权、代理、超时、Provider 字段映射、不支持参数的忽略 / 降级方式。
+- 不可以改变：`active_*_preset`、自动预设选择结果、`world_info_settings`、`chat_metadata.world_info`、角色卡 `data.extensions.world`、`world_info.charLore`、Regex allow list、Regex Preset、世界书文件内容、预设文件内容。
+- 不应保存资源文件；只保存 `active_api_config_id` 本身或用户显式编辑的 API 配置。
 
 ## 4. 职责边界
 
