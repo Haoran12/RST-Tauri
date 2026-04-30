@@ -8,7 +8,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 ## 项目概述
 
 - **SillyTavern 模式**：复刻 SillyTavern 体验，支持角色卡 V3 + 世界书 + 预设 + Regex + API 配置，JSON 文件存储。总览见 [70_st_mode.md](70_st_mode.md)，角色卡见 [71_st_character_cards.md](71_st_character_cards.md)，世界书模型见 [72_st_worldbook_model.md](72_st_worldbook_model.md)，注入流程见 [73_st_worldbook_injection.md](73_st_worldbook_injection.md)，预设见 [74_st_presets.md](74_st_presets.md)，运行时组装见 [75_st_runtime_assembly.md](75_st_runtime_assembly.md)，Regex 见 [76_st_regex.md](76_st_regex.md)。
-- **Agent 模式**：基于 RP Agent 架构的高级角色扮演系统，分层"客观世界 / 人物具身状态 / 主观认知与意图 / 结果规划与状态更新 / 叙事输出"，SQLite 存储。数据模型见 [10_agent_data_model.md](10_agent_data_model.md)，运行时见 [11_agent_runtime.md](11_agent_runtime.md)，程序化解算见 [12_agent_simulation.md](12_agent_simulation.md)，LLM I/O 契约见 [13_agent_llm_io.md](13_agent_llm_io.md)，持久化见 [14_agent_persistence.md](14_agent_persistence.md)，地点系统见 [15_agent_location_system.md](15_agent_location_system.md)。
+- **Agent 模式**：基于 RP Agent 架构的高级角色扮演系统，分层"客观世界 / 人物具身状态 / 主观认知与意图 / 结果规划与状态更新 / 叙事输出"，SQLite 存储。数据模型入口见 [10_agent_data_model.md](10_agent_data_model.md)，运行时见 [11_agent_runtime.md](11_agent_runtime.md)，程序化派生见 [12_agent_simulation.md](12_agent_simulation.md)，对抗技能见 [19_agent_combat_and_skills.md](19_agent_combat_and_skills.md)，LLM I/O 入口见 [13_agent_llm_io.md](13_agent_llm_io.md)，场景节点见 [21_agent_scene_llm_io.md](21_agent_scene_llm_io.md)，结果/叙事节点见 [22_agent_outcome_narration_io.md](22_agent_outcome_narration_io.md)，持久化见 [14_agent_persistence.md](14_agent_persistence.md)，地点系统见 [15_agent_location_system.md](15_agent_location_system.md)。
 
 > **架构基础**：参考 `D:\Projects\RST-flutter\docs\rp_agent_*` 系列文档（成熟的角色扮演 Agent 架构），本项目在其基础上为 Tauri + Rust + Vue 3 技术栈做适配。
 
@@ -60,7 +60,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 6. KnowledgeEntry 体系（kind / subject / access_policy / subject_awareness / apparent_content）+ 访问派生索引表。
 7. HistoricalEvent / TruthGuidance / provisional_session_truth / ConflictReport：过去线 Truth 引导、开放细节补完和非正史分支记录。
 8. KnowledgeEntry content sub-schemas（每种 facet/fact 类型的核心字段 + extensions 兜底）。
-9. CharacterRecord（baseline_body_profile + mind_model_card + temporary_body_state）。
+9. CharacterRecord（base_attributes + baseline_body_profile + mind_model_card + temporary_state）。
 10. CharacterSubjectiveState（Layer 3）。
 11. EmbodimentState / FilteredSceneView / AccessibleKnowledge（Layer 2 派生类型）。
 12. CognitivePass I/O 类型（含 ConfidenceShift / BodyReactionDelta）。
@@ -74,7 +74,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 2. KnowledgeAccessResolver（统一 Knowledge 访问权限最终判定，三谓词合并）。
 3. KnowledgeAccessProtocol（SQLite 派生索引预筛 + KnowledgeAccessResolver 裁剪，构建 AccessibleKnowledge；支持按 TimeAnchor 查询当时可知信息）。
 4. LocationResolver / LocationFactResolver / RoutePlanner（地点消歧、父级事实继承、自然地理影响、路线与路程估算）。
-5. EmbodimentResolver（含灵觉 + 环境档位翻译）。
+5. AttributeResolver + EmbodimentResolver（含基础属性有效值、灵觉 + 环境档位翻译）。
 6. SceneFilter（含 observable_facets 计算 + WeatherPerception + ManaSignal）。
 7. InputAssembly（拒绝 Layer 1 原始对象）。
 8. PhysicsResolver / CombatMathResolver（Mana Combat Resolution 公式等）+ EffectValidator（技能契约与硬约束校验）。
@@ -89,7 +89,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 4. CharacterCognitivePass（融合调用，严格 schema 输出）。
 5. JSON 输出容错修复器（缺字段补默认 / 修复常见结构错误）。
 6. OutcomePlanner（结果规划与状态更新计划，God-read 但不直接提交）。
-7. SurfaceRealizer（叙事生成，受 narratable_facts 约束）。
+7. SurfaceRealizer（叙事生成，受结构化 narratable_facts / used_fact_ids 约束）。
 8. AI Provider 的 chat_structured 实现（OpenAI Responses / OpenAI Chat Completions / Anthropic / Gemini / DeepSeek / Claude Code Interface 各自的 structured output / tool schema / JSON 降级路径）。
 9. LLM 调用日志：request / response / schema / stream chunks / readable_text。
 10. Agent LLM 节点配置选择 UI：SceneInitializer / SceneStateExtractor / CharacterCognitivePass / OutcomePlanner / SurfaceRealizer 分别选择 API 配置。
@@ -145,6 +145,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 - `src-tauri/src/agent/location/route_planner.rs` — 路线图与路程估算。
 - `src-tauri/src/agent/cognitive/cognitive_pass.rs` — 融合调用。
 - `src-tauri/src/agent/simulation/scene_filter.rs` — 场景过滤（含 observable_facets）。
+- `src-tauri/src/agent/simulation/attribute_resolver.rs` — 基础属性 effective 值、AttributeTier / AttributeDelta 派生。
 - `src-tauri/src/agent/simulation/input_assembly.rs` — 拒绝 Layer 1 泄露。
 - `src-tauri/src/agent/simulation/reaction_window.rs` — 有界反应窗口资格判定与 ReactionOption 派发。
 - `src-tauri/src/agent/simulation/physics_resolver.rs` — 物理与灵力数值骨架。
@@ -165,7 +166,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 
 ## 4. 验证与里程碑
 
-每阶段交付的验证清单见 [90_pitfalls_and_tests.md](90_pitfalls_and_tests.md)。
+风险登记见 [90_pitfalls_and_tests.md](90_pitfalls_and_tests.md)，每阶段交付的验证清单见 [91_test_matrix.md](91_test_matrix.md)。
 
 ---
 
@@ -183,8 +184,9 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 | 知识统一模型 | KnowledgeEntry 统一承载世界/势力/角色档案/记忆，按 access_policy 谓词控制，并维护 SQLite 访问派生索引 | 单一访问权限入口（KnowledgeAccessResolver），索引只做候选预筛 |
 | 地点系统 | LocationNode.parent_id 表达层级归属；LocationSpatialRelation 表达自然地理覆盖 / 穿过 / 重叠；LocationEdge 带权图表达相邻 / 路线；RegionFact 可沿 parent 链继承 | 支持地点归属、自然地理影响、地区事实默认适用与路程估算，同时避免把弱推断固化成硬设定 |
 | 场景域 God-read | SceneInitializer / SceneStateExtractor 可读取程序裁剪后的当前场景相关私有约束；不得全库读取隐藏 Knowledge / GodOnly，也不得把私有约束写成外显事实 | 避免初始化和输入解析与隐藏真相冲突，同时限制泄露面 |
-| 灵力档位 | 6 档（Mundane / Awakened / Adept / Master / Ascendant / Transcendent），边界对 `rp_cards\` 锚点校准 | 用档位识别身份，用数值差识别实力 |
-| 感知 vs 对抗解算分离 | 感知用 `displayed_mana_power`（含压制），对抗解算用 `effective_mana_power`（不含压制） | 压制是认知层欺骗手段，不影响真实对抗 |
+| 基础属性档位 | 6 档（Mundane / Awakened / Adept / Master / Ascendant / Transcendent），默认边界对 `rp_cards\` 的 mana_power 锚点校准 | 六项基础属性共用档位/差距机制；raw f64 不进受限 LLM |
+| 灵力显露两层模型 | 持久倾向 3 档（Inward / Neutral / Expressive）+ 运行时状态 5 档（Sealed / Suppressed / Natural / Released / Dominating） | 区分人物体质/性格/修行体系导致的默认外显倾向，和场景中有意/无意/被迫做出的封息、抑制、自然、外放、威压状态 |
+| 感知 vs 对抗解算分离 | 感知用 `displayed_mana_power`（含显露倾向、运行时状态、压制、伪装），对抗解算用 `effective_mana_power`（不含显露倾向、运行时状态与压制） | 压制/外放是认知层与环境压力手段，不直接改变真实对抗 |
 | 对抗解算公式 | `combat_power = effective × max(0.1, 1 + Σ_modifiers) × soul_factor`，加算修正区 + 灵魂独立乘区 | 多因子加和可控，灵魂破损保留乘性凸显质变打击 |
 | 跨档差阈值 | 感知层 150 / 300 / 1000 / 2000；对抗解算共享 150 / 300 / 1000，1000+ 即 Crushing | 150 起感觉差距、1000+ 基本无力应对，2000+ 进入无法测度的体感描述 |
 | 运行配置策略 | 默认配置 + `app_runtime.yaml` + World `world_base.yaml` 合并校验后发布 `RuntimeConfigSnapshot` / `WorldRulesSnapshot` | 阈值和清理策略可配置，但 Resolver / Filter / Retention 热路径不做配置 IO |

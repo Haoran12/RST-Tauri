@@ -125,11 +125,12 @@ Agent Trace 记录 Agent 模式下"程序如何判断"与"模型如何输出"。
 - UserInputDelta 应用结果。
 - 身体 / 资源 / 状态 / 冷却的机械演化摘要。
 - Active Set + Dirty Flags 的触发项与跳过原因。
+- AttributeResolver 的属性修正来源、effective/displayed、ManaExpressionTendency、运行时 ManaExpressionMode、intentionality、presence pressure、tier/delta 与异常修正摘要。
 - EmbodimentResolver、SceneFilter、KnowledgeAccess、InputAssembly 的关键 Layer 2 派生摘要。
 - CharacterCognitivePass 输入输出、schema 校验、程序修复、OutcomePlanner 兜底触发。
 - Validator 各规则结果。
 - OutcomePlanner 的 God-read 输入域、候选 StateUpdatePlan、EffectValidator 裁剪摘要与物理后果。
-- SurfaceRealizer 请求、流式响应拼接、NarrativeFactCheck 结果。
+- SurfaceRealizer 请求、流式响应拼接、used_fact_ids 与 NarrativeFactCheck 结果。
 - StateCommitter 的提交记录、rollback patch 和 trace 关联。
 
 ---

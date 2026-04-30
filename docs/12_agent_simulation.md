@@ -1,13 +1,11 @@
 # 12 Agent 程序化派生与解算
 
-本文档承载 Agent 模式中由程序确定的派生、档位翻译和硬规则解算：
+本文档承载 Agent 模式中由程序确定的环境与基础属性派生、档位翻译：
 
 - 环境档位翻译：物理环境如何影响感知、行动与长期压力
-- 灵力档位翻译：原始数值如何转为 LLM 可读的档位与压力
-- Mana Combat Resolution：灵力对抗的可验证物理后果
-- Skill Model：技能契约与 LLM 描述文本的边界
+- 基础属性档位翻译：基础属性与 mana_power 如何转为 LLM 可读的档位、差距与压力
 
-基础数据模型见 [10_agent_data_model.md](10_agent_data_model.md)。LLM 节点 I/O 契约见 [13_agent_llm_io.md](13_agent_llm_io.md)。运行时调用顺序见 [11_agent_runtime.md](11_agent_runtime.md)。
+Mana Combat Resolution 与 Skill Model 已拆分到 [19_agent_combat_and_skills.md](19_agent_combat_and_skills.md)。基础数据模型见 [10_agent_data_model.md](10_agent_data_model.md)。LLM 节点 I/O 契约入口见 [13_agent_llm_io.md](13_agent_llm_io.md)。运行时调用顺序见 [11_agent_runtime.md](11_agent_runtime.md)。
 
 ---
 
@@ -130,21 +128,30 @@ pub enum PrecipitationKind {
 
 ---
 
-## 2. 程序化派生：灵力档位翻译
+## 2. 程序化派生：基础属性档位翻译
 
-灵力的"档位"用于身份识别（"是凡人/修士/超凡/传说"），灵力的"数值差"用于实力对比（感知层是体感强弱，对抗解算层是实际胜负）。两者都不让 LLM 自己估算 raw 数值。
+六项基础属性（`physical` / `agility` / `endurance` / `insight` / `mana_power` / `soul_strength`）使用同一数值标尺和同一默认档位边界。属性 raw 值和运行时计算值使用 `f64` 存储与计算，以便比例修正、状态叠加和调参；普通 UI 默认四舍五入显示为整数。UI 展示值只服务阅读，不参与档位、差距或仲裁判断。
 
-档位边界数值参考 `rp_cards\` 锚点（凡人 100 / 入门 500–800 / 瓶颈 1300–1450 / 大成 2400 / 仙灵修行瓶颈 5000 / 神祇 苍角 8800 / 高阶仙灵 NaN）。默认值来自版本化配置，World 可在 `./data/worlds/<world_id>/world_base.yaml` 中重写；运行时由 `ConfigCompiler` 编译成 `WorldRulesSnapshot`，`SceneFilter` 只读快照，不在感知派生过程中读取配置文件。
+属性"档位"用于把 raw 能力底盘翻译为 LLM 可读层级；属性"差距"用于可观察对抗中的相对判断。两者都不让 LLM 自己估算 raw 数值。档位边界默认沿用原 `mana_power` 锚点（凡人 100 / 入门 500–800 / 瓶颈 1300–1450 / 大成 2400 / 仙灵修行瓶颈 5000 / 神祇 苍角 8800 / 高阶仙灵 NaN），World 可在 `./data/worlds/<world_id>/world_base.yaml` 中重写；YAML 中阈值可写整数或小数，编译后统一为 `f64`。运行时由 `ConfigCompiler` 编译成 `WorldRulesSnapshot`，Resolver / Filter 只读快照，不在感知派生过程中读取配置文件。
 
 ```rust
-pub enum ManaPotencyTier {
-    // 单个角色 / 法器 / 法术 / 灵脉的灵力强度档位（默认边界，可由世界配置覆盖）
-    Mundane,       // [0, 200)         凡人 / 无修行（锚: 人类无修行 100）
-    Awakened,      // [200, 1000)      入门（锚: 妖精入门 500, 人类入门 700, 仙灵诞生 800）
-    Adept,         // [1000, 1800)     成熟/精英（锚: 妖精瓶颈 1400, 人类瓶颈 1300, 齐松 1450）
-    Master,        // [1800, 2600)     大成（锚: 仙灵不修行成型 1800, 人妖大成 2400）
-    Ascendant,     // [2600, 5600)     高阶（锚: 仙灵修行瓶颈 5000）
-    Transcendent,  // [5600, +∞)       超越/超凡（锚: 苍角 7200, 高阶仙灵 NaN）
+pub enum AttributeKind {
+    Physical,
+    Agility,
+    Endurance,
+    Insight,
+    ManaPower,
+    SoulStrength,
+}
+
+pub enum AttributeTier {
+    // 单项基础属性的能力层级（默认边界，可由世界配置覆盖）
+    Mundane,       // [0, 200)
+    Awakened,      // [200, 1000)
+    Adept,         // [1000, 1800)
+    Master,        // [1800, 2600)
+    Ascendant,     // [2600, 5600)
+    Transcendent,  // [5600, +∞)
 }
 
 pub enum AmbientManaDensityTier {
@@ -157,9 +164,9 @@ pub enum AmbientManaDensityTier {
     Saturated,      // 神祇驻地 / 上古遗迹，弱者会过载乃至昏厥
 }
 
-pub enum ManaPerceptionDelta {
-    // Δ = target.displayed_mana_power - observer.effective_mana_power
-    // 用于"感觉差距多大"，与档位识别正交（同档可有显著差，跨档也可被技巧/状态拉平）
+pub enum AttributeDelta {
+    // Δ = target_effective_or_displayed - observer_effective
+    // 用于"感觉/实际差距多大"，与档位识别正交（同档可有显著差，跨档也可被技巧/状态拉平）
     Indistinguishable,       // |Δ| < 150          相若, 难分高下
     SlightlyBelow,           // Δ ∈ [-300, -150)   略弱
     NotablyBelow,            // Δ ∈ [-1000, -300)  显著弱
@@ -171,13 +178,90 @@ pub enum ManaPerceptionDelta {
     Overwhelming,            // Δ ≥ 2000           压顶, 无法测度（对抗解算=Crushing）
 }
 
+pub enum ManaExpressionMode {
+    // 运行时灵力显露状态：只改变感知与环境压力，不改变 effective_mana_power
+    Sealed,        // 封息：几乎无外泄
+    Suppressed,    // 抑制：主动/被迫压低气息
+    Natural,       // 自然：不刻意收放；由长期倾向校准默认外显
+    Released,      // 外放：灵压影响场景与低阶稳定
+    Dominating,    // 威压：以气势压迫感知、情绪与认知清晰度
+}
+
+pub enum ManaExpressionTendency {
+    // 持久层默认倾向：来自体质、性格、修行体系或长期训练
+    Inward,
+    Neutral,
+    Expressive,
+}
+
+pub enum ManaExpressionIntentionality {
+    Intentional,
+    Unintentional,
+    Forced,
+}
+
+pub enum ManaPresenceRadiusTier {
+    SelfOnly,
+    Touch,
+    Close,
+    Room,
+    Area,
+    Scene,
+}
+
+pub struct ManaExpressionProfile {
+    // 运行时内部派生；ratio 原值不进入 CognitivePass
+    pub character_id: String,
+    pub baseline_tendency: ManaExpressionTendency,
+    pub mode: ManaExpressionMode,
+    pub intentionality: ManaExpressionIntentionality,
+    pub tendency_factor: f64,
+    pub mode_factor: f64,
+    pub display_ratio: f64,
+    pub pressure_ratio: f64,
+    pub radius_tier: ManaPresenceRadiusTier,
+    pub overstated_signal: bool,        // display 高于可持续真实外放时置 true，用于破绽/疲劳/识破
+}
+
+pub struct EffectiveAttributeProfile {
+    // 运行时内部派生；不进入 CognitivePass raw 输入
+    pub character_id: String,
+    pub values: HashMap<AttributeKind, f64>,
+    pub tiers: HashMap<AttributeKind, AttributeTier>,
+    pub descriptors: HashMap<AttributeKind, Vec<String>>,
+}
+
+pub struct PerceivedAttributeProfile {
+    pub source_id: String,
+    pub attribute_kind: AttributeKind,
+    pub tier_assessment: Option<AttributeTier>,
+    pub delta: Option<AttributeDelta>,
+    pub confidence: f64,                          // 0.0-1.0
+    pub evidence: Vec<AttributeEvidenceKind>,      // observation / combat_exchange / mana_signal / soul_pressure ...
+    pub descriptors: Vec<String>,                 // 程序生成: ["步伐极稳", "反应稍慢", "气息浩瀚如海"]
+}
+
+pub enum AttributeEvidenceKind {
+    Appearance,
+    Movement,
+    SustainedAction,
+    InjuryResponse,
+    CombatExchange,
+    TacticalRead,
+    ManaSignal,
+    SoulPressure,
+    SkillEffect,
+}
+
 pub struct PerceivedManaProfile {
     pub source_id: String,                            // 被感知者 / 来源
-    pub tier_assessment: Option<ManaPotencyTier>,     // 对方档位识别（被压制时为压制后的档）
-    pub delta: ManaPerceptionDelta,                   // 感知差距档位
+    pub tier_assessment: Option<AttributeTier>,       // 对方 mana_power 档位识别（内敛/压制/伪装后为显示档）
+    pub delta: AttributeDelta,                        // 感知差距档位
+    pub expression_assessment: Option<ManaExpressionMode>, // 对方当前气息状态的粗判：封息/抑制/自然/外放/威压等
     pub attribute_assessment: Option<ManaAttribute>,  // 仅 |Δ| < 1000 且未被严重干扰时较准
     pub confidence: f64,                              // 0.0-1.0
-    pub concealment_suspected: bool,                  // 感觉对方在压制气息
+    pub concealment_suspected: bool,                  // 感觉对方在收敛/压制/伪装气息
+    pub pressure_response: Option<AttributeDelta>,     // 自身受到的灵压体感差距；不等同于对抗结论
     pub descriptors: Vec<String>,                     // 程序生成: ["气息浩瀚如海", "似有若无, 形迹诡异"]
 }
 
@@ -192,162 +276,103 @@ pub struct ManaEnvironmentSense {
     // 整体环境灵气感知（区别于针对单一来源的 ManaSignal）
     pub density_tier: AmbientManaDensityTier,
     pub dominant_attribute: Option<ManaAttribute>,
+    pub character_presences: Vec<ManaPresenceSense>,   // 同场人物当前显露状态造成的局部灵压体感
     pub interferences: Vec<String>,                   // "屏蔽阵法残留", "灵雾阻隔感知"
     pub overload_risk: bool,                          // 灵觉过载风险（高敏锐度撞 Saturated 环境）
     pub descriptors: Vec<String>,                     // ["灵气浓郁如蜜, 呼吸间满是清甜"]
 }
+
+pub struct ManaPresenceSense {
+    pub source_id: String,
+    pub expression_assessment: Option<ManaExpressionMode>,
+    pub radius_tier: ManaPresenceRadiusTier,
+    pub pressure_delta: AttributeDelta,
+    pub cognitive_effect_hints: Vec<String>,           // llm_readable: "注意力被牵引", "呼吸发紧", "判断变保守"
+}
 ```
 
-**感知规则（认知层）**——由 `SceneFilter::derive_mana_perception(...)` 程序化实施：
+**属性派生规则**——由 `AttributeResolver::derive_effective_attributes(...)` 程序化实施：
 
-1. **观察者灵力** = `observer.effective_mana_power`（已含 L1 伤势 / 疲惫 / 突破修正）。
-2. **目标显示灵力** `target.displayed_mana_power`：
-   - 默认 = `target.effective_mana_power`。
-   - 若目标具备压制能力且本回合启用：`displayed = effective - suppression_amount`（压制量来自 L1 状态，不让 LLM 自己定）。
-3. **Δ = target.displayed_mana_power − observer.effective_mana_power**，按上述 9 档桶映射到 `ManaPerceptionDelta`。
-4. **档位识别**：
-   - `|Δ| < 1000`：可识别 `tier_assessment = ManaPotencyTier::from_power(displayed)` 与 `attribute_assessment`，`confidence ≥ 0.7`。
+1. **基础值**来自 Layer 1 `CharacterRecord.base_attributes`，均为 `f64`。
+2. **有效值** = `max(0.0, (base_value + flat_delta) * max(0.1, 1.0 + ratio_modifier_sum))`。伤势、疲惫、疼痛、状态效果、技能、环境等只影响本回合 effective，不改写 base。
+3. **档位判断**直接使用 effective `f64` 与阈值比较，区间为 `[lower, upper)`；例如实际值 `999.6` 仍低于 `1000.0`，不会因为 UI 显示为 `1000` 而进入下一档。
+4. `physical` 主要影响肉身爆发、承载、擒拿、推挤、冲撞；`agility` 主要影响移动、平衡、闪避、抢位、精细动作；`endurance` 主要影响持续损耗、抗痛、伤后维持；`insight` 主要影响威胁识别、破绽解释和战术阅读；`mana_power` 主要影响灵力/法力强度、对冲、压制和施法；`soul_strength` 主要影响精神/灵魂/压制类底盘。
+5. `EffectiveAttributeProfile` 属于程序内部派生和 trace 对象；CognitivePass 不读取 raw `values`，只读取由 EmbodimentResolver / SceneFilter 派生出的 tier、delta、descriptors、constraints。
+
+**灵力显露倾向与运行时状态**——由 `AttributeResolver::derive_mana_expression(...)` 与 `SceneFilter::derive_mana_presence(...)` 程序化实施：
+
+`base_attributes.mana_power` 是长期底盘；`effective_mana_power` 是叠加伤势、状态、突破等 L1 修正后的真实可用底力；`displayed_mana_power` 是他人灵觉读到的外显强度；`mana_presence_pressure` 是这股气息对环境和旁人认知造成的压力。四者必须分开：持久的内敛/外放倾向通过 `tendency_factor` 校准默认外显；运行时的封息/抑制/自然/外放/威压通过 `mode_factor` 表示当前场景的实际显露状态。高 base / high effective 的角色可以长期倾向外放但此刻封息，也可以长期内敛但此刻主动威压；两者都不直接改变对抗解算使用的 `effective_mana_power`。
+
+持久层 `CharacterRecord.mana_expression_tendency` 只保存三档默认倾向；`tendency_factor` 可被特定人物覆盖，未覆盖时使用世界默认值：
+
+| 倾向 | 默认 `tendency_factor` | 默认作用 |
+|---|---:|---|
+| `Inward` 内敛倾向 | -0.5 | display 偏低，气息描述更收束；转入 `Sealed` / `Suppressed` 成本较低 |
+| `Neutral` 一般倾向 | -0.2 | display 略低于真实 effective；姿态切换无明显偏置 |
+| `Expressive` 外放倾向 | 0.1 | display 偏高，情绪或突破时更容易无意识泄露；维持 `Sealed` / `Suppressed` 成本较高 |
+
+运行时 `TemporaryCharacterState.mana_expression.mode` 表达当前场景状态：
+
+| 姿态 | 默认 `mode_factor` | 典型影响 |
+|---|---:|---|
+| `Sealed` 封息 | -0.7 | 近乎无气息；行动/施法前可能需要解除 |
+| `Suppressed` 抑制 | -0.3 | 有意或被迫压低气息；远距离难察，近距离或高灵觉可能出现违和感 |
+| `Natural` 自然 | 0.0 | 不刻意收放；具体落点由持久倾向校准 |
+| `Released` 外放 | 0.2 | 灵压影响房间/区域体感；弱者可能动作迟滞、灵觉过载 |
+| `Dominating` 威压 | 0.4 | 主动压迫感知与认知清晰度；可触发恐惧、退缩、反应窗口或状态候选 |
+
+派生规则：
+
+1. `CharacterRecord.mana_expression_tendency` 提供长期默认倾向；`ManaExpressionState.mode` 提供当前场景状态。二者共同决定目标 `display_ratio` / `pressure_ratio`，但只有 runtime mode 表示本回合真实姿态。
+2. `ManaExpressionState.intentionality` 标记姿态来源：主动控制（Intentional）、情绪/伤势/突破等无意识泄露或收缩（Unintentional）、禁制/法器/他人压制等外部强制（Forced）。Validator 必须能追溯 `source_id` 或状态来源。
+3. `tendency_factor = character.mana_expression_tendency_factor_override.unwrap_or(world_rules.mana_rules.tendency_factors[tendency])`。人物级覆盖用于特殊体质、性格或修行法门；覆盖值必须通过配置范围校验。
+4. `mode_factor = world_rules.mana_rules.mode_factors[mode]`，默认值为 `Sealed=-0.7`、`Suppressed=-0.3`、`Natural=0.0`、`Released=0.2`、`Dominating=0.4`。
+5. `display_ratio = min(2.0, max(0.0, 1.0 + tendency_factor + mode_factor))`。`display_ratio` 是倍率，不含 `effective_mana_power`；它可写入 `ManaExpressionProfile` 和 Trace，但不得进入 CognitivePass。
+6. `displayed_mana_power = max(0.0, effective_mana_power * display_ratio + display_flat_delta + illusion_bonus - concealment_penalty)`。若没有额外 L1 技能/法器/阵法/干扰来源，则简化为 `effective_mana_power * display_ratio`。`illusion_bonus`、`display_flat_delta` 和 `concealment_penalty` 只来自 L1 来源；不能由 LLM 临场编造。
+7. `pressure_ratio` 第一版默认复用 `display_ratio`，再按模式的 `pressure_multiplier` 或技能/场景规则修正；`mana_presence_pressure = effective_mana_power * pressure_ratio`，再按距离、遮蔽、阵法、属性相克和环境干扰衰减，映射为观察者视角的 `pressure_delta`。
+8. `display_ratio > 1.0` 代表更强的外显、显摆、威吓或伪装信号，不代表真实对抗变强；若缺少资源/技能支撑且长期维持，`overstated_signal = true`，用于疲劳、破绽和识破判定。
+9. `Released` / `Dominating` 会向 `ManaField.character_presences` 写入派生源，进而影响同场角色的 `ManaEnvironmentSense.character_presences`、`SalienceModifiers.attention_biases`、`ReasoningModifiers.threat_bias` / `overload_bias`。
+10. `Sealed` / `Suppressed` 不删除真实 `effective_mana_power`；对抗、施法上限和压制破绽仍按 effective 计算。它们只降低 displayed 和 presence，并可能增加行动前解除姿态的成本或延迟。
+
+**感知规则（认知层）**——由 `SceneFilter::derive_attribute_perception(...)` 和 `SceneFilter::derive_mana_perception(...)` 程序化实施：
+
+1. 对他人 `physical`、`agility`、`endurance`、`insight`、`soul_strength` 的 `PerceivedAttributeProfile` 必须有观察依据；静止外观只能给低置信度，不能凭空生成确定档位。
+2. `physical` 通过体型、负重、冲撞、擒拿、碰撞结果感知；`agility` 通过移动、闪避、变向、平衡、出手速度感知；`endurance` 通过长时间行动、受伤后维持、疲惫恢复、痛苦反应感知；`insight` 通过识破虚招、反应选择、战术阅读、话术破绽判断感知；`soul_strength` 通过神魂压力、精神冲击抗性、恐惧/魅惑抵抗、灵魂类技能交互感知。
+3. `insight` 只提升线索解释质量与置信度，不自动读取隐藏事实、GodOnly Knowledge 或不可见实体。
+4. **观察者灵力** = `observer.effective_mana_power`（已含 L1 伤势 / 疲惫 / 突破修正）。
+5. **目标显示灵力** `target.displayed_mana_power`：
+   - 默认来自 `ManaExpressionState::Natural`，具体强弱由 `mana_expression_tendency` 的 `tendency_factor` 校准：默认内敛倾向 `0.5x`、一般倾向 `0.8x`、外放倾向 `1.1x`。
+   - 若目标处于 `Sealed` / `Suppressed`，displayed 按姿态比例下降；若处于 `Released` / `Dominating`，displayed 可上升，但只代表外显信号。
+   - 额外隐匿、压制、伪装或放大来自 L1 状态 / 技能 / 阵法修正；不让 LLM 自己定。
+6. **Δ = target.displayed_mana_power − observer.effective_mana_power**，按上述 9 档桶映射到 `AttributeDelta`。
+7. **mana_power 档位识别**：
+   - `|Δ| < 1000`：可识别 `tier_assessment = AttributeTier::from_value(AttributeKind::ManaPower, displayed)` 与 `attribute_assessment`，`confidence ≥ 0.7`。
    - `|Δ| ∈ [1000, 2000)`：可识别 tier，但 attribute 不稳；descriptors 偏向"远胜 / 远不及"。
    - `|Δ| ≥ 2000`：`tier_assessment = None`，descriptors 偏向"无法测度 / 如同蝼蚁"。
-5. **Mundane (Tier0) 观察者**：仅能将 `effective_mana_power ≥ 1000` 的存在感知为"超出常理"，无具体档位；环境灵气仅给"格外厚重 / 压抑"等体感。
-6. **零灵觉**（`SensoryCapabilities.mana.acuity == 0`）：`mana_signals = []`，`mana_environment.density_tier` 由间接体感（呼吸/温度异常）回填，`dominant_attribute = None`。
-7. **隐匿 / 压制**：
-   - 压制后档位 `displayed_tier = ManaPotencyTier::from_power(displayed)` 直接落在 tier_assessment 上。
+8. **Mundane (Tier0) 观察者**：仅能将 `effective_mana_power ≥ 1000` 的存在感知为"超出常理"，无具体档位；环境灵气仅给"格外厚重 / 压抑"等体感。
+9. **零灵觉**（`SensoryCapabilities.mana.acuity == 0`）：`mana_signals = []`，`mana_environment.density_tier` 由间接体感（呼吸/温度异常）回填，`dominant_attribute = None`。
+10. **隐匿 / 压制**：
+   - 封息/抑制后档位 `displayed_tier = AttributeTier::from_value(AttributeKind::ManaPower, displayed)` 直接落在 tier_assessment 上。
    - **破绽判定**（`concealment_suspected`）：当 `observer.effective_mana_power ≥ target.effective_mana_power − 200` 时（即观察者实力已能"接近"压制前的目标），置 true（"似有若无的违和感"）。否则压制看起来天衣无缝，false。
    - 灵觉敏锐度可作为额外破绽来源：`acuity ≥ 0.85` 且 `target.suppression_amount ≥ 1000` 时也强制 `concealment_suspected = true`（高灵觉天然能闻到压制痕迹）。
-8. **环境干扰**：`ManaField.interferences` 中的 jam/scramble 按强度降低 `confidence`；`mana_haze` 让该回合所有 mana_signals 的 |Δ| 视为额外 +500（拉远感知，便于隐匿者进出）。
-9. **属性相生相克**：观察者擅长属性与目标属性相同 → confidence +；相克 → 易识别（descriptors 含"违逆 / 刺骨"），同时影响 `attribute_assessment` 准确度与 descriptors 色彩。
+11. **外放 / 威压**：`Released` / `Dominating` 的 `pressure_delta` 可写入观察者的 `ReasoningModifiers`，形成"注意力被牵引 / 判断更保守 / 灵觉过载"等输入；是否真正恐惧、屈服或误判仍由 CognitivePass 基于 L2 + prior L3 生成。
+12. **环境干扰**：`ManaField.interferences` 中的 jam/scramble 按强度降低 `confidence`；`mana_haze` 让该回合所有 mana_signals 的 |Δ| 视为额外 +500（拉远感知，便于隐匿者进出）。
+13. **属性相生相克**：观察者擅长属性与目标属性相同 → confidence +；相克 → 易识别（descriptors 含"违逆 / 刺骨"），同时影响 `attribute_assessment` 准确度与 descriptors 色彩。
 
 **关键不变量**：
 
-1. CognitivePass 永远不读 raw `mana_power`，只读 tier / delta / descriptors。`FilteredSceneView` 中不暴露 raw 数值。
-2. 档位边界、Δ 桶边界、压制破绽阈值都是**世界配置项**（默认值同上，对 rp_cards 锚点校准），由 `WorldRulesSnapshot` 同时供角色卡解析、`SceneFilter::derive_mana_perception(...)`、`CombatMathResolver` 使用；改边界需同时更新配置 schema、迁移规则与单元测试。
+1. CognitivePass 永远不读 raw 基础属性或 raw `mana_power`，只读 tier / delta / expression_assessment / pressure_hints / descriptors / constraints。`FilteredSceneView` 中不暴露 raw 数值。
+2. 档位边界、Δ 桶边界、压制破绽阈值都是**世界配置项**（默认值同上，对 rp_cards 锚点校准），由 `WorldRulesSnapshot` 同时供角色卡解析、`AttributeResolver`、`SceneFilter::derive_attribute_perception(...)`、`SceneFilter::derive_mana_perception(...)`、`CombatMathResolver` 使用；改边界需同时更新配置 schema、迁移规则与单元测试。
 3. 感知层只写**事实级感受**（"远胜 / 难测 / 似有压制"），**不写信念**（"他一定是神祇 / 他在装弱 / 他没安好心"）。这些信念由 CognitivePass 的 LLM 基于感受 + `prior_subjective_state` 自行生成。
-4. ManaPotencyTier 同时为 `KnowledgeEntry { facet: CultivationRealm }` 的内部表征：`access_policy` 决定"谁能读取这一档", 跨档感知精度决定"感知到的是真档还是被压制的档"。
+4. `AttributeTier` 对 `AttributeKind::ManaPower` 的应用同时为 `KnowledgeEntry { facet: CultivationRealm }` 的内部表征：`access_policy` 决定"谁能读取这一档", 跨档感知精度决定"感知到的是真档还是被压制的档"。
 5. SurfaceRealizer 如需在叙事中提到"修为相差一筹/远胜/碾压"等具体差距文字，从 `ManaSignal.perceived.delta` 与 `tier_assessment` 取，不回查 raw mana_power。
+6. UI 展示的整数属性值不参与档位判断；Trace 可记录 full precision，普通 UI 默认隐藏小数。
+7. `ManaExpressionTendency` 是持久倾向，`ManaExpressionMode` 是运行时离散状态。LLM 可请求"封息/抑制/自然/外放/威压"这类动作意图，但不能输出 `tendency_factor`、`mode_factor`、`display_ratio`、`pressure_ratio` 或 raw displayed 值；具体倍率由程序按配置、人物覆盖、倾向和技能契约派生。
 
 ---
 
-## 3. Mana Combat Resolution（程序化灵力对抗解算）
+## 3. 对抗解算与 Skill Model
 
-对抗解算层与感知层用的是**不同**输入：
+Mana Combat Resolution、对抗公式、关键不变量和 Skill Model 契约已拆分到 [19_agent_combat_and_skills.md](19_agent_combat_and_skills.md)。
 
-- 感知层：`displayed_mana_power`（含压制）→ 角色"觉得"对方多强。
-- 对抗解算层：`effective_mana_power`（不含压制；压制只是没主动用全力）→ 实际对抗按真实底力 + 技能 + 身体状态计算。
-
-```rust
-pub struct ManaCombatResolution {
-    // 对抗解算层使用，不进入 CognitivePass
-    pub actor_id: String,
-    pub target_id: String,
-    pub actor_combat_power: f64,         // = effective_mana_power × max(0.1, 1 + Σ_modifiers) × soul_factor
-    pub target_combat_power: f64,
-    pub combat_delta: f64,               // actor_combat_power − target_combat_power
-    pub outcome_tier: CombatOutcomeTier,
-    pub disrupting_factors: Vec<String>, // 程序生成: ["攻方处于深度疲惫, 输出折半", "守方擅长水属性, 克制对手火属性"]
-}
-
-pub enum CombatOutcomeTier {
-    // 由 |combat_delta| 桶映射；与感知层 ManaPerceptionDelta 共享 150/300/1000 三个阈值
-    // 对抗解算层不再细分 1000 以上：到了"无力应对"就够用了
-    Indistinguishable,       // |Δ| < 150       势均力敌, 胜负看临场发挥/技巧
-    SlightEdge,              // Δ ∈ [150, 300)  攻方略占上风
-    MarkedEdge,              // Δ ∈ [300, 1000) 攻方明显优势
-    Crushing,                // Δ ≥ 1000        守方基本无力应对, 仅能逃避或求饶
-    // 负向（攻方反吃亏）对称展开
-}
-```
-
-### 3.1 对抗解算公式（程序化）
-
-```
-combat_power = effective_mana_power × max(0.1, 1 + Σ_modifiers) × soul_factor
-```
-
-仅有**两个独立乘区**：加算修正区（多数因子在此叠加），与灵魂状态乘区（单独成区）。其余因子全部以**加和**方式落到 `Σ_modifiers` 内，不互乘。
-
-1. **基础有效灵力** `effective_mana_power = base_mana_power + L1 状态修正`（突破/中毒/压制解除等，皆为 L1 真相，不含伤势疲惫——后者落入加算修正区）。
-2. **加算修正区** `Σ_modifiers`（同区内所有修正以加和方式叠加）：
-
-   **技能**：
-   - 本命法术：**+0.10 ~ +0.15**
-   - 克制属性：+0.10 ~ +0.20
-   - 受克制：-0.10 ~ -0.20
-   - mastery_rank：novice -0.15 ~ master +0.15
-
-   **身体**：
-   - 轻伤：-0.05 ~ -0.15
-   - **严重疲惫：-0.25**
-   - **身体重伤 / 灵力枯竭：-0.20 ~ -0.50**（按伤势严重度落区间）
-   - `EnvironmentalStrain.disrupted_actions` 按 disrupted 程度：-0.10 ~ -0.40
-
-   **心境**（来自 Layer 3 EmotionState 与 L1 突发情绪事件，按已有情绪标签程序化映射，不让 LLM 在对抗解算时即兴选择）：
-   - **自信 / 愤怒：+0.05 ~ +0.10**
-   - 恐惧 / 迟疑：-0.05 ~ -0.15
-   - 崩溃：-0.20 ~ -0.40
-
-   **环境**：
-   - 本属性 `Rich/Dense`：**通常 +0.1 ~ +0.15**
-   - 本属性 `Saturated`：至 +0.20
-   - `mana_haze`：-0.10
-   - **明确设定的例外**（特定阵法 / 上古遗迹 / 神祇坐镇地脉等）：由 L1 `KnowledgeEntry { kind: RegionFact / FactionFact }` 的 `content.combat_modifiers` 字段显式给出非常规修正值，直接加入 `Σ_modifiers`，可超出上述区间。
-
-3. **灵魂状态乘区** `soul_factor`（独立乘区，是除加算区外唯一的乘子）：
-   - 灵魂完整：1.0
-   - **灵魂破损 / 抽离：0.2 ~ 0.7**（按程度落区间，下限对应"魂飞魄散"级）
-
-4. **下限保护**：加算系数以 `max(0.1, 1 + Σ_modifiers)` 截下限，避免修正过深导致 combat_power 趋零或为负而引发除零 / 碾压判定异常。
-
-5. **outcome_tier** 按 `combat_delta = actor_combat_power − target_combat_power` 落桶（默认 150 / 300 / 1000，1000 以上即 Crushing）；桶边界来自 `WorldRulesSnapshot.combat_delta_thresholds`，细化由 `disrupting_factors` 列出（程序生成的具体说明，例 ["攻方显著疲惫 -0.20", "守方身体重伤 -0.40 + 恐惧 -0.10 + 灵魂破损 ×0.5"]）。
-
-6. 程序化对抗解算只决定**可验证物理后果**（伤势 / 法力消耗 / 位置变化）是否可写回 L1；公开退让、站队、敌对升级等外显社会事件可由 OutcomePlanner 候选输出，但内心恐惧 / 屈服 / 记仇仍由下游角色 CognitivePass 解读。
-
-### 3.2 关键不变量
-
-1. 对抗解算公式只读 L1 的 `effective_mana_power`、L1 的身体状态、L1 的技能/属性数据；**不读 displayed_mana_power**（压制是认知层的事，不影响真实对抗）。
-2. `combat_delta` 与 `ManaPerceptionDelta` 共享同一份 `WorldRulesSnapshot` 中的 150/300/1000 默认阈值，保证"我感觉略胜"与"实际略胜"在同一刻度上。对抗解算层在 Crushing 阈值以上不再细分；感知层仍可额外配置 `far` / `overwhelming` 边界（默认 2000），但两者**对应的对抗结论一致**（皆为"基本无力应对"），区别只在体感（"远胜，难敌" vs "无法测度，压顶之势"）与是否可识别 tier。
-3. 当 `disrupting_factors` 与 `outcome_tier` 出现"违和"（例如攻方 base_mana_power 高但身体状态极差导致 combat_delta 反而为负），SurfaceRealizer 必须在叙事中体现这种反差，而不是按"谁灵力高谁赢"硬写。
-4. **以弱胜强**在该框架下要求**多个加算修正叠加 + 可能的灵魂状态打击**：守方若同时陷入"显著疲惫 (-0.20) + 身体重伤 (-0.40) + 恐惧 (-0.10) = Σ = -0.70"，加算系数 = max(0.1, 0.30) = 0.30；再叠加灵魂破损 soul_factor = 0.5，总系数 0.15，足以让基础灵力差 1500 的弱者翻盘。"算计 / 偷袭 / 中毒 / 惊扰魂魄"必须落到具体的 L1 状态字段上，由公式自然得出，不允许 LLM 在对抗解算口径上手抹平差距。
-
----
-
-## 4. Skill Model（契约 + LLM）
-
-```rust
-pub struct Skill {
-    pub skill_id: String,
-    pub name: String,
-    pub trigger_mode: TriggerMode,         // active / reaction / passive / channeled
-    pub delivery_channel: DeliveryChannel, // gaze / voice / touch / projectile / scent / spiritual_link / ritual / field
-    pub impact_scope: ImpactScope,         // body / perception / mind / soul / scene
-    pub effect_contract: SkillEffectContract,
-    pub notes: String,                     // llm_readable: 技能意象、限制、常见表现；不直接参与程序判断
-}
-
-pub struct SkillEffectContract {
-    pub allowed_target_kinds: Vec<TargetKind>,
-    pub allowed_state_domains: Vec<StateDomain>,      // body / resource / position / perception / mind / soul / scene / knowledge_reveal
-    pub cost_profile: CostProfile,                    // semantic: 法力/体力/冷却/材料等成本
-    pub max_intensity_tier: EffectIntensityTier,      // 程序校验硬效果强度上限
-    pub allows_injury: bool,
-    pub allows_position_change: bool,
-    pub allows_knowledge_reveal: bool,
-    pub requires_line_of_effect: bool,
-    pub duration_policy: DurationPolicy,
-    pub opens_reaction_window: bool,
-    pub allows_interrupt: bool,
-    pub max_reaction_depth_override: Option<u8>,  // 默认 None；若 Some(2) 必须由 EffectValidator 校验
-}
-
-pub struct CharacterSkillUseProfile {
-    pub character_id: String,
-    pub skill_id: String,
-    pub mastery_rank: u8,  // 1-5: novice / trained / skilled / expert / master
-    pub notes: String,
-}
-```
-
-技能的"该角色掌握哪些技能"以 `KnowledgeEntry { kind: CharacterFacet, facet: KnownAbility | HiddenAbility }` 表达，统一受 `access_policy` 约束。OutcomePlanner 可以读取 `notes` 理解复杂效果，但硬状态变化只能落在 `effect_contract` 允许的范围内；超出范围的候选效果由 EffectValidator 转入 `blocked_effects` 或 `soft_effects`。
-
----
-
+本文件只保留环境档位与基础属性档位的程序化派生规则。

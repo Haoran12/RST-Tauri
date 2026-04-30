@@ -152,7 +152,7 @@ Wrapper 的后置条件：
 
 `chat_structured` 的统一后置条件：返回值必须通过传入的 JSON Schema 校验；未通过时由 Provider 层执行有限重试，仍失败则向上返回错误并触发运行时容错路径。JSON mode 只能保证 JSON 可解析，不能替代 schema adherence。
 
-Agent 模式的调用方不得手写散落 prompt。所有 Agent LLM 调用必须先由 `PromptBuilder` 生成 [13_agent_llm_io.md](13_agent_llm_io.md) 定义的 `AgentPromptBundle`：
+Agent 模式的调用方不得手写散落 prompt。所有 Agent LLM 调用必须先由 `PromptBuilder` 生成 [13_agent_llm_io.md](13_agent_llm_io.md) 定义的 `AgentPromptBundle`；具体节点 I/O 契约按节点分布在 [13_agent_llm_io.md](13_agent_llm_io.md)、[21_agent_scene_llm_io.md](21_agent_scene_llm_io.md) 与 [22_agent_outcome_narration_io.md](22_agent_outcome_narration_io.md)：
 
 - system：静态节点契约。
 - developer / system追加：本次任务说明；Provider 无 developer role 时合并进 system。

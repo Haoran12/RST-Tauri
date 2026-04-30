@@ -1,0 +1,71 @@
+# 16 Agent 时间线与正史资格
+
+本文档承载 Agent World 的时间锚点、会话时期、主线光标、过去线正史资格与冲突处理规则。
+
+三层数据语义见 [10_agent_data_model.md](10_agent_data_model.md)。运行时处理见 [11_agent_runtime.md](11_agent_runtime.md)。SQLite 持久化见 [14_agent_persistence.md](14_agent_persistence.md)。
+
+---
+
+## 1. 时间锚点、会话与正史资格
+
+Agent World 使用一条 canonical Truth 作为正史。多份聊天记录不是多套世界状态，而是同一 World 下的 `AgentSession`：用户选择特定时期、地点、扮演人物和叙事视角进入世界。
+
+```rust
+pub struct WorldMainlineCursor {
+    pub world_id: String,
+    pub timeline_id: String,                 // 第一版固定为 "main"
+    pub mainline_head_turn_id: Option<String>,
+    pub mainline_time_anchor: TimeAnchor,
+    pub updated_at: DateTime,
+}
+
+pub struct AgentSession {
+    pub session_id: String,
+    pub world_id: String,
+    pub title: String,
+    pub session_kind: AgentSessionKind,
+    pub period_anchor: TimeAnchor,
+    pub player_character_id: Option<String>,
+    pub canon_status: SessionCanonStatus,
+    pub conflict_policy: Option<ConflictPolicyDecision>,
+    pub created_at: DateTime,
+    pub updated_at: DateTime,
+}
+
+pub enum AgentSessionKind {
+    Mainline,
+    Retrospective,       // period_anchor < WorldMainlineCursor.mainline_time_anchor
+    FuturePreview,       // period_anchor > WorldMainlineCursor.mainline_time_anchor；默认不入正史
+}
+
+pub enum SessionCanonStatus {
+    CanonCandidate,      // 尚未发生硬冲突，候选细节可经校验提升
+    PartiallyCanon,      // 冲突前可提升，冲突回合及之后非正史
+    NonCanon,            // 整条会话非正史
+}
+
+pub enum TurnCanonStatus {
+    CanonCandidate,
+    CanonPromoted,
+    ConflictWarned,
+    NonCanon,
+}
+
+pub enum ConflictPolicyDecision {
+    NonCanonAfterConflict,
+    WholeSessionNonCanon,
+}
+```
+
+`TimeAnchor` 必须是程序可比较的结构化时间锚点，而不是只给 LLM 阅读的自然语言。不同 World 可在 `world_base.yaml` 中定义日历，但编译后的运行时必须能比较同一 World 内两个锚点的先后：
+
+```rust
+pub struct TimeAnchor {
+    pub calendar_id: String,
+    pub ordinal: i64,                         // World 内可排序时间刻度
+    pub precision: TimePrecision,             // exact / day / period / era
+    pub display_text: String,                 // llm_readable；不参与排序
+}
+```
+
+可变化的 Layer 1 事实必须支持有效时间，至少在写入元数据中保存 `valid_from` / `valid_until` 或来源事件时间。角色位置、伤势、临时状态、关系授权、Knowledge 揭示、地点状态和历史事件结果不得只覆盖“当前值”。运行时通过 `WorldStateAt(period_anchor)` 构建某一会话的工作视图，禁止过去线读取未来状态。

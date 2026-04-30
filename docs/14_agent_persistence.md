@@ -60,7 +60,7 @@ CREATE TABLE world_turns (
     timeline_id TEXT NOT NULL DEFAULT 'main',
     story_time_anchor TEXT NOT NULL,          -- JSON: TimeAnchor
     user_message TEXT NOT NULL,             -- JSON: 用户输入/扮演输入
-    rendered_output TEXT,                   -- SurfaceRealizer 输出
+    rendered_output TEXT,                   -- SurfaceRealizerOutput.narrative_text；used_fact_ids 写入 Agent Trace
     canon_status TEXT NOT NULL DEFAULT 'canon', -- canon / provisional_promoted
     status TEXT NOT NULL DEFAULT 'active',  -- active / rolled_back
     created_at TEXT NOT NULL,
@@ -271,12 +271,15 @@ CREATE TABLE character_scope_memberships (
     PRIMARY KEY (character_id, scope_type, scope_value)
 );
 
--- 角色基本档案（仅 baseline_body_profile + mind_model_card_knowledge_id 指针；其余事实在 knowledge_entries 中）
+-- 角色基本档案（base_attributes + baseline_body_profile + mana_expression_tendency + optional factor override + mind_model_card_knowledge_id 指针 + temporary_state；其余事实在 knowledge_entries 中）
 CREATE TABLE character_records (
     character_id TEXT PRIMARY KEY,
+    base_attributes TEXT NOT NULL,         -- JSON: BaseAttributes，f64 存储和计算
     baseline_body_profile TEXT NOT NULL,   -- JSON
+    mana_expression_tendency TEXT NOT NULL, -- enum: Inward / Neutral / Expressive，长期默认显露倾向
+    mana_expression_tendency_factor_override REAL, -- 可空；特定人物覆盖 tendency_factor
     mind_model_card_knowledge_id TEXT NOT NULL,
-    temporary_body_state TEXT NOT NULL,    -- JSON: Layer 1 当前身体/资源状态
+    temporary_state TEXT NOT NULL,         -- JSON: Layer 1 当前身体/资源/跨域临时状态，含 mana_expression
     schema_version TEXT NOT NULL DEFAULT '0.1',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
