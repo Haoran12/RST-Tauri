@@ -1,14 +1,14 @@
 # 14 Agent SQLite 持久化
 
-本文档承载 Agent 模式的 SQLite 表结构、索引与持久化边界。
+本文档承载 Agent 模式的 `world.sqlite` 表结构、索引与持久化边界。全局 `./data/logs/app_logs.sqlite` 只复用日志相关表形状，且不包含指向 Agent World 表的外键；边界见 [30_logging_and_observability.md](30_logging_and_observability.md)。
 
-数据语义见 [10_agent_data_model.md](10_agent_data_model.md)。地点层级、地区事实继承与路线图见 [15_agent_location_system.md](15_agent_location_system.md)。Knowledge 访问派生索引的运行规则见 KnowledgeEntry 章节。运行时写入顺序见 [11_agent_runtime.md](11_agent_runtime.md)，日志表与清理策略见 [30_logging_and_observability.md](30_logging_and_observability.md)。
+数据语义见 [10_agent_data_model.md](10_agent_data_model.md)。地点层级、地区事实继承与路线图见 [15_agent_location_system.md](15_agent_location_system.md)。Knowledge 访问派生索引的运行规则见 KnowledgeEntry 章节。Agent 世界编辑器见 [40_agent_world_editor.md](40_agent_world_editor.md)。运行时写入顺序见 [11_agent_runtime.md](11_agent_runtime.md)，日志表与清理策略见 [30_logging_and_observability.md](30_logging_and_observability.md)。
 
 ---
 
 ## 1. SQLite 表结构
 
-按三层语义组织。Layer 2 不持久化（每回合重建）；Layer 1 / Layer 3 / Trace 各自独立。Agent 模式以 World 为 canonical Truth 单元；聊天记录是同一 World 下的会话视图，不等同于独立世界状态。canonical 回合、会话消息、过去线 provisional truth 与冲突报告必须分表保存，避免非正史会话污染正史。
+按三层语义组织。Layer 2 不持久化（每回合重建）；Layer 1 / Layer 3 / Trace 各自独立。Agent 模式以 World 为 canonical Truth 单元；聊天记录是同一 World 下的会话视图，不等同于独立世界状态。Agent runtime turn、canonical 状态提交、会话消息、过去线 provisional truth 与冲突报告必须分表保存，避免非正史会话污染正史。
 
 ```sql
 -- ===== Session / Timeline / Turn Commit（会话、主线光标与正史提交） =====
@@ -46,13 +46,15 @@ CREATE TABLE session_turns (
     local_index INTEGER NOT NULL,
     role TEXT NOT NULL,                       -- user / assistant / system
     message_json TEXT NOT NULL,
-    canon_status TEXT NOT NULL,               -- canon_candidate / canon_promoted / conflict_warned / noncanon
+    canon_status TEXT NOT NULL,               -- SessionTurnCanonStatus: canon_candidate / canon_promoted / conflict_warned / noncanon
     created_at TEXT NOT NULL,
     FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id),
     FOREIGN KEY (scene_turn_id) REFERENCES world_turns(scene_turn_id)
 );
 
--- canonical commit journal；提交顺序不等于故事时间顺序
+-- Agent runtime turn journal；提交顺序不等于故事时间顺序。
+-- runtime_turn_status=canon/provisional_promoted 且存在 state_commit_records 时，才表示 canonical 状态提交。
+-- noncanon/future_preview/provisional_only 回合可用于 SessionTurn、Trace、Logs 与 provisional truth 关联，但不得改 canonical Truth。
 CREATE TABLE world_turns (
     scene_turn_id TEXT PRIMARY KEY,
     parent_turn_id TEXT,
@@ -61,7 +63,7 @@ CREATE TABLE world_turns (
     story_time_anchor TEXT NOT NULL,          -- JSON: TimeAnchor
     user_message TEXT NOT NULL,             -- JSON: 用户输入/扮演输入
     rendered_output TEXT,                   -- SurfaceRealizerOutput.narrative_text；used_fact_ids 写入 Agent Trace
-    canon_status TEXT NOT NULL DEFAULT 'canon', -- canon / provisional_promoted
+    runtime_turn_status TEXT NOT NULL DEFAULT 'canon', -- RuntimeTurnCanonStatus: canon / provisional_promoted / provisional_only / noncanon / future_preview
     status TEXT NOT NULL DEFAULT 'active',  -- active / rolled_back
     created_at TEXT NOT NULL,
     rolled_back_at TEXT,
@@ -109,7 +111,8 @@ CREATE TABLE conflict_reports (
     FOREIGN KEY (scene_turn_id) REFERENCES world_turns(scene_turn_id)
 );
 
--- 每回合状态提交记录；用于定位需要回滚的人物、世界、知识和 trace 变化
+-- canonical 状态提交记录；用于定位需要回滚的人物、世界、知识和 trace 变化。
+-- noncanon / future_preview / provisional_only 回合没有 state_commit_records。
 CREATE TABLE state_commit_records (
     commit_id TEXT PRIMARY KEY,
     scene_turn_id TEXT NOT NULL,
@@ -124,6 +127,25 @@ CREATE TABLE state_commit_records (
     rolled_back_at TEXT,
     rollback_reason TEXT,
     FOREIGN KEY (scene_turn_id) REFERENCES world_turns(scene_turn_id)
+);
+
+-- 作者编辑器提交记录；只记录 World Editor 在 paused 状态下产生的结构化作者修改。
+-- 它不是 runtime turn，不伪造 scene_turn_id，也不替代 state_commit_records。
+CREATE TABLE world_editor_commits (
+    editor_commit_id TEXT PRIMARY KEY,
+    world_id TEXT NOT NULL,
+    base_editor_revision INTEGER NOT NULL,
+    resulting_editor_revision INTEGER NOT NULL,
+    changed_location_ids TEXT NOT NULL,            -- JSON array: location_nodes / edges / spatial_relations / aliases / templates 变更 ID
+    changed_knowledge_ids TEXT NOT NULL,           -- JSON array
+    changed_character_ids TEXT NOT NULL,           -- JSON array
+    changed_relationship_ids TEXT NOT NULL,        -- JSON array: objective_relationships 变更 ID
+    changed_temporal_state_ids TEXT NOT NULL,      -- JSON array
+    changed_config_keys TEXT NOT NULL,             -- JSON array: world_base.yaml / world rules key path
+    rollback_patch TEXT NOT NULL,                  -- JSON: 反向 patch 或变更前镜像
+    validation_summary TEXT NOT NULL,              -- JSON: 提交时校验摘要、warning 与影响面
+    author_note TEXT,
+    created_at TEXT NOT NULL
 );
 
 -- ===== Layer 1: Truth Store =====
@@ -285,6 +307,47 @@ CREATE TABLE character_records (
     updated_at TEXT NOT NULL
 );
 
+-- 可变化 Layer 1 状态的时态记录。WorldStateAt(period_anchor) 以此重建过去线工作视图；
+-- character_records.temporary_state、location_nodes.status 等当前态字段只是主线最新状态的 materialized cache。
+CREATE TABLE temporal_state_records (
+    state_record_id TEXT PRIMARY KEY,
+    subject_type TEXT NOT NULL,              -- character / location / scene / object / relationship / resource
+    subject_id TEXT NOT NULL,
+    state_kind TEXT NOT NULL,                -- position / temporary_state / location_status / item_state / objective_relation / authorization / ...
+    valid_from TEXT NOT NULL,                -- JSON: TimeAnchor
+    valid_until TEXT,                        -- JSON: TimeAnchor；NULL 表示持续有效
+    payload TEXT NOT NULL,                   -- JSON: 对应该 state_kind 的结构化状态
+    source_scene_turn_id TEXT,
+    source_session_id TEXT,
+    canon_status TEXT NOT NULL DEFAULT 'canon', -- canon / provisional_promoted；noncanon 不进入 WorldStateAt canonical 视图
+    schema_version TEXT NOT NULL DEFAULT '0.1',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (source_scene_turn_id) REFERENCES world_turns(scene_turn_id),
+    FOREIGN KEY (source_session_id) REFERENCES agent_sessions(session_id)
+);
+
+-- 当前主线 L1 客观关系 / 授权的 materialized cache。AccessCondition::SocialAccessAtLeast 在当前主线热路径可读此表；
+-- 按 TimeAnchor 查询、过去线和回滚复盘必须读取 temporal_state_records 中的时态权威。
+-- 禁止读取 L3 relation_models。
+CREATE TABLE objective_relationships (
+    relation_id TEXT PRIMARY KEY,
+    subject_character_id TEXT NOT NULL,
+    target_character_id TEXT NOT NULL,
+    relation_kind TEXT NOT NULL,             -- ally / family / faction_rank / employer / oath / access_grant / hostility ...
+    access_level REAL NOT NULL DEFAULT 0.0,  -- 供 SocialAccessAtLeast 等结构化条件读取
+    authorization_tags TEXT NOT NULL,         -- JSON array: private_room_access / archive_access / command_rank ...
+    valid_from TEXT NOT NULL,                -- JSON: TimeAnchor
+    valid_until TEXT,                        -- JSON: TimeAnchor
+    source_knowledge_id TEXT,
+    source_scene_turn_id TEXT,
+    schema_version TEXT NOT NULL DEFAULT '0.1',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (source_knowledge_id) REFERENCES knowledge_entries(knowledge_id),
+    FOREIGN KEY (source_scene_turn_id) REFERENCES world_turns(scene_turn_id)
+);
+
 -- ===== Layer 3: Subjective State =====
 
 -- 角色主观状态快照（每回合 cognitive pass 后写入）
@@ -307,6 +370,7 @@ CREATE TABLE character_subjective_snapshots (
 
 CREATE TABLE config_snapshots (
     config_snapshot_id TEXT PRIMARY KEY,
+    snapshot_kind TEXT NOT NULL,           -- runtime_config / world_rules
     scope TEXT NOT NULL,                   -- global / world
     world_id TEXT,
     schema_version INTEGER NOT NULL,
@@ -321,17 +385,19 @@ CREATE TABLE turn_traces (
     scene_turn_id TEXT NOT NULL,
     session_id TEXT,
     story_time_anchor TEXT,                -- JSON: TimeAnchor
-    canon_status TEXT NOT NULL DEFAULT 'canon',
+    runtime_turn_status TEXT NOT NULL DEFAULT 'canon',
     trace_kind TEXT NOT NULL,              -- turn / character / presentation / rollback
     character_id TEXT,                     -- NULL 表示全局回合 trace
-    config_snapshot_id TEXT NOT NULL,
+    runtime_config_snapshot_id TEXT NOT NULL,
+    world_rules_snapshot_id TEXT,
     summary TEXT NOT NULL,                 -- JSON: 回合级关键产物索引与摘要
     linked_request_ids TEXT NOT NULL,       -- JSON array: 关联 llm_call_logs.request_id
     linked_event_ids TEXT NOT NULL,         -- JSON array: 关联 app_event_logs.event_id
     created_at TEXT NOT NULL,
     FOREIGN KEY (scene_turn_id) REFERENCES world_turns(scene_turn_id),
     FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id),
-    FOREIGN KEY (config_snapshot_id) REFERENCES config_snapshots(config_snapshot_id)
+    FOREIGN KEY (runtime_config_snapshot_id) REFERENCES config_snapshots(config_snapshot_id),
+    FOREIGN KEY (world_rules_snapshot_id) REFERENCES config_snapshots(config_snapshot_id)
 );
 
 CREATE TABLE agent_step_traces (
@@ -361,7 +427,8 @@ CREATE TABLE llm_call_logs (
     character_id TEXT,
     llm_node TEXT NOT NULL,                -- STChat / SceneInitializer / SceneStateExtractor / CharacterCognitivePass / OutcomePlanner / SurfaceRealizer
     api_config_id TEXT NOT NULL,           -- 调用时实际使用的 API 配置
-    config_snapshot_id TEXT,
+    runtime_config_snapshot_id TEXT,
+    world_rules_snapshot_id TEXT,
     provider TEXT NOT NULL,
     model TEXT NOT NULL,
     call_type TEXT NOT NULL,               -- chat / chat_structured / chat_stream
@@ -381,7 +448,8 @@ CREATE TABLE llm_call_logs (
     FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id),
     FOREIGN KEY (scene_turn_id) REFERENCES world_turns(scene_turn_id),
     FOREIGN KEY (trace_id) REFERENCES turn_traces(trace_id),
-    FOREIGN KEY (config_snapshot_id) REFERENCES config_snapshots(config_snapshot_id)
+    FOREIGN KEY (runtime_config_snapshot_id) REFERENCES config_snapshots(config_snapshot_id),
+    FOREIGN KEY (world_rules_snapshot_id) REFERENCES config_snapshots(config_snapshot_id)
 );
 
 -- Agent LLM 节点配置档案；api_config_id 指向 ./data/api_configs/ 中的 ST/API 配置池
@@ -424,17 +492,19 @@ CREATE TABLE app_event_logs (
     scene_turn_id TEXT,
     trace_id TEXT,
     character_id TEXT,
-    config_snapshot_id TEXT,
+    runtime_config_snapshot_id TEXT,
+    world_rules_snapshot_id TEXT,
     detail_json TEXT,                      -- JSON: 异常上下文，写入前必须脱敏
     created_at TEXT NOT NULL,
-    FOREIGN KEY (config_snapshot_id) REFERENCES config_snapshots(config_snapshot_id)
+    FOREIGN KEY (runtime_config_snapshot_id) REFERENCES config_snapshots(config_snapshot_id),
+    FOREIGN KEY (world_rules_snapshot_id) REFERENCES config_snapshots(config_snapshot_id)
 );
 
 CREATE TABLE log_retention_state (
     retention_id TEXT PRIMARY KEY,
     scope TEXT NOT NULL,                   -- global / world
     world_id TEXT,
-    config_snapshot_id TEXT,
+    runtime_config_snapshot_id TEXT,
     size_limit_bytes INTEGER NOT NULL,       -- 本轮 retention 检查采用的快照值
     current_size_bytes INTEGER,
     last_checked_at TEXT,
@@ -442,7 +512,7 @@ CREATE TABLE log_retention_state (
     cleanup_needed INTEGER NOT NULL DEFAULT 0,
     user_prompt_required INTEGER NOT NULL DEFAULT 0,
     detail_json TEXT,
-    FOREIGN KEY (config_snapshot_id) REFERENCES config_snapshots(config_snapshot_id)
+    FOREIGN KEY (runtime_config_snapshot_id) REFERENCES config_snapshots(config_snapshot_id)
 );
 
 -- ===== 索引 =====
@@ -456,6 +526,8 @@ CREATE INDEX idx_world_turns_parent ON world_turns(parent_turn_id);
 CREATE INDEX idx_world_turns_session ON world_turns(session_id);
 CREATE INDEX idx_world_turns_story_time ON world_turns(timeline_id, story_time_anchor);
 CREATE INDEX idx_commit_records_turn ON state_commit_records(scene_turn_id);
+CREATE INDEX idx_world_editor_commits_revision ON world_editor_commits(world_id, resulting_editor_revision);
+CREATE INDEX idx_world_editor_commits_created ON world_editor_commits(world_id, created_at);
 CREATE INDEX idx_location_parent ON location_nodes(parent_id);
 CREATE INDEX idx_location_polity ON location_nodes(polity_id);
 CREATE INDEX idx_location_level ON location_nodes(canonical_level);
@@ -475,19 +547,25 @@ CREATE INDEX idx_access_scopes_lookup ON knowledge_access_scopes(scope_type, sco
 CREATE INDEX idx_character_scope_lookup ON character_scope_memberships(character_id, scope_type, scope_value);
 CREATE INDEX idx_subjective_char ON character_subjective_snapshots(character_id, scene_turn_id);
 CREATE INDEX idx_subjective_char_time ON character_subjective_snapshots(character_id, story_time_anchor, canon_status);
+CREATE INDEX idx_temporal_state_subject ON temporal_state_records(subject_type, subject_id, state_kind);
+CREATE INDEX idx_temporal_state_time ON temporal_state_records(valid_from, valid_until, canon_status);
+CREATE INDEX idx_objective_relationship_pair ON objective_relationships(subject_character_id, target_character_id, relation_kind);
+CREATE INDEX idx_objective_relationship_time ON objective_relationships(valid_from, valid_until);
 CREATE INDEX idx_provisional_session ON provisional_session_truth(session_id, promotion_status);
 CREATE INDEX idx_conflicts_session ON conflict_reports(session_id, severity, created_at);
-CREATE INDEX idx_config_snapshots_scope ON config_snapshots(scope, world_id, created_at);
+CREATE INDEX idx_config_snapshots_scope ON config_snapshots(snapshot_kind, scope, world_id, created_at);
 CREATE INDEX idx_traces_turn ON turn_traces(scene_turn_id);
-CREATE INDEX idx_traces_session ON turn_traces(session_id, canon_status);
-CREATE INDEX idx_traces_config ON turn_traces(config_snapshot_id);
+CREATE INDEX idx_traces_session ON turn_traces(session_id, runtime_turn_status);
+CREATE INDEX idx_traces_runtime_config ON turn_traces(runtime_config_snapshot_id);
+CREATE INDEX idx_traces_world_rules ON turn_traces(world_rules_snapshot_id);
 CREATE INDEX idx_step_traces_turn ON agent_step_traces(scene_turn_id);
 CREATE INDEX idx_step_traces_trace ON agent_step_traces(trace_id);
 CREATE INDEX idx_llm_logs_turn ON llm_call_logs(scene_turn_id);
 CREATE INDEX idx_llm_logs_session ON llm_call_logs(session_id);
 CREATE INDEX idx_llm_logs_trace ON llm_call_logs(trace_id);
 CREATE INDEX idx_llm_logs_api_config ON llm_call_logs(api_config_id);
-CREATE INDEX idx_llm_logs_config ON llm_call_logs(config_snapshot_id);
+CREATE INDEX idx_llm_logs_runtime_config ON llm_call_logs(runtime_config_snapshot_id);
+CREATE INDEX idx_llm_logs_world_rules ON llm_call_logs(world_rules_snapshot_id);
 CREATE INDEX idx_llm_logs_created ON llm_call_logs(created_at);
 CREATE INDEX idx_stream_chunks_request ON llm_stream_chunks(request_id, chunk_index);
 CREATE INDEX idx_app_events_context ON app_event_logs(world_id, scene_turn_id, trace_id);
@@ -504,15 +582,19 @@ CREATE INDEX idx_app_events_created ON app_event_logs(created_at);
 - `subject_id + facet_type` 联合索引服务"取角色 X 的所有 facets"这一最高频查询。
 - `world_mainline_cursor` 定义玩家当前主线前沿；判断过去线必须比较 `agent_sessions.period_anchor` 与 `mainline_time_anchor`，不得使用 `world_turns.created_at`。
 - `agent_sessions` 保存同一 World 下的聊天入口；`session_turns` 保存会话内显示顺序。删除 / 归档会话不等于删除 canonical Truth。
-- `world_turns` 是 canonical commit journal；`parent_turn_id` 表示提交依赖链，`story_time_anchor` 表示故事内时间。补玩过去线时，新的 commit 可以晚创建但 story time 更早。
+- `agent_sessions.canon_status`、`session_turns.canon_status` 与 `world_turns.runtime_turn_status` 使用不同枚举，分别表示整条会话资格、聊天消息状态和运行回合状态，不得在代码中复用同一个 enum。
+- `world_turns` 是 Agent runtime turn journal，不等同于 canonical commit journal；`parent_turn_id` 表示运行 / 依赖链，`story_time_anchor` 表示故事内时间。只有 `runtime_turn_status = canon | provisional_promoted` 且存在 `state_commit_records` 的回合才提交 canonical Truth。补玩过去线时，新的 runtime turn 可以晚创建但 story time 更早。
+- `world_editor_commits` 记录作者在 World Editor 中对 canonical Truth / World rules 的结构化修改。它只能在 World paused 且无 active turn / LLM call / StateCommitter 写入时产生；它不创建 `world_turns`，不写 `state_commit_records`，也不伪造 `scene_turn_id`。运行时回合回滚与作者编辑回滚是两个流程，后续若需要把作者修改转成剧情事件，必须通过修正 / 重放流程。
 - `provisional_session_truth` 保存过去线和预演会话产生的候选事实。只有 `promotion_status = promoted` 的候选能对应到 canonical `knowledge_entries` 或 `world_turns`；非正史会话不得提升。
 - `conflict_reports` 记录过去线与 TruthGuidance 的硬冲突。冲突不会打断游玩，只通过 `policy_decision` 把冲突后或整条会话降为非正史。
 - `character_subjective_snapshots` 的 canonical 最新快照才是角色当前心智状态；非正史或过去线会话的快照必须带 `session_id` / `canon_status`，不得覆盖 canonical 当前心智。
+- `temporal_state_records` 是可变化 Layer 1 状态的时态权威：角色位置、伤势 / 临时状态、地点状态、物品状态、客观关系 / 授权都必须能落为带 `valid_from` / `valid_until` 的记录。`character_records.temporary_state` 与 `location_nodes.status` 是当前主线的 materialized cache，不能单独作为过去线 `WorldStateAt(period_anchor)` 的来源。
+- `objective_relationships` 保存当前主线 L1 客观关系与授权等级的 materialized cache；对应时间权威必须存在于 `temporal_state_records(state_kind=objective_relation|authorization)` 或可追溯来源中。`AccessCondition::SocialAccessAtLeast` 当前热路径可读此表，按 `TimeAnchor` 查询必须读时态记录；任何情况下都禁止读取 L3 `relation_models`。
 - 没有"memory_records"表；正史事件约束使用 `knowledge_entries.kind = 'historical_event'`，角色亲历 / 听闻 / 推断记忆使用 `knowledge_entries.kind = 'memory'`。
 - 回滚 canonical turn 时，必须检查后续 canonical facts、已提升 provisional truth、其他会话和 `world_mainline_cursor` 是否依赖该回合；存在依赖时默认阻止并生成影响报告，不能只按聊天消息删除。
 - Agent Trace 以 `scene_turn_id` 为主轴，解释回合如何演化；运行 Logs 以 `request_id` / `event_id` 为主轴，解释应用运行时发生了什么。两者可互相关联，但日志不得作为 Agent 判断或 LLM 输入来源。
-- `config_snapshots` 记录已发布运行配置快照的 hash 和脱敏摘要，用于复盘“当时用了哪套阈值”；它不是热路径配置源，Resolver 不得从表中查询阈值。
+- `config_snapshots` 记录已发布配置快照的 hash 和脱敏摘要，用于复盘“当时用了哪套预算 / 阈值”。`snapshot_kind=runtime_config` 对应全局 `RuntimeConfigSnapshot`，`snapshot_kind=world_rules` 对应 `WorldRulesSnapshot`。Agent 回合相关 Trace / Logs 同时记录 `runtime_config_snapshot_id` 与 `world_rules_snapshot_id`；ST 或全局运行事件通常只记录 runtime 配置。该表不是热路径配置源，Resolver 不得从表中查询阈值。
 - Agent 模式允许五类 LLM 节点绑定不同 API 配置；`agent_llm_profiles.bindings` 保存用户选择，`llm_call_logs.api_config_id` 保存每次调用实际使用的配置。
 - `llm_call_logs.request_json`、`response_json`、`llm_stream_chunks.raw_chunk` 尽量还原 Provider 原貌；`readable_text` 仅用于流式响应的段落化查看，不替代原始响应。
-- `app_event_logs` 同表结构可用于 `./data/logs/app_logs.sqlite`。ST 模式只写全局运行 Logs；Agent 模式与回合相关的记录写入对应 `world.sqlite`，同时可在全局异常日志中保留带 `world_id` / `scene_turn_id` 的索引事件。
-- 默认清理上限为 1GB，但实际上限来自 `RuntimeConfigSnapshot.log_retention`；`log_retention_state.size_limit_bytes` 只记录本轮 retention 检查采用的值。自动清理只处理全局运行 Logs；Agent Trace 和仍被 `state_commit_records.trace_ids` 引用的记录不自动删除。30 天以上未更新且日志体积较大的 World 只产生提示事件，等待用户确认。
+- `config_snapshots`、`llm_call_logs`、`llm_stream_chunks`、`app_event_logs`、`log_retention_state` 的字段形状可复用于全局 `./data/logs/app_logs.sqlite`。全局库不得创建指向 `agent_sessions`、`world_turns`、`turn_traces` 的外键；其中的 `world_id` / `scene_turn_id` / `trace_id` 只是逻辑索引。ST 模式只写全局运行 Logs；Agent 模式与回合相关的记录写入对应 `world.sqlite`，同时可在全局异常日志中保留带 `world_id` / `scene_turn_id` 的脱敏索引事件。
+- 默认清理上限为 1GB，但实际上限来自 `RuntimeConfigSnapshot.log_retention`；`log_retention_state.size_limit_bytes` 只记录本轮 retention 检查采用的值。自动清理只处理全局运行 Logs；Agent Trace、World 内回合相关 LLM Logs 和仍被 `state_commit_records.trace_ids` 引用的记录不自动删除。30 天以上未更新且日志体积较大的 World 只产生提示事件，等待用户确认。

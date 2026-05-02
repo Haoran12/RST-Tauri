@@ -206,6 +206,13 @@ interface PromptOrderItem {
 
 ## 4. 预设管理器
 
+预设中的大段模板正文使用 [42_structured_text_editor.md](42_structured_text_editor.md) 定义的 Structured Text Editor：
+
+- `SystemPrompt.content`、`PromptItem.content`、`story_string`、`wi_format`、`scenario_format`、`personality_format` 等字段默认 Plain。
+- 用户可切 JSON / YAML，把 prompt 正文组织成 LLM 可读的结构化模板、规则列表、示例块或配置样式文本，但保存形态仍是 string。
+- JSON / YAML 解析失败时阻止保存当前字段；Plain 的括号 / 引号不匹配只作为 warning。
+- `extensions`、`provider_overrides` 和导入保留的未知字段默认使用 JSON 模式编辑；保存前必须保持 object 形态。
+
 ```typescript
 interface PresetManager {
   listPresets(type: PresetType): Promise<string[]>;

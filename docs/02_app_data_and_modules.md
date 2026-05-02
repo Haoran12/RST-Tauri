@@ -2,7 +2,7 @@
 
 本文档承载应用数据目录、配置分层、运行时快照、前后端模块结构与模块职责边界。
 
-总体架构、数据形态铁律与 LLM/程序边界见 [01_architecture.md](01_architecture.md)。Agent 数据契约见 [10_agent_data_model.md](10_agent_data_model.md)。SQLite 表结构见 [14_agent_persistence.md](14_agent_persistence.md)。日志与可观测性见 [30_logging_and_observability.md](30_logging_and_observability.md)。
+总体架构、数据形态铁律与 LLM/程序边界见 [01_architecture.md](01_architecture.md)。Agent 数据契约见 [10_agent_data_model.md](10_agent_data_model.md)。SQLite 表结构见 [14_agent_persistence.md](14_agent_persistence.md)。Agent 世界编辑器见 [40_agent_world_editor.md](40_agent_world_editor.md)。前端交互主框架见 [41_frontend_interaction.md](41_frontend_interaction.md)。结构化文本编辑器见 [42_structured_text_editor.md](42_structured_text_editor.md)。日志与可观测性见 [30_logging_and_observability.md](30_logging_and_observability.md)。
 
 ---
 
@@ -16,7 +16,7 @@
 - API 配置、角色卡、世界书、聊天记录、Agent 世界数据库不得散落在程序目录外。
 - 应用启动时由存储层负责创建缺失目录；业务模块只通过 `storage::*` 访问路径。
 - 路径中的实体 ID 必须使用安全文件名，禁止 `..`、绝对路径和平台保留字符。
-- 日志存储位置见 [30_logging_and_observability.md](30_logging_and_observability.md)：全局运行 Logs 位于 `./data/logs/`，Agent Trace 随 World 位于 `./data/worlds/<world_id>/`。
+- 日志存储位置见 [30_logging_and_observability.md](30_logging_and_observability.md)：全局运行 Logs 位于 `./data/logs/`；Agent Trace 与回合相关 LLM Logs 随 World 位于 `./data/worlds/<world_id>/world.sqlite`。
 
 ### 1.2 ST 模式数据布局
 
@@ -70,7 +70,7 @@ Agent 模式以 World 为顶层隔离单元。一个 World 不是普通聊天文
 
 过去线用于补完正史细节，而不是默认创建平行 if 线。若过去线与既有结构化 Truth 产生硬冲突，系统只向用户警告，不打断游玩；用户在警告中选择“冲突后非正史”或“整条会话非正史”。非正史会话仍保留聊天、Trace 与 provisional truth，但不得改变 canonical Truth、主线光标、角色 canonical 记忆或后续正史判断。
 
-Agent 世界数据存放在应用数据目录的 `data/worlds/<world_id>/` 下，每个世界独立保存 SQLite 数据库、运行时快照、回放 trace 和必要资源；全局运行 Logs 作为应用观测数据存放在 `data/logs/`：
+Agent 世界数据存放在应用数据目录的 `data/worlds/<world_id>/` 下，每个世界独立保存 SQLite 数据库、运行时快照、回放 trace、回合相关 LLM Logs 和必要资源；全局运行 Logs 作为应用级观测数据存放在 `data/logs/`：
 
 ```
 ./data/
@@ -92,7 +92,7 @@ SQLite 内部表结构见 [14_agent_persistence.md](14_agent_persistence.md)。L
 
 Agent 会话删除只删除或归档会话消息视图，不能自动删除 canonical Truth。回滚 canonical turn 时必须从目标 canonical 回合开始检查依赖：若后续正史事实、其他会话已提升的细节或主线光标依赖该回合，默认阻止并生成影响报告；只有确认可回滚时才按 `state_commit_records.rollback_patch` 恢复 Layer 1 / Layer 3 / Knowledge / Trace 索引。非正史会话回滚只影响该会话的 provisional truth 和聊天记录。
 
-Agent Trace 是世界调试与回放数据，随 World 保存；运行 Logs 是应用观测数据，用于记录 LLM 请求响应、Provider 错误与异常事件。回滚 Agent 回合时，世界状态与回合 trace 按故事线回退；运行 Logs 默认保留为审计记录，不随剧情回滚物理删除。
+Agent Trace 是世界调试与回放数据，随 World 保存；运行 Logs 分为全局运行 Logs 与 World 内运行 Logs。ST 模式 LLM 请求、应用启动、设置变更、清理任务和无 World 归属的 Provider 错误写入全局 `app_logs.sqlite`；Agent 回合相关 LLM 请求响应、Provider 错误和异常事件写入对应 World 的 `world.sqlite`，并可在全局日志中保留脱敏索引事件。回滚 Agent 回合时，世界状态与回合 trace 按故事线回退；运行 Logs 默认保留为审计记录，不随剧情回滚物理删除。
 
 ### 1.4 配置分层与运行时快照
 
@@ -116,6 +116,17 @@ log_retention:
   world_stale_prompt:
     inactive_days: 30
     size_ratio_of_global_limit: 0.5
+request_budget:
+  input_tokens:
+    critical_attention_tokens: 8192
+    soft_input_tokens: 16384
+    max_context_tokens: 32768
+    reserved_output_tokens: 4096
+  cognitive_scheduling:
+    tiering_enabled: true
+    tiering_start_active_characters: 4
+    max_primary_cognitive_passes: 3
+    max_reaction_passes_per_window: 4
 ```
 
 ```yaml
@@ -166,22 +177,23 @@ combat_rules:
 - `ConfigValidator` 必须检查 schema version、未知字段、数值范围、阈值单调性、互斥项和迁移规则；失败时保留上一份有效快照，并写入 `app_event_logs`。
 - `ConfigCompiler` 把合并后的文本配置编译为强类型 `RuntimeConfigSnapshot` / `WorldRulesSnapshot`，预计算排序阈值、查找表、字节上限和配置 hash；属性 / `mana_power` 阈值在 YAML 中可写整数或小数，编译后统一为 f64。
 - `ConfigRegistry` 以 `Arc` / 只读引用发布当前快照；Resolver、Filter、RequestAssembler、RetentionManager 只接收快照引用，不直接依赖文件路径。
-- Agent 回合开始时固定 `config_snapshot_id`，本回合内即使用户保存新配置，也只能从下一回合 / 下一次请求组装开始生效。Trace 和 Logs 记录该 ID 以便复盘。
+- Agent 回合开始时同时固定 `runtime_config_snapshot_id` 与 `world_rules_snapshot_id`；前者对应全局运行配置（预算、日志、Provider 限制），后者对应 World 规则配置（属性、环境、对抗、灵力阈值）。本回合内即使用户保存新配置，也只能从下一回合 / 下一次请求组装开始生效。Trace 和 Logs 记录这两个 ID 以便复盘。
 
 快照只保存强类型、已校验、可复盘的运行配置，不作为新的业务数据源：
 
 ```rust
 pub struct RuntimeConfigSnapshot {
-    pub config_snapshot_id: String,
+    pub runtime_config_snapshot_id: String,
     pub schema_version: String,
     pub log_retention: serde_json::Value,      // 编译后的日志清理配置
-    pub request_budget: serde_json::Value,     // 编译后的调用预算配置
+    pub request_budget: serde_json::Value,     // 编译后的调用预算、输入 token 预算与 Agent 分层调度配置
     pub provider_limits: serde_json::Value,
     pub config_hash: String,
 }
 
 pub struct WorldRulesSnapshot {
-    pub config_snapshot_id: String,
+    pub world_rules_snapshot_id: String,
+    pub runtime_config_snapshot_id: String,      // 编译时所依赖的全局运行配置快照；用于复盘组合
     pub world_id: String,
     pub schema_version: String,
     pub attribute_rules: serde_json::Value,    // 编译后的基础属性档位/差距配置
@@ -195,7 +207,7 @@ pub struct WorldRulesSnapshot {
 配置变更生效边界：
 
 - ST 模式请求组装：下一次生成请求生效。
-- Agent World 规则：下一回合生效；已提交回合不重算，回滚后按目标回合记录的 `config_snapshot_id` 检查是否可复现。
+- Agent World 规则：下一回合生效；已提交回合不重算，回滚后按目标回合记录的 `runtime_config_snapshot_id` 与 `world_rules_snapshot_id` 检查是否可复现。
 - 日志清理策略：下一次后台 retention 检查生效；日志写入线程只更新内存计数和 `cleanup_needed` 标记，不在写入路径扫描文件大小。
 - 文件监听只允许标记“配置可能已变更”，不得在监听回调内直接改运行快照；实际 reload 走同一套校验和发布流程。
 
@@ -210,21 +222,44 @@ pub struct WorldRulesSnapshot {
 ```
 src/
 ├── components/
+│   ├── layout/              # App Shell、导航、上下文列表区、检查面板
 │   ├── chat/                # 聊天组件
 │   ├── character/           # 角色管理
 │   ├── worldbook/           # 世界书
+│   ├── resources/           # 资源工作台与资源库通用组件
 │   ├── agent/               # Agent 模式专用
+│   │   ├── world-editor/    # Agent World 作者编辑器
+│   │   │   ├── WorldEditorShell.vue
+│   │   │   ├── LocationGraphEditor.vue
+│   │   │   ├── KnowledgeEntryEditor.vue
+│   │   │   ├── CharacterRecordEditor.vue
+│   │   │   ├── RelationshipEditor.vue
+│   │   │   ├── ValidationPanel.vue
+│   │   │   └── ImpactSummaryPanel.vue
 │   │   ├── SceneInspector.vue
 │   │   ├── CharacterMindView.vue
 │   │   ├── EmbodimentDebug.vue
 │   │   ├── ValidationReport.vue
 │   │   └── TurnTraceViewer.vue
+│   ├── shared/
+│   │   └── structured-text-editor/ # Plain / JSON / YAML 大文本编辑器
+│   │       ├── StructuredTextEditor.vue
+│   │       ├── StructuredTextToolbar.vue
+│   │       ├── StructuredTextDiagnostics.vue
+│   │       ├── cm6Setup.ts
+│   │       ├── languageRegistry.ts
+│   │       └── modeAdapters.ts
 │   └── settings/
+├── composables/
+│   └── useStructuredTextDraft.ts
 ├── stores/                  # Pinia stores
+│   ├── appShell.ts
+│   ├── resourceLibrary.ts
 │   ├── chat.ts
 │   ├── characters.ts
 │   ├── worldbook.ts
 │   ├── agent.ts
+│   ├── agentWorldEditor.ts
 │   └── settings.ts
 ├── services/
 │   ├── api.ts               # Tauri IPC 封装
@@ -232,17 +267,27 @@ src/
 ├── types/
 │   ├── character.ts                     # SillyTavern 角色卡
 │   ├── worldbook.ts                     # SillyTavern 世界书
+│   ├── structuredText.ts                # StructuredTextBinding / Draft / Diagnostic
 │   ├── agent/                           # Agent 模式（与 Rust 端对应）
 │   │   ├── scene.ts                     # SceneModel / ManaField
 │   │   ├── knowledge.ts                 # KnowledgeEntry / AccessPolicy
 │   │   ├── location.ts                  # LocationNode / LocationSpatialRelation / LocationEdge / RouteEstimate
+│   │   ├── worldEditor.ts               # WorldEditorPatch / ValidationReport / ImpactSummary
 │   │   ├── embodiment.ts                # EmbodimentState / FilteredSceneView
 │   │   ├── accessible.ts                # AccessibleKnowledge
 │   │   ├── subjective.ts                # CharacterSubjectiveState
 │   │   └── cognitive.ts                 # CognitivePass I/O
 │   └── api.ts
 ├── views/
+│   ├── LibraryView.vue                  # 默认资源工作台
+│   ├── STChatView.vue
+│   ├── AgentWorldView.vue
+│   ├── ResourceLibraryView.vue
+│   ├── ApiConfigsView.vue
+│   ├── LogsView.vue
+│   └── SettingsView.vue
 └── router/
+    └── index.ts                         # 路由约定见 docs/41_frontend_interaction.md
 ```
 
 ### 2.2 后端 (Rust)
@@ -256,13 +301,16 @@ src-tauri/
 │   │   ├── character.rs
 │   │   ├── worldbook.rs
 │   │   ├── agent.rs
+│   │   ├── agent_world_editor.rs
 │   │   └── settings.rs
 │   ├── api/                 # AI Provider 抽象
 │   │   ├── provider.rs
-│   │   ├── openai.rs
+│   │   ├── openai_responses.rs
+│   │   ├── openai_chat.rs
 │   │   ├── anthropic.rs
 │   │   ├── gemini.rs
-│   │   └── ollama.rs
+│   │   ├── deepseek.rs
+│   │   └── claude_code_interface.rs
 │   ├── worldinfo/           # SillyTavern 世界书
 │   │   ├── matcher.rs
 │   │   ├── injector.rs
@@ -292,6 +340,12 @@ src-tauri/
 │   │   │   ├── resolver.rs
 │   │   │   ├── fact_resolver.rs
 │   │   │   └── route_planner.rs
+│   │   ├── world_editor/    # 作者编辑器：paused-only patch 校验、影响分析与提交
+│   │   │   ├── snapshot.rs
+│   │   │   ├── patch.rs
+│   │   │   ├── validator.rs
+│   │   │   ├── impact.rs
+│   │   │   └── commit.rs
 │   │   ├── simulation/      # 程序化核心
 │   │   │   ├── scene_initializer.rs
 │   │   │   ├── scene_extractor.rs
@@ -325,6 +379,10 @@ src-tauri/
 │   │   ├── loader.rs       # app_runtime.yaml / world_base.yaml 加载
 │   │   ├── validator.rs    # schema version、范围、单调性校验
 │   │   └── registry.rs     # RuntimeConfigSnapshot / WorldRulesSnapshot 发布
+│   ├── text_format/         # 保存前 JSON / YAML 复检、格式化与 diagnostics
+│   │   ├── mod.rs
+│   │   ├── json.rs
+│   │   └── yaml.rs
 │   ├── logging/             # 日志与可观测性
 │   │   ├── mod.rs
 │   │   ├── context.rs       # LogContext / request_id / trace_id
@@ -347,6 +405,11 @@ src-tauri/
 | `location::resolver` | 名称 / 别名 / 上下文锚点 → 候选 LocationNode 与父级链 | 不猜唯一 ID；多命中必须返回 ambiguity |
 | `location::fact_resolver` | 沿 parent 链合并可继承 RegionFact，读取自然地理影响，并调用 KnowledgeAccessResolver 裁剪 | 不提升 Knowledge 访问权限；不把自然地理影响混入行政继承 |
 | `location::route_planner` | 基于 LocationEdge 带权图计算路线、耗时、风险与置信度 | 不用行政层级直接硬算距离；无连通边时只返回未知或低置信度提示 |
+| `world_editor::snapshot` | 读取 World Editor 所需的结构化摘要与详情 | 不读取运行日志全文，不把派生视图当成持久真相 |
+| `world_editor::patch` | 定义 WorldEditorPatch / operation / revision 契约 | 不直接执行写库，不承载业务校验 |
+| `world_editor::validator` | 校验 editor patch 的 schema、跨表引用、paused-only 门禁和派生索引一致性 | 不修改任何状态，不根据索引反写 access_policy |
+| `world_editor::impact` | 生成删除、改名、移动、访问策略变化的影响报告 | 不替用户自动级联删除，不把 warning 当作提交许可 |
+| `world_editor::commit` | 在单个 SQLite 事务内写入权威表、同步派生索引、记录 editor commit journal | 不伪造 world_turns / state_commit_records，不在 active turn 或 LLM call 期间提交 |
 | `simulation::scene_initializer` | 调 LLM 从结构化 SceneSeed、公开上下文与场景相关私有约束生成候选 SceneModel 草案 | 不全库读取隐藏 Knowledge / GodOnly；不把私有约束泄露为外显事实；不直接写 Layer 1；不创建未授权持久实体 |
 | `simulation::scene_extractor` | 调 LLM 把用户自由文本解析为 UserInputDelta / SceneUpdate 候选 | 只做场景域 God-read；不读取无关私密 Knowledge；不写 Layer 1（写入由 runtime 协调）；不解析中间数据 |
 | `simulation::attribute_resolver` | 从基础属性、身体状态、技能/环境修正派生 effective 属性值、档位和差距骨架 | 不调 LLM；不把 UI 取整值用于仲裁；不修改 base_attributes |
@@ -362,4 +425,4 @@ src-tauri/
 | `agent::runtime` | 编排上述模块 | 不嵌入业务逻辑（仅做调度） |
 | `logging::llm_logger` | 包装 Provider 调用并记录请求 / 响应 / stream chunk | 不改写 Provider 结果；不参与 prompt 组装 |
 | `logging::event_logger` | 记录应用异常与运行事件 | 不吞异常；不改变业务分支 |
-| `logging::retention` | 清理全局运行 Logs | 不自动删除 Agent Trace 或仍被回合引用的记录 |
+| `logging::retention` | 清理全局运行 Logs，并对 World 内日志 / Trace 只生成提示或执行用户确认后的清理 | 不自动删除 Agent Trace、World 内回合相关 LLM Logs 或仍被回合引用的记录 |

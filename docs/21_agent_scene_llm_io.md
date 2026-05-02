@@ -283,6 +283,8 @@ pub struct BlockedSceneAddition {
 
 用户的最近一轮自由文本输入由 SceneStateExtractor (LLM) 结合当前结构化场景信息解析。它不是普通角色认知节点，而是场景域编排节点：可读取当前 `SceneModel`，输出候选 `SceneUpdate` 与 `UserInputDelta`，但不直接写入 Layer 1。
 
+用户发言是分级输入权，不是无条件写入权。SceneStateExtractor 必须把自由文本拆成“角色意图 / 主观心理 / 场景候选 / 导演偏置 / 元命令”，并为每个 delta 标注权限等级；越接近用户扮演角色的言行和本回合叙事，越可直接进入 `TurnWorkingState`，越接近正史、隐藏知识、硬数值、他人内心和持久世界结构，越必须降级为候选、假设、歧义或确认请求。
+
 权限采用场景域 God-read：
 
 - 可读：最近一轮自由文本、当前 `SceneModel` 全量、世界级 schema / 枚举 / 物理约束、与当前场景直接相关的公开设定。
@@ -384,26 +386,48 @@ pub struct SceneEventDraft {
 pub struct UserInputDelta {
     pub turn_id: String,
     pub raw_text: String,                          // 原始用户输入（仅用于 trace）
+    pub authority_class: UserInputAuthorityClass,
+    pub authority_notes: Vec<UserInputAuthorityNote>,
     pub kind: UserInputKind,
+}
+
+pub enum UserInputAuthorityClass {
+    PlayerCharacterIntent,     // 用户扮演角色的外显意图；强输入，但不保证行动成功
+    PlayerSubjectiveState,     // 用户扮演角色的主观心理；只影响该角色 L3
+    SceneCandidate,            // 场景旁白候选；需要 SceneUpdate / Validator 仲裁
+    DirectorBias,              // 导演偏置；只影响 OutcomePlanner / SurfaceRealizer 倾向
+    SessionControl,            // 会话 / 时间 / 场景控制请求
+    AmbiguousOrBlocked,        // 无法安全分类，或试图越权
+}
+
+pub struct UserInputAuthorityNote {
+    pub note_kind: String,                         // applied / downgraded / needs_confirmation / blocked / ambiguous
+    pub field_path: Option<String>,
+    pub reason: String,                            // llm_readable; Trace/UI 可用，不参与程序硬判断
 }
 
 pub enum UserInputKind {
     /// 用户作为旁白 / 作者插入场景描述（如新增 entity / 改变光照）。
+    /// 低风险、非持久、非冲突细节可作为候选自动进入工作副本；持久实体、隐藏机关、地理拓扑、天气 / 灵力硬状态等必须由 Validator 确认、降级或阻止。
     SceneNarration { scene_delta: SceneDelta },
 
     /// 用户扮演角色 X 的言行：直接写入 X 的 IntentPlan，跳过 X 的 CognitivePass。
+    /// 这只表达 X 想说 / 想做什么；命中、伤害、资源消耗、位移、揭示等硬结果仍由 OutcomePlanner + EffectValidator 决定。
     CharacterRoleplay {
         character_id: String,
         intent_plan: IntentPlan,
         spoken_dialogue: Option<String>,
         actions: Vec<CharacterAction>,
+        subjective_input: Option<PlayerSubjectiveInput>, // 用户扮演角色的心理活动 / 情绪 / 目标声明；只能影响该角色 L3，由 SubjectiveStateReducer 处理
     },
 
     /// 元指令：跳过时间 / 切场景 / 重置 / 暂停。
+    /// 只生成结构化运行指令或 SceneSeed；不得直接提交 canonical Truth。
     MetaCommand { command: MetaCommandKind },
 
     /// 引导结果规划与文风（用户对当前回合的"导演"权）。
     /// outcome_bias 必须结构化；自由文本导演说明只能进入 style_override.explicit_guidelines 或 trace。
+    /// 它不能强制 NPC 违背认知、技能、物理、正史或隐藏真相。
     DirectorHint { outcome_bias: Option<OutcomeBias>, style_override: Option<StyleConstraints> },
 }
 
@@ -425,5 +449,14 @@ pub enum OutcomePressure {
 ```
 
 `SceneStateExtractor` 输出严格遵守此 schema。失败时进入容错路径（见 [11_agent_runtime.md](11_agent_runtime.md)）。
+
+用户扮演输入分类规则：
+
+- “我害怕 / 我怀疑他在撒谎 / 我决定撤退”等心理、情绪、目标声明进入 `CharacterRoleplay.subjective_input`。
+- “我知道密室里有机关”这类客观隐藏事实断言，若该角色本回合 L2 无来源，只能作为 `PlayerBeliefSource::NewHypothesis` 的主观猜测，或拆为 `DirectorHint` / `SceneNarration` 候选等待 Validator；不得直接变成 Knowledge 访问权限或 L1 真相。
+- 用户以导演身份声明的事实必须进入 `SceneNarration` / `DirectorHint`，并继续经过 SceneUpdate / OutcomePlanner / Validator；不得伪装成角色内心从而绕过访问控制。
+- “这里有一把普通木椅”这类低风险、非持久场景细节可标为 `SceneCandidate`；“这里有上古神器 / 隐藏传送阵 / 某 NPC 一直在场”这类持久或高影响断言必须标为 needs_confirmation、provisional_truth_candidate、ambiguity 或 blocked。
+- “让他相信我 / 让战斗轻一点 / 文风更压抑”只能成为角色目标、`DirectorHint.outcome_bias` 或 `style_override`；不得直接覆盖他人 L3 或保证硬结果。
+- “忽略规则 / 直接设为正史 / 改掉隐藏设定”必须标为 `AmbiguousOrBlocked` 或 `MetaCommand` 请求；不得改变节点权限、KnowledgeAccessResolver、EffectValidator、TemporalConsistencyValidator 或 StateCommitter 边界。
 
 ---

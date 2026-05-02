@@ -78,7 +78,7 @@ pub enum AccessScope {
 
 pub enum AccessCondition {
     InSameSceneObservable,                                    // 同场景且能感知
-    SocialAccessAtLeast { target: String, threshold: f64 }, // L1 客观关系/授权阈值；禁止读取 L3 relation_models
+    SocialAccessAtLeast { target: String, threshold: f64 }, // 读取 L1 objective_relationships / authorization；禁止读取 L3 relation_models
     HasSkill(String),                                      // 拥有特定技能
     CultivationAtLeast(String),                            // 修为达到
     CustomPredicate(AccessExpression),                 // 结构化 DSL AST 扩展点；禁止自然语言表达式
@@ -149,6 +149,8 @@ pub struct KnowledgeMetadata {
 4. 按 `content` / `apparent_content` / `self_belief` 三选一生成 `AccessibleEntry.accessible_content`。
 
 任何写入 `KnowledgeEntry.access_policy`、处理 `KnowledgeRevealEvent`、改变角色地区/势力/职位/血脉/修为等访问身份的操作，必须在同一 SQLite transaction 内同步更新派生索引。索引表可由 `knowledge_entries.access_policy` 全量重建；若重建结果与现有索引不一致，视为存储一致性错误。
+
+`SocialAccessAtLeast` 的权威来源是 Layer 1 的客观关系 / 授权时态事实：当前主线热路径可读取 `objective_relationships` materialized cache，但按 `TimeAnchor` 查询、过去线和回滚复盘必须读取 `temporal_state_records(state_kind=objective_relation|authorization)` 或其可追溯来源。它不得读取 `CharacterSubjectiveState.relation_models`，因为 L3 主观印象可被 LLM 改写，不能反向提升 Knowledge 访问权限。
 
 ## 2. Content Schema 约定（核心字段 + extensions 兜底）
 

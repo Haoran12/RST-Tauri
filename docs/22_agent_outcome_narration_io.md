@@ -46,10 +46,23 @@ pub struct OutcomePlannerInput {
     // 来自受限认知节点或用户扮演输入
     pub character_outputs: Vec<CharacterCognitivePassOutput>,
     pub user_roleplay_intents: Vec<IntentPlan>,
+    pub minor_actor_slots: Vec<MinorActorSlot>,
     pub reaction_windows: Vec<ReactionWindow>,
     pub reaction_intents: Vec<ReactionIntent>,
     pub director_hint: Option<OutcomeBias>,
     pub provisional_truth_candidates: Vec<ProvisionalTruthCandidate>,
+}
+
+pub struct MinorActorSlot {
+    pub character_id: String,
+    pub tier: String,                         // Tier B / Tier C
+    pub scene_role: String,                   // guard / bystander / servant / crowd_member ...
+    pub current_posture: String,              // semantic enum in implementation
+    pub observable_constraints: Vec<String>,  // distance / visibility / injury / control / morale ...
+    pub allowed_action_kinds: Vec<String>,    // wait / retreat / protect_self / continue_task / assist / speak_short ...
+    pub default_behavior: String,             // semantic fallback, not free intent generation
+    pub relevant_relationship_refs: Vec<String>,
+    pub salience_reason: Option<String>,
 }
 
 pub struct OutcomePlannerOutput {
@@ -205,10 +218,11 @@ pub struct ReactionPassInput {
 不变量：
 
 1. ReactionWindow 的开启、资格、距离/视线/感官、资源、冷却、援护关系与 `max_reaction_depth` 全由程序判定；LLM 不能自行把旁观者加入窗口。
-2. `ReactionIntent` 只表达"打算如何反应"，不立即产生新的 `OutwardAction` 或 `StateUpdatePlan`；反应造成的反击、格挡、援护统一进入 OutcomePlanner 的一次性结算。
-3. 默认 `no_reaction_to_reaction = true`。B 的反击不再为 A 打开新的普通反应窗口；只有 SkillEffectContract 明确声明 interrupt/反制反击，且深度未超过上限时才允许进入第二层。
-4. 每个角色在同一窗口默认最多提交一个 `ReactionIntent`；未提交或 LLM 失败时，OutcomePlanner 可按 `passive`/默认防御策略兜底，但必须写 trace。
-5. 旁观者或伙伴能否反应取决于 `observable_threat` 对该角色是否可观察，以及其 `ReactionOption` 是否覆盖目标、距离、通道和资源；"站在场上"本身不构成反应资格。
+2. ReactionWindow 开启后独立派生 `eligible_reactors`，并为这些角色临时标记 `reaction_window_open`；候选者不要求已经通过 primary cognitive pass 预算裁剪。
+3. `ReactionIntent` 只表达"打算如何反应"，不立即产生新的 `OutwardAction` 或 `StateUpdatePlan`；反应造成的反击、格挡、援护统一进入 OutcomePlanner 的一次性结算。
+4. 默认 `no_reaction_to_reaction = true`。B 的反击不再为 A 打开新的普通反应窗口；只有 SkillEffectContract 明确声明 interrupt/反制反击，且深度未超过上限时才允许进入第二层。
+5. 每个角色在同一窗口默认最多提交一个 `ReactionIntent`；未提交或 LLM 失败时，OutcomePlanner 可按 `passive`/默认防御策略兜底，但必须写 trace。
+6. 旁观者或伙伴能否反应取决于 `observable_threat` 对该角色是否可观察，以及其 `ReactionOption` 是否覆盖目标、距离、通道和资源；"站在场上"本身不构成反应资格。
 
 硬约束：
 
@@ -216,6 +230,7 @@ pub struct ReactionPassInput {
 - `StateUpdatePlan` 中的数值、资源、位置、伤势、访问权限变更必须能被程序公式、技能契约或 Validator 校验；校验失败时不反复调用 LLM，非法硬效果进入 `blocked_effects` 或降级为 `soft_effects`，不得写入 L1。
 - `BodyReactionDelta` 只作为候选身体反应；如需改变 `temporary_state`，必须由 OutcomePlanner/EffectValidator 转成合法 `CharacterStateDelta` 后经 StateCommitter 提交。
 - 角色是否"相信 / 接受 / 记恨"不由 OutcomePlanner 直接写入 L3，除非它来自该角色本回合 `CharacterCognitivePassOutput`；否则作为外显事件进入下一轮认知输入。
+- `minor_actor_slots` 只允许 OutcomePlanner 为未执行完整 CognitivePass 的次要人物补全外显、低复杂度、受约束的行为；不得生成新的深层心理变化、长期目标变化、隐藏知识推断或 L3 更新。
 - OutcomePlanner 必须把 `reaction_windows` 中的原行动与 `reaction_intents` 一起结算；禁止在结算中再自由打开无限新窗口。
 
 ---

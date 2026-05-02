@@ -12,7 +12,20 @@
       "WebFetch(domain:api-docs.deepseek.com)",
       "WebFetch(domain:docs.anthropic.com)",
       "WebFetch(domain:platform.openai.com)",
-      "WebFetch(domain:ai.google.dev)"
+      "WebFetch(domain:ai.google.dev)",
+      "Bash(cargo tauri *)",
+      "Bash(npm --version)",
+      "Bash(rustc --version)",
+      "Bash(cargo --version)",
+      "Bash(npm create *)",
+      "Bash(npm install *)",
+      "Bash(cargo install *)",
+      "Bash(npm run *)",
+      "Bash(cargo build *)",
+      "Bash(convert --version)",
+      "Bash(cargo check *)",
+      "Bash(npx tsc *)",
+      "Bash(cargo test *)"
     ]
   }
 }

@@ -29,7 +29,7 @@ interface GlobalAppState {
 
 ```typescript
 interface STWorldInfoSettings {
-  globalSelect: string[];                 // selected_world_info
+  globalSelect: string[];                 // selected_world_info；RST 内部使用 lore_id，ST 导入导出时映射为文件名
   world_info_depth: number;
   world_info_min_activations: number;
   world_info_min_activations_depth_max: number;
@@ -77,7 +77,7 @@ interface SessionData {
 
 interface STChatMetadata {
   // Chat lore：当前聊天绑定的单本世界书。对应 SillyTavern chat_metadata.world_info。
-  world_info?: string;
+  world_info?: string;                    // RST 内部使用 lore_id，ST 导入导出时映射为文件名
 
   // Author's Note、变量、脚本注入、书签等扩展继续保留原始 key。
   [key: string]: any;

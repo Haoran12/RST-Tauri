@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This is currently a documentation-first Tauri project for Ran's SmartTavern (RST). Keep source-of-truth guidance in `README.md` and focused design documents under `docs/`.
+This is a Tauri project for Ran's SmartTavern (RST). Keep source-of-truth guidance in `README.md`, focused design documents under `docs/`, frontend code in `src/`, and Rust backend code in `src-tauri/`.
 
 - `README.md`: project map and document ownership.
 - `docs/implementation_plan.md`: roadmap, milestones, and key decisions.
@@ -33,16 +33,20 @@ This is currently a documentation-first Tauri project for Ran's SmartTavern (RST
 - `docs/91_test_matrix.md`: staged test cases and verification plans.
 - `docs/reference/`: external or historical reference notes; do not treat these as primary specs.
 
-When app code is added, prefer conventional Tauri layout: frontend in `src/`, Rust backend in `src-tauri/`, static assets in `public/` or `assets/`, and tests near verified modules.
+Use the conventional Tauri layout: frontend in `src/`, Rust backend in `src-tauri/`, static assets in `public/` or `assets/`, and tests near verified modules.
 
 ## Build, Test, and Development Commands
 
-No package manifest or Tauri workspace is present yet, so there are no runnable build or test commands. Until implementation files are added, validate docs with:
+Use these commands for implementation checks:
 
-- `git diff -- README.md docs AGENTS.md`: review documentation-only changes.
+- `npm run build`: TypeScript check and frontend production build.
+- `cargo check` from `src-tauri/`: Rust type and borrow checking.
+- `cargo test` from `src-tauri/`: Rust unit tests.
+- `npm audit`: dependency vulnerability scan for npm packages.
+- `git diff -- README.md docs AGENTS.md`: review documentation changes.
 - `git status --short`: confirm changed files before committing.
 
-Once app scaffolding lands, document exact commands here, such as `npm run dev`, `npm test`, `cargo test`, and `npm run tauri build`.
+If Rust dependency auditing is required, install and run `cargo audit`; do not treat a missing `cargo-audit` binary as a passed scan.
 
 ## Coding Style & Naming Conventions
 
@@ -52,10 +56,20 @@ Use Markdown headings with clear ownership boundaries. Keep docs concise, update
 
 Treat `docs/90_pitfalls_and_tests.md` as the risk gate and `docs/91_test_matrix.md` as the executable verification plan. When implementing features, add tests for every listed invariant that becomes executable. Prefer behavior names such as `agent_runtime_rejects_invalid_active_set` or `worldbook_respects_injection_order`.
 
+## Security & Runtime Boundaries
+
+- All app-owned data must stay under the portable `./data/` root or an explicit user-selected override. Do not write default runtime data to AppData, Application Support, or `~/.config`.
+- Never concatenate untrusted IDs, names, filenames, or import metadata into filesystem paths. Route all JSON/resource file access through `storage::paths::safe_join` or an equivalent helper that rejects absolute paths, `..`, Windows prefixes, control characters, and platform-reserved names.
+- Imported filenames are display hints only. Persistent resource paths must use generated stable IDs or sanitized basenames.
+- API keys, Authorization headers, provider secrets/tokens, proxy credentials, and equivalent sensitive fields must be redacted before logs or SQLite writes. UI masking is not a substitute for storage-layer redaction.
+- Keep `withGlobalTauri` disabled unless a documented feature requires it. Do not add `tauri-plugin-shell`, filesystem, opener, or broad capabilities without a narrow command surface and a documented threat model.
+- ST request assembly must be the single runtime gate for provider-bound prompts: load API config and presets, run worldbook injection, apply allowed Regex prompt transforms, assemble the neutral request, then map to provider format. Frontend code must not bypass this sequence.
+- LLM provider implementations only perform network mapping/calls. They must not scan worldbooks, select presets, mutate resources, or write logs directly.
+
 ## Commit & Pull Request Guidelines
 
 Recent commits are short Chinese summaries, for example `继续完整文档` and `调整文档结构: ...`. Follow that style: imperative, focused, and scoped to one logical change. Pull requests should include a summary, affected docs or modules, linked issues if any, and screenshots only for UI changes.
 
 ## Agent-Specific Instructions
 
-Do not overwrite unrelated local edits. Start concept changes in `docs/01_architecture.md`, then propagate details to mode, data, runtime, backend, and testing docs. Keep LLM responsibilities and deterministic program logic separate.
+Do not overwrite unrelated local edits. Start concept changes in `docs/01_architecture.md`, then propagate details to mode, data, runtime, backend, and testing docs. Keep LLM responsibilities and deterministic program logic separate. Agent prompt-budget changes must keep `PromptBuilder` / `InputAssembly` as the budget gate: token estimation, P0/P1/P2/P3 priority, compression, pruning, and multi-character CognitivePass scheduling belong in docs before implementation, with Trace/Logs recording budget decisions.

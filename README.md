@@ -2,8 +2,8 @@
 
 Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 
-- **SillyTavern 模式**：复刻 SillyTavern 体验，角色卡 V3 + 世界书 + 预设，JSON 存储。
-- **Agent 模式**：基于 RP Agent 架构的高级角色扮演系统，分层"客观世界 / 人物具身状态 / 主观认知与意图 / 结果规划与状态更新"，SQLite 存储。
+- **SillyTavern 模式**：复刻 SillyTavern 体验，角色卡 V3 + 世界书 + 预设 + Regex + API 配置解耦，JSON 存储。
+- **Agent 模式**：基于 RP Agent 架构的高级角色扮演系统，分层"客观世界 / 人物具身状态 / 主观认知与意图 / 结果规划与状态更新 / 叙事输出"，支持多时期会话、World Editor 与 SQLite 存储。
 
 ## 文档结构
 
@@ -33,6 +33,9 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 | [21_agent_scene_llm_io.md](docs/21_agent_scene_llm_io.md) | SceneInitializer + SceneStateExtractor + UserInputDelta I/O | Agent 场景 LLM 节点实现 |
 | [22_agent_outcome_narration_io.md](docs/22_agent_outcome_narration_io.md) | StyleConstraints + OutcomePlanner + ReactionWindow + SurfaceRealizerInput | Agent 结果规划与叙事节点实现 |
 | [30_logging_and_observability.md](docs/30_logging_and_observability.md) | Agent Trace + 运行 Logs + LLM 请求响应还原 + 异常事件 + 定期清理 | 日志、调试与可观测性 |
+| [40_agent_world_editor.md](docs/40_agent_world_editor.md) | Agent 世界编辑器：结构化 World / Location / Knowledge / Character CRUD、paused-only 提交、校验与 editor commit journal | 实现 Agent World 作者工具 |
+| [41_frontend_interaction.md](docs/41_frontend_interaction.md) | 前端交互主框架：App Shell、资源工作台、一级页面、路由、主题与 UI 状态边界 | 设计与实现全应用 UI 交互 |
+| [42_structured_text_editor.md](docs/42_structured_text_editor.md) | 结构化文本编辑器：Plain / JSON / YAML 模式、缩进矫正、括号 / 引号诊断和跨模式 content 编辑绑定 | 实现 ST 与 Agent 共用的大文本编辑组件 |
 | [90_pitfalls_and_tests.md](docs/90_pitfalls_and_tests.md) | 潜在坑点 + 测试矩阵入口 | 风险登记与质量门禁 |
 | [91_test_matrix.md](docs/91_test_matrix.md) | 按阶段组织的测试用例 / 验证方案 | 实现可执行测试与验收 |
 
@@ -42,6 +45,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 |---|---|
 | [reference/RST_Sch.md](docs/reference/RST_Sch.md) | RST 会话调度模式：ST 模式 vs Agent 模式的目录结构 |
 | [reference/SillyTavernLorebook.md](docs/reference/SillyTavernLorebook.md) | SillyTavern 世界书注入判定流程详细分析 |
+| [CLAUDE_CODE_REQUEST_FORMAT.md](docs/CLAUDE_CODE_REQUEST_FORMAT.md) | Claude Code Interface 请求格式复刻参考 |
 
 外部依赖：
 
@@ -51,7 +55,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 
 ## 文档维护原则
 
-- 每份文档单一职责边界：路线图 / 架构 / 数据目录与模块 / 模式实现 / 数据总览 / 知识 / 角色 / 运行时 / 程序化派生 / 对抗技能 / LLM I/O / 持久化 / 后端 / 风险 / 测试矩阵。
+- 每份文档单一职责边界：路线图 / 架构 / 数据目录与模块 / 模式实现 / 数据总览 / 知识 / 角色 / 运行时 / 程序化派生 / 对抗技能 / LLM I/O / 持久化 / 后端 / UI 主框架 / Agent 世界编辑器 / 结构化文本编辑器 / 风险 / 测试矩阵。
 - **修改时直接更新最新版**，不保留历史对比、版本演进或"改进前后"标记。重大变更走 git commit 而非文档内嵌。
 - 概念变更从架构层（`01_architecture.md`）开始，向下传递到具体实现文档。
 - 跨文档共享的"铁律"集中在 `01_architecture.md`（数据形态铁律 + LLM/程序边界总表），其他文档引用即可，不重复定义。

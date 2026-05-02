@@ -45,7 +45,7 @@
 | 访问权限逻辑散落 | 多处不一致 | KnowledgeAccessResolver 是唯一入口；所有判断必须经它 |
 | 访问索引替代 Resolver | SQL 查询结果被当成最终访问权限，绕过 GodOnly / apparent / self_belief 规则 | `known_by` / `scope` 派生索引只做候选预筛；所有候选必须再经 KnowledgeAccessResolver |
 | 访问派生索引漂移 | `access_policy` JSON 与索引表不一致，导致该读的读不到或隐藏知识泄露 | KnowledgeStore / StateCommitter 同事务维护索引；提供从 JSON 全量重建并比对的校验 |
-| 访问权限读取 L3 主观关系 | LLM 输出改变知识访问权限，形成循环 | SocialAccessAtLeast 只读 L1 客观关系/授权等级，不读 relation_models |
+| 访问权限读取 L3 主观关系 | LLM 输出改变知识访问权限，形成循环 | SocialAccessAtLeast 只读 L1 `objective_relationships` / 授权时态记录，不读 relation_models |
 | Subject self-belief 被外部读 | 暴露真相 | `KnowledgeEntry.content` 与 `self_belief` 在类型层面分离；访问 API 强制经过 awareness 检查 |
 | Knowledge 揭示无追溯 | 不知何时谁知道了什么 | 所有访问权限变更必须经 KnowledgeRevealEvent；持久化到独立表，包含 scope_change |
 | Belief 与 RelationModel 重复 | 同一命题两处存储 | 文档约定 + lint 规则：关于人的命题写 RelationModel，关于事件/世界的写 BeliefState |
@@ -58,11 +58,15 @@
 | Schema 漂移 | 旧数据无法兼容 | 每个 KnowledgeEntry 含 `schema_version`；StateCommitter 写入时校验；提供迁移脚本 |
 | Rust-TS 类型同步 | 两端定义不一致 | 代码生成 + 共享 schema + 单元测试 |
 | 状态爆炸 | 长对话状态过大 | 增量更新 + 周期压缩 + Knowledge metadata 衰减 |
+| 结构化文本编辑器过度格式化 | 用户的世界书正文、prompt 模板或 YAML 注释被静默改写，导致注入文本变化或配置语义变化 | Structured Text Editor 只在解析成功后格式化；Plain 只做保守缩进；切换模式不自动改写；ST content 仍保存为 string；Agent structured content 仍需业务 validator |
+| 文本诊断被误当业务校验 | JSON / YAML 可解析但不符合 Knowledge schema、Regex 语义或 ST 兼容字段 | 文本 diagnostics 与业务 validation 分离；Regex 编译、ST 兼容规则、Agent schema / paused-only / impact analysis 必须在父级模块复跑 |
 | 地点层级与行政名称混用 | "县/州/大区" 被当成程序层级，跨国家设定冲突 | 程序只信 `LocationNode.parent_id` 与 `canonical_level`；`type_label` 仅显示；国家模板只做编辑器校验 |
 | 同父级地点被误判为可一日抵达 | 行政归属被当成道路距离，导致剧情瞬移 | 路程估算只读 `LocationEdge`；同父级只能生成低置信度 `ProximityHint` |
 | 自然地理带被硬塞进行政树 | 山脉 / 平原跨多个州县时破坏单父级层级，或被错误继承为行政事实 | `NaturalRegion` 用 `parent_id` 挂载主地理域，跨域影响用 `LocationSpatialRelation`；行政继承与自然影响分开 |
 | 地区事实继承泄露隐藏知识 | 父级私密 RegionFact 被所有子地点角色读到 | LocationFactResolver 只扩展候选，最终仍经 KnowledgeAccessResolver；继承不得提升访问权限 |
 | 地点别名歧义被 LLM 猜死 | 多个 `c县` 被错误绑定到同一地点 | `location_aliases` 允许一对多；LocationResolver 多命中必须返回 ambiguity 或要求用户确认 |
+| World Editor 直接改 SQLite | 绕过 schema 校验、访问派生索引、地点一致性和审计，导致后续运行时不可复盘 | 所有编辑走 WorldEditorPatch；提交前校验和影响分析；单事务写权威表、派生索引和 `world_editor_commits` |
+| 作者编辑伪装成运行回合 | 无 `scene_turn_id` 的修改被写进 `state_commit_records`，破坏回滚与主线判断 | World Editor 使用独立 editor commit journal，不写 `world_turns` / `state_commit_records` |
 
 ### 1.3.1 多时期会话与过去线
 
@@ -84,6 +88,7 @@
 |---|---|---|
 | 等待 LLM 时持有写事务 | SQLite 写锁阻塞 UI、日志和后续提交 | 并行认知阶段只读快照；远程调用期间不持有写事务；最终 StateCommitter 单写提交 |
 | 多个 Agent 并发写状态 | L1/L3 顺序不确定，回滚困难 | CognitivePass 只产出候选；统一验证后由 OutcomePlanner 协调，StateCommitter 单事务写入 |
+| 运行中作者编辑与回合提交并发 | World Editor 改写 canonical Truth 时，正在执行的回合仍基于旧快照提交，造成状态覆盖 | World Editor 提交必须 paused-only：无 active turn、无 pending LLM call、无 StateCommitter 写入、revision 一致 |
 | 流式日志高频抢写 | stream chunk 写入阻塞状态提交 | 日志使用短事务、队列或批量写；状态提交优先级高于调试日志 |
 
 ### 1.5 物理 / 属性 / 灵力档位翻译
@@ -92,7 +97,7 @@
 |---|---|---|
 | LLM 误读物理量数值 | 50m/s 当成微风、-30℃ 当成凉爽 | 程序在 EmbodimentResolver/SceneFilter 把 raw → tier + effect_hints；FilteredSceneView 不暴露 raw 值给 CognitivePass |
 | 物种舒适带未校准 | 同样温度对不同种族应不同感受 | BaselineBodyProfile 含 comfort_temperature_range；档位是相对该范围偏离量计算 |
-| 环境压力跨回合丢失 | 长期暴露不发生冻伤 | EnvironmentalStrain.cold_strain/heat_strain/respiration_strain 在 EmbodimentResolver 累加，到阈值后经 OutcomePlanner 候选 + EffectValidator 生成伤势事件 |
+| 环境压力跨回合丢失 | 长期暴露不发生冻伤 | EnvironmentalStrain 只产出本回合 exposure delta；跨回合累计写入 L1 `TemporaryCharacterState.environmental_exposure`，到阈值后经 OutcomePlanner 候选 + EffectValidator 生成伤势事件 |
 | L1 物理子字段不自洽 | 暴雨却地面不湿、沙暴但能见度 100m | SceneInitializer / SceneStateExtractor prompt 模板强制一并填齐；额外 ConsistencyRule 检查（暴雨时 wetness>=阈值，沙暴时 dust_density>=阈值） |
 | 档位阈值在两侧不一致 | body 已 Storm 但 perception 仍 Strong | 阈值表集中在已校验配置快照（一份表两侧共享）；改阈值需同时跑两侧单元测试 |
 | 配置热路径反复 IO | 每次感知、对抗或日志写入都读 YAML/SQLite，拖慢回合 | 启动 / 打开 World / 保存设置时加载并校验配置，发布 `RuntimeConfigSnapshot`；热路径只读内存快照 |
@@ -117,6 +122,9 @@
 |---|---|---|
 | 多角色调用成本 | Token 消耗大 | Dirty Flags + 意图复用 + Tier 分级 |
 | 并行 Agent 放大 Provider 限流 | 延迟抖动、费用飙升 | 并行度受 Active Set、Tier、场景预算和 Provider 限流器约束 |
+| Prompt 输入超出模型上下文 | 请求失败、Provider 截断、角色误判 | `PromptBudgetReport` 估算输入 token；16K 触发压缩 / 裁剪；有效最大上下文来自用户配置与 Provider 窗口；超过时必须继续裁剪到上限内 |
+| 预算裁剪删掉关键约束 | LLM 越权、schema 漂移、结果不可校验 | P0/P1/P2/P3 分区；P0 权限、schema、当前任务硬规则和合法选项不可裁剪；裁剪 refs 写 Trace |
+| 未全量认知角色突然改变内心 | 次要 NPC 凭空识破秘密、改变信念或长期目标 | 未跑 CognitivePass 的角色只允许复用意图、模板意图、`MinorActorSlot` 外显补全或 crowd behavior；不写 L3 |
 
 ### 1.6.1 ST API 切换副作用
 

@@ -54,6 +54,7 @@ pub struct TemporaryCharacterState {
     pub mana_reserve_current: Option<f64>,
     pub mana_expression: ManaExpressionState,       // 当前场景灵力显露状态：封息/抑制/自然/外放/威压
     pub mana_suppression: Vec<ManaSuppressionState>,
+    pub environmental_exposure: EnvironmentalExposureState, // 跨回合环境暴露累计；由 EmbodimentResolver 增量计算，StateCommitter 写入
     pub active_conditions: Vec<ConditionState>,    // poison / stun / restraint / bleeding / fear / soul_damage ...
     pub cooldowns: Vec<CooldownState>,
     pub transient_signals: Vec<String>,            // llm_readable: 手抖/脸红/气息紊乱等外显短态
@@ -72,6 +73,13 @@ pub struct ManaSuppressionState {
     pub source_id: String,
     pub multiplier: f64,
     pub expires_at_turn: Option<String>,
+}
+
+pub struct EnvironmentalExposureState {
+    pub cold_strain: f64,                         // 0.0+；持续寒冷累计，到阈值后转为冻伤 / 行动惩罚候选
+    pub heat_strain: f64,                         // 0.0+；持续高温累计，到阈值后转为中暑 / 脱水候选
+    pub respiration_strain: f64,                  // 0.0+；烟尘 / 沙暴 / 缺氧累计，到阈值后转为咳嗽 / 缺氧 / 窒息候选
+    pub last_updated_turn: Option<String>,
 }
 
 pub enum ManaExpressionTendency {

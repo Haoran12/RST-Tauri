@@ -11,7 +11,7 @@ Mana Combat Resolution 与 Skill Model 已拆分到 [19_agent_combat_and_skills.
 
 ## 1. 程序化派生：环境档位翻译
 
-LLM 不擅长把 raw 数值（`50.0 m/s`、`-30.0 ℃`、`视距 8 m`）翻译成行为后果。这一步在程序里做：`EmbodimentResolver` 与 `SceneFilter` 协同把 Layer 1 `physical_conditions` 的原始量映射为**档位 + 具体后果**，分别写入 `EmbodimentState.body_constraints.environmental_strain`（影响该角色行动）和 `FilteredSceneView.weather_perception`（角色对天气的主观感受）。
+LLM 不擅长把 raw 数值（`50.0 m/s`、`-30.0 ℃`、`视距 8 m`）翻译成行为后果。这一步在程序里做：`EmbodimentResolver` 与 `SceneFilter` 协同把 Layer 1 `physical_conditions` 的原始量映射为**档位 + 具体后果**，分别写入 `EmbodimentState.body_constraints.environmental_strain`（影响该角色本回合行动）和 `FilteredSceneView.weather_perception`（角色对天气的主观感受）。跨回合冷 / 热 / 呼吸累计不保存在 Layer 2，而由 StateCommitter 写回 Layer 1 `TemporaryCharacterState.environmental_exposure`。
 
 ```rust
 pub enum WindImpactTier {
@@ -79,16 +79,17 @@ pub enum SurfaceVisualState {
 }
 
 pub struct EnvironmentalStrain {
-    // 写入 EmbodimentState.body_constraints；驱动 action_feasibility 与跨回合身体状态
+    // 写入 EmbodimentState.body_constraints；驱动本回合 action_feasibility。
+    // exposure_*_delta 由 StateCommitter 累加到 L1 TemporaryCharacterState.environmental_exposure。
     pub wind_tier: WindImpactTier,
     pub temperature_tier: TemperatureFeelTier,
     pub surface_tier: SurfaceImpactTier,
     pub respiration_tier: RespirationImpactTier,
     pub movement_penalty: f64,           // 0.0-1.0
     pub balance_penalty: f64,            // 0.0-1.0
-    pub cold_strain: f64,                // 累积冷损耗（按时间累加，到阈值由 OutcomePlanner 候选 + EffectValidator 生成冻伤事件）
-    pub heat_strain: f64,
-    pub respiration_strain: f64,         // 累积呼吸损耗（沙暴/浓烟久留触发咳嗽/缺氧伤害）
+    pub exposure_cold_delta: f64,        // 本回合冷暴露增量；不在 L2 持久化
+    pub exposure_heat_delta: f64,
+    pub exposure_respiration_delta: f64, // 本回合呼吸暴露增量；不在 L2 持久化
     pub disrupted_actions: Vec<String>,  // 具体限制说明，例 "无法施展持续吟唱的法术"、"远程瞄准命中-40%"
 }
 
@@ -120,7 +121,7 @@ pub enum PrecipitationKind {
 1. CognitivePass 的 LLM **只读 tier + effect_hints**，不应从 raw 数值推断后果。`FilteredSceneView` 中不放 raw 数值。
 2. 物种差异在档位翻译时已校准（用 `BaselineBodyProfile.comfort_temperature_range`），下游不用再判断"对该角色冷不冷"。
 3. 灵力升温/冰寒（`TemperatureModifier.kind = 灵力*`）已在 `Temperature.felt_celsius` 中合并；档位只看最终 felt 值。
-4. `cold_strain` / `heat_strain` 跨回合累积；到阈值由 OutcomePlanner 候选 + EffectValidator 生成具体伤势事件（冻伤/中暑），写回 Layer 1。
+4. `exposure_cold_delta` / `exposure_heat_delta` / `exposure_respiration_delta` 是本回合增量；跨回合累计值保存在 Layer 1 `TemporaryCharacterState.environmental_exposure`。累计到阈值后，由 OutcomePlanner 候选 + EffectValidator 生成具体伤势 / 状态事件（冻伤 / 中暑 / 缺氧），写回 Layer 1。
 5. `disrupted_actions` 是 LLM 选择行动时的硬约束（在 IntentPlan 验证阶段比对），不是建议。
 6. SurfaceRealizer 如需在叙事中提到风速/温度的具体数字，应通过 `SurfaceRealizerInput` 单独传入 raw 值（叙事用），不经 `FilteredSceneView`。
 7. **L1 字段须保持自洽**：`physical_conditions` 各子字段间存在因果（暴雨 → wetness↑ → slipperiness↑；沙暴 → dust_density↑ → visibility↓ + respiration 受影响）。`SceneStateExtractor` 在产出 L1 时由 prompt 模板要求一并填齐；档位翻译层只负责把 L1 翻译成档位，不补全 L1 缺失。

@@ -1,0 +1,134 @@
+/* RST-Tauri Global Styles */
+
+:root {
+  /* Colors - Light Theme */
+  --color-bg-app: #f0f2f5;
+  --color-bg-surface: #ffffff;
+  --color-bg-subtle: #f5f7fa;
+  --color-border-subtle: #e0e0e6;
+  --color-text-primary: #1f2937;
+  --color-text-secondary: #6b7280;
+  --color-status-success: #18a058;
+  --color-status-warning: #f0a020;
+  --color-status-danger: #d03050;
+  --color-status-info: #2080f0;
+
+  /* Typography */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+}
+
+/* Dark Theme */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg-app: #16171d;
+    --color-bg-surface: #1f2028;
+    --color-bg-subtle: #2a2b35;
+    --color-border-subtle: #2e303a;
+    --color-text-primary: #f3f4f6;
+    --color-text-secondary: #9ca3af;
+  }
+}
+
+/* Reset */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-app);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  height: 100%;
+  width: 100%;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-subtle);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-secondary);
+}
+
+/* Selection */
+::selection {
+  background: rgba(32, 128, 240, 0.3);
+}
+
+/* Focus */
+:focus-visible {
+  outline: 2px solid var(--color-status-info);
+  outline-offset: 2px;
+}
+
+/* Links */
+a {
+  color: var(--color-status-info);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* Code */
+code,
+pre {
+  font-family: var(--font-mono);
+}
+
+/* Utility Classes */
+.text-mono {
+  font-family: var(--font-mono);
+}
+
+.text-secondary {
+  color: var(--color-text-secondary);
+}
+
+.text-success {
+  color: var(--color-status-success);
+}
+
+.text-warning {
+  color: var(--color-status-warning);
+}
+
+.text-danger {
+  color: var(--color-status-danger);
+}

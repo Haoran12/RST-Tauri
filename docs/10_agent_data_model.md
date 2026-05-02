@@ -22,7 +22,9 @@
 │  ├── LocationGraph           地点层级、别名、路线边与路程估算 │
 │  ├── KnowledgeEntry[*]       统一知识库（含世界/势力/角色档 │
 │  │                           案/记忆，带访问策略）           │
-│  └── CharacterRecord        基础属性 / 身体基线 / 当前临时态 │
+│  ├── CharacterRecord        基础属性 / 身体基线 / 当前临时态 │
+│  ├── TemporalStateRecord[*] 可变化 L1 状态的时态记录         │
+│  └── ObjectiveRelationship[*] 客观关系 / 授权                 │
 │  约束：只有声明 God-read 的编排类节点可读此层；              │
 │        CognitivePassInput / SurfaceRealizerInput 不出现       │
 │        Layer 1 原始对象。                                    │
@@ -250,6 +252,12 @@ Agent World 的主线光标、`TimeAnchor`、`AgentSession`、过去线正史资
 
 `CharacterRecord`、基础属性、身体基线、临时状态、灵力显露长期倾向与运行时状态已拆分到 [18_agent_character_model.md](18_agent_character_model.md)。
 
+### 2.6 TemporalStateRecord 与 ObjectiveRelationship
+
+可变化的 Layer 1 状态必须支持按故事时间重建。`TemporalStateRecord` 是角色位置、角色临时状态、地点状态、物品状态、客观关系 / 授权等状态的时态记录；`WorldStateAt(period_anchor)` 以它和 `KnowledgeEntry.valid_from / valid_until` 重建过去线工作视图。`CharacterRecord.temporary_state` 与 `LocationNode.status` 只能作为当前主线 materialized cache，不能作为过去线唯一来源。
+
+`ObjectiveRelationship` 是当前主线的 L1 客观关系 / 授权 materialized cache，用于 `AccessCondition::SocialAccessAtLeast`、职位权限、通行许可、誓约关系等高频程序判断；对应的时间权威必须落在 `TemporalStateRecord(state_kind=objective_relation|authorization)` 或可追溯的 Knowledge 来源中。它与 L3 `relation_models` 严格分离：角色主观上信任某人，不会自动提升对方的 Knowledge 访问权限。
+
 ## 3. Layer 2 — Per-Character Access
 
 ### 3.1 EmbodimentState
@@ -259,7 +267,7 @@ pub struct EmbodimentState {
     pub character_id: String,
     pub scene_turn_id: String,
     pub sensory_capabilities: SensoryCapabilities,  // vision/hearing/smell/touch/proprioception/mana
-    pub body_constraints: BodyConstraints,          // 移动力/平衡/痛苦负载/疲惫/认知清晰度 + environmental_strain（环境档位+惩罚）
+    pub body_constraints: BodyConstraints,          // 移动力/平衡/痛苦负载/疲惫/认知清晰度 + environmental_strain（本回合环境档位+惩罚）
     pub salience_modifiers: SalienceModifiers,      // 注意力吸引/厌恶触发/过载风险
     pub reasoning_modifiers: ReasoningModifiers,    // 痛苦偏倚/威胁偏倚/过载偏倚
     pub action_feasibility: ActionFeasibility,      // 物理执行/社交耐心/精细控制/持续注意
@@ -288,7 +296,7 @@ pub struct BodyConstraints {
     pub pain_load: f64,            // 0.0-1.0
     pub fatigue_load: f64,         // 0.0-1.0
     pub cognitive_clarity: f64,    // 0.0-1.0
-    pub environmental_strain: Vec<String>, // tier / descriptor refs
+    pub environmental_strain: EnvironmentalStrain, // 本回合 tier / penalty / exposure_delta；跨回合累计在 L1 temporary_state.environmental_exposure
 }
 
 pub struct SalienceModifiers {
@@ -391,5 +399,6 @@ pub struct CharacterSubjectiveState {
 - "我相信门外有刺客" → `belief_state` 中的命题信念。
 - 伤势、疲惫、痛感、灵力消耗、魂伤等当前临时状态 → Layer 1 `CharacterRecord.temporary_state`；L3 只保存角色对此状态的信念、情绪和目标反应。
 - 不允许同一命题既写入 `belief_state` 又写入 `relation_models`。
+- L3 快照不由 LLM 直接整份覆盖；必须由 `SubjectiveStateReducer` 根据 prior L3、CognitivePassOutput 或用户扮演的 `PlayerSubjectiveInput` 程序化生成下一份快照。
 
 ---

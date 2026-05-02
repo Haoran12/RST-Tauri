@@ -34,7 +34,7 @@ Agent 模式包含五类 LLM 节点，权限不同：
 
 每类节点可绑定不同 API 配置。运行时在调用节点前按 `AgentLlmProfile` 解析实际 `api_config_id`：节点绑定优先，其次 World 覆盖，最后全局默认 Agent 配置。API 配置只影响 Provider / model / 参数，不改变节点权限。
 
-运行时同时固定一份配置快照。打开 World 时，`ConfigLoader` 合并全局 `app_runtime.yaml` 与该 World 的 `world_base.yaml`，校验后发布 `RuntimeConfigSnapshot` / `WorldRulesSnapshot`。每个 Agent 回合开始时捕获 `config_snapshot_id`；本回合所有 `SceneFilter`、`EmbodimentResolver`、`CombatMathResolver`、PromptBuilder 预算判断和日志 retention 判断只读这份快照。用户在回合执行中保存配置时，新配置只能从下一回合生效。
+运行时同时固定两份配置快照。打开 World 时，`ConfigLoader` 加载全局 `app_runtime.yaml` 并发布 `RuntimeConfigSnapshot`，再合并该 World 的 `world_base.yaml` 并发布 `WorldRulesSnapshot`。每个 Agent 回合开始时捕获 `runtime_config_snapshot_id` 与 `world_rules_snapshot_id`；本回合所有 PromptBuilder 预算判断、Provider 限流和日志 retention 判断只读 runtime 快照，`SceneFilter`、`EmbodimentResolver`、`AttributeResolver`、`CombatMathResolver` 只读 world rules 快照。用户在回合执行中保存配置时，新配置只能从下一回合生效。
 
 ## 3. 融合调用
 
@@ -67,13 +67,17 @@ Agent 模式包含五类 LLM 节点，权限不同：
 
 跳过用户当前扮演的角色（其行为由 UserInputDelta 直接给出）。
 
-当 active + dirty 角色数超过本场景 primary cognitive pass 预算（默认 2，来自 `RuntimeConfigSnapshot.request_budget`）时，运行时按确定性优先级裁剪：
+当 active characters 数达到 `RuntimeConfigSnapshot.request_budget.cognitive_scheduling.tiering_start_active_characters`（默认 4）时，运行时启用分层调度。未达到阈值时，所有 active + hard dirty 且非用户扮演角色都可进入 primary CognitivePass，但仍受输入 token 预算、Provider 限流和并行度约束。达到阈值后，每场景 primary CognitivePass 默认最多 3 个（`max_primary_cognitive_passes = 3`），运行时按确定性优先级裁剪：
 
 1. `under_threat` / `reaction_window_open` / `directly_addressed` 的 Tier A 角色优先。
 2. 与用户扮演角色直接交互、或其 intent 会打开 ReactionWindow 的角色优先。
-3. `knowledge_revealed`、`scene_changed`、`body_changed` 按 salience 分数排序；同分时按 `character_id` 稳定排序。
-4. 超出预算的 Tier A/B 角色本回合降级为 Tier B 模板策略或沿用上一可用 IntentPlan，并在 Trace 中记录 `budget_deferred`；其 dirty flags 不丢弃，下一回合仍满足硬条件时继续参与调度。
-5. Reaction pass 不占 primary cognitive pass 预算，但受独立的 reaction window 深度、每窗口人数和 Provider 限流预算约束。
+3. 心智模型与当前事件高度相关的角色优先：prior L3 中有当前目标、强承诺、敌意、恐惧、未完成 IntentPlan 或刚被打破的 belief。
+4. `knowledge_revealed`、`scene_changed`、`body_changed` 按 salience 分数排序；同分时按 `character_id` 稳定排序。
+5. 超出预算的 Tier A/B 角色本回合不执行完整心智更新；运行时优先沿用上一合法 IntentPlan，否则生成 `MinorActorSlot` 交给 OutcomePlanner 补全受限外显行为，并在 Trace 中记录 `budget_deferred` / `template_intent_used` / `minor_actor_slot_used`。其 dirty flags 与 pending observations 不丢弃，下一回合仍满足硬条件时继续参与调度。
+6. Tier C / 背景群众不执行单独 CognitivePass；程序生成聚合 crowd behavior 摘要，OutcomePlanner 只接收外显行为约束。
+7. Reaction pass 不占 primary cognitive pass 预算，但受独立的 reaction window 深度、每窗口人数、`max_reaction_passes_per_window` 和 Provider 限流预算约束。
+
+未经过完整 CognitivePass 的人物，本回合只能产生外显、低复杂度、受约束的行为；不得产生新的深层心理变化、长期目标变化、隐藏知识推断或 L3 belief 更新。其观察、KnowledgeRevealEvent 和显著情绪触发进入 pending，等待未来被直接触发或预算允许时由完整 CognitivePass 消费。
 
 ---
 
@@ -90,6 +94,7 @@ Agent 模式包含五类 LLM 节点，权限不同：
 
 - primary target、盟友/守护者、领域/被动技能拥有者、被波及者都可以成为候选反应者，但必须能通过本回合 `FilteredSceneView` / `ObservableEventDelta` 感知到威胁。
 - 候选反应者必须满足距离、视线/通道、感官、冷却、资源、姿态、控制状态与 SkillEffectContract。
+- ReactionWindow 开启后会独立派生 `eligible_reactors`，并为这些角色临时标记 `reaction_window_open`。候选反应者不要求已经进入 primary active + dirty 裁剪结果；否则原本安静但能援护 / 反制的角色会被错误排除。
 - 对候选者额外执行一次受限 reaction pass，输入只包含该窗口、合法 `ReactionOption`、该角色 L2 视图与 prior L3，输出 `ReactionIntent`。
 - `ReactionIntent` 只表示"选择怎么反应"，不立即结算，也不生成新的普通 ReactionWindow。
 
@@ -111,7 +116,7 @@ OutcomePlanner 每回合仍默认最多 1 次：它接收原行动、所有 `Rea
 0. 加载 AgentSession 与 WorldMainlineCursor：
    - 比较 session.period_anchor 与 mainline_time_anchor，判定 Mainline / Retrospective / FuturePreview
    - RetrospectiveSession 调用 HistoricalTruthResolver，生成 TruthGuidance
-   - canon_status == noncanon 时，本回合只能写会话记录、Trace 与 provisional truth，不能写 canonical Truth
+   - canon_status == noncanon 时，本回合只能写会话记录、非 canonical `world_turns` 运行回合、Trace 与 provisional truth，不能写 canonical Truth
 1. 收集用户输入（自由文本）
 1a. 若当前没有可用 SceneModel，或上一回合 MetaCommand / 程序事件要求切场景、大幅跳时：
    - 程序组装 SceneSeed、AgentSessionContext、公开世界 / 地点 / 人物上下文、场景相关私有约束、TruthGuidance、SceneGenerationPolicy
@@ -121,13 +126,13 @@ OutcomePlanner 每回合仍默认最多 1 次：它接收原行动、所有 `Rea
    → SceneStateExtractorOutput（结构化）
    - 输出 SceneUpdate 候选 + UserInputDelta
    - 过去线输出 provisional_truth_candidates 与 conflict_warnings
-   - UserInputDelta 可为 SceneNarration / CharacterRoleplay / MetaCommand / DirectorHint
+   - UserInputDelta 可为 SceneNarration / CharacterRoleplay / MetaCommand / DirectorHint，并必须携带 authority_class / authority_notes 说明权限等级、降级或阻止原因
    - 解析失败 → 容错修复 → 仍失败则提示用户重写
 3. Validator + StateApplier 将 SceneUpdate / UserInputDelta 应用到本回合 `TurnWorkingState`：
-   - SceneUpdate / SceneNarration → 更新工作副本中的 SceneModel
-   - CharacterRoleplay → 写入对应角色的 IntentPlan（跳过其 CognitivePass）
-   - MetaCommand → 时间/场景控制
-   - DirectorHint → 暂存结构化 outcome_bias 与 style_override
+   - SceneUpdate / SceneNarration → 仅作为候选更新工作副本中的 SceneModel；低风险、非持久、非冲突可自动应用，高风险或持久世界事实必须要求确认、降级为 assumption 或阻止
+   - CharacterRoleplay → 写入对应角色的 IntentPlan（跳过其 CognitivePass）；该角色行动是否成功、造成何种硬效果仍由 OutcomePlanner + EffectValidator 决定；若包含 `subjective_input`，暂存给 SubjectiveStateReducer
+   - MetaCommand → 时间/场景控制；生成结构化运行指令或 SceneSeed，不直接写 canonical Truth
+   - DirectorHint → 暂存结构化 outcome_bias 与 style_override；只作为结果规划 / 叙事偏置，不强制 NPC 违背认知、技能、物理、正史或隐藏真相
    - hard conflict warning → UI 弹出“冲突后非正史 / 整条会话非正史”，不中断本回合
 4. 更新身体 / 资源 / 状态 / 冷却（Layer 1，机械演化）
 4a. AttributeResolver 从 `base_attributes + temporary_state + scene/status/skill modifiers` 派生 `effective_attributes`：
@@ -157,7 +162,8 @@ OutcomePlanner 每回合仍默认最多 1 次：它接收原行动、所有 `Rea
 == Reaction Collection (bounded, optional) ==
 
 12a. 程序从用户扮演 intent、场景事件、NPC IntentPlan 中打开 ReactionWindow
-     - 只允许 active/dirty 场景内可感知威胁的角色进入候选
+     - 基于本回合工作副本重新派生 eligible_reactors；不要求候选者已进入 primary active + dirty 裁剪结果
+     - 对 eligible_reactors 临时标记 `reaction_window_open`，并为 reaction pass 派生最小 L2 输入
      - 援护者/伙伴/被动领域按 SkillEffectContract 与感知可达性 / Knowledge 访问权限判断资格
 12b. 对每个 eligible reactor 组装 ReactionPassInput（L2 视图 + ReactionWindow + 合法 ReactionOption）
 12c. CharacterCognitivePass 的 reaction 子任务输出 ReactionIntent
@@ -183,10 +189,10 @@ OutcomePlanner 每回合仍默认最多 1 次：它接收原行动、所有 `Rea
     - canon_status 允许时，追加新 KnowledgeEntry { kind: Memory }
     - canon_status 允许时，只应用通过 EffectValidator / TemporalConsistencyValidator 的 StateUpdatePlan；BodyReactionDelta 不直接写 Layer 1
     - RetrospectiveSession 的新长期细节先写 provisional_session_truth；只有 canon_candidate 且校验通过时才提升为 canonical Knowledge / Event
-    - noncanon 或冲突后非正史区间只写 SessionTurn、provisional truth、conflict_reports 与 Trace，不改 canonical Layer 1 / Layer 3 / Knowledge
+    - noncanon 或冲突后非正史区间只写 SessionTurn、`world_turns(runtime_turn_status=noncanon|future_preview|provisional_only)`、provisional truth、conflict_reports 与 Trace，不写 `state_commit_records`，不改 canonical Layer 1 / Layer 3 / Knowledge
     - 当前主线会话成功推进时，更新 WorldMainlineCursor
-    - 写入 character_subjective_snapshots（Layer 3；非正史会话写会话域快照，不覆盖 canonical 当前心智）
-    - 写入 turn_traces / agent_step_traces（调试与回放）
+    - 对每个有 CognitivePassOutput、OutcomePlanner 兜底输出或 `PlayerSubjectiveInput` 的角色执行 SubjectiveStateReducer，写入 character_subjective_snapshots（Layer 3；非正史会话写会话域快照，不覆盖 canonical 当前心智）
+    - 写入 turn_traces / agent_step_traces（调试与回放；非正史 Trace 关联非 canonical `world_turns` 运行回合）
 ```
 
 ---
@@ -238,10 +244,10 @@ SQLite 并发策略：
 | 步骤 | Agent Trace | 运行 Logs |
 |---|---|---|
 | 0 | 记录 session_id、session_kind、period_anchor、mainline_time_anchor、canon_status、TruthGuidance 来源摘要 | 会话加载 / 主线光标读取异常 |
-| 1 | 记录原始用户输入摘要、回合起点与 `config_snapshot_id` | 输入采集异常 |
+| 1 | 记录原始用户输入摘要、回合起点、`runtime_config_snapshot_id` 与 `world_rules_snapshot_id` | 输入采集异常 |
 | 1a | 记录 SceneInitializer 输入域、`private_scene_constraints` / `truth_guidance` 来源、生成策略、假设列表、阻止项、确认需求、api_config_id | LLM request / response / schema / retry / error |
 | 2 | 记录 SceneStateExtractor 输入域、`private_scene_constraints` / `truth_guidance` 来源、输出、解析状态、修复状态、api_config_id、provisional truth 候选 | LLM request / response / schema / retry / error |
-| 3 | 记录 UserInputDelta 应用摘要 | 状态应用异常 |
+| 3 | 记录 UserInputDelta 应用摘要、authority_class、authority_notes、降级 / 确认 / 阻止原因 | 状态应用异常 |
 | 4 | 记录机械演化摘要 | 状态演化异常 |
 | 4a | 记录 AttributeResolver 修正来源、effective/displayed 摘要、tier/delta 与异常修正 | 属性派生异常 |
 | 5 | 记录事件 delta 摘要 | 事件生成异常 |
@@ -251,11 +257,11 @@ SQLite 并发策略：
 | 12 | 记录每条 Validator 结果与失败项 | 验证异常事件 |
 | 13a-13c | 记录 OutcomePlanner 输入域、God-read 使用范围、TruthGuidance 使用范围、输出 plan、ConflictReport、兜底原因、api_config_id | LLM request / response / error |
 | 13d-13e | 记录 EffectValidator / TemporalConsistencyValidator 裁剪结果、资源消耗、命中、结构化 narratable_facts、blocked_effects / soft_effects、canon_status 变化 | 结果规划异常 |
-| 14 | 记录 SurfaceRealizer 输入摘要、api_config_id、used_fact_ids 与最终叙事 | LLM request / response；stream chunk 与 readable_text |
+| 14 | 记录 SurfaceRealizer 输入摘要、api_config_id、used_fact_ids 与最终叙事 | LLM request / response；第一版无 stream chunk，未来若引入 `chat_structured_stream` 才记录结构化流式片段 |
 | 15 | 记录 NarrativeFactCheck 的 fact_id 子集校验与文本抽查结果 | fact check 失败事件 |
 | 16 | 记录 canonical 提交索引、provisional truth、rollback patch、trace_ids、主线光标更新或非正史跳过原因 | SQLite 事务异常、回滚事件 |
 
-所有 LLM 调用日志、异常事件和 Trace 条目都应尽量记录同一 `config_snapshot_id`。缺失该 ID 时仍允许写日志，但必须写 `config_snapshot_missing` 事件，避免后续无法判断某次运行使用了哪套阈值与清理策略。
+所有 LLM 调用日志、异常事件和 Trace 条目都应尽量记录 `runtime_config_snapshot_id`；Agent World 回合相关记录还必须记录 `world_rules_snapshot_id`。缺失任一必需 ID 时仍允许写日志，但必须写 `config_snapshot_missing` 事件，避免后续无法判断某次运行使用了哪套预算、阈值与清理策略。
 
 ---
 
@@ -271,13 +277,33 @@ CognitivePassOutput **必须为严格 schema JSON**，优先由 Provider structu
 
 ## 8. 调用预算
 
-- 每场景窗口：0-2 次 primary cognitive passes（重要活跃角色）。
+- 每场景窗口：0-3 次 primary cognitive passes（重要活跃角色，默认 3，可配置）。
 - Reaction pass 只对 `ReactionWindow.eligible_reactors` 执行；每角色每窗口最多 1 次，并受 `max_reaction_depth` 与场景级预算限制。
 - 0 次 cognitive passes（次要 / 背景角色）。
 - 1 次 surface realization（仅当需要叙事输出）。
 - 0-1 次 SceneInitializer（仅新建场景、切场景、大幅跳时或回滚重建时）。
 - 1 次 SceneStateExtractor（每次用户输入）。
 - 0-1 次 OutcomePlanner（每回合需要状态推进时；若无交互可跳过；默认不因校验失败二次调用）。
+
+### 8.1 输入 token 预算
+
+每次 Agent LLM 请求都必须在 `PromptBuilder/InputAssembly/agent::budget` 中估算输入 token，并生成 `PromptBudgetReport`。预算默认值来自 `RuntimeConfigSnapshot.request_budget.input_tokens`：
+
+- `critical_attention_tokens = 8192`：关键注意力带。P0/P1 中的节点权限、schema、当前任务硬规则、用户最近输入、当前威胁、合法选项和角色心智模型焦点应尽量放入此范围。
+- `soft_input_tokens = 16384`：软上限。估算达到该值时必须进入确定性压缩 / 裁剪流程。
+- `max_context_tokens = 32768`：可配置最大上下文，语义参考 ST 的最大上下文。它不是“超过即放弃”，而是请求必须继续压缩 / 裁剪相对不重要内容，直到低于有效最大上下文。
+- `reserved_output_tokens`：为模型输出预留的 token；有效输入上限为 `min(user_max_context_tokens, provider_context_window - reserved_output_tokens)`。
+
+估算优先使用 Provider/model tokenizer；不可用时采用保守估算（英文 / ASCII 约 `chars / 4`，CJK 约 `chars`，JSON 字段名、ID、schema 和 message wrapper 均计入）。Provider 返回实际 usage 后，Logs 记录 `estimated_tokens` 与 `actual_tokens` 以校准估算。
+
+重要性按节点本地任务判定，不使用 LLM 自行判断：
+
+1. **P0_REQUIRED**：节点静态契约、权限边界、输出 schema、当前任务硬规则、合法反应/技能选项、NarrationScope、用户最近输入。原则上不可裁剪。
+2. **P1_DECISION_CRITICAL**：当前角色身体/感官限制、直接可观察实体、直接相关 Knowledge、最近事件 delta、prior L3 心智模型焦点、上一轮未完成 IntentPlan。
+3. **P2_CONTEXTUAL**：同场景但非直接相关实体、较旧事件、低 salience Knowledge、背景环境、软风格提示。
+4. **P3_OPTIONAL_FLAVOR**：长 `llm_readable`、extensions、重复 descriptors、低置信度氛围和可由结构化字段重建的描述。
+
+压缩 / 裁剪顺序固定：先删 P3 可省字段；再把 P2/P3 长文本替换为既有 `summary_text`；再按 salience、recency、direct target、source、emotional_weight 和当前事件引用裁剪 `AccessibleKnowledge` / `recent_event_delta` / `FilteredSceneView`。超过有效最大上下文时继续强裁剪 P3 与低相关 P2；只有 P0 或必需 P1 自身已经超过有效最大上下文、无法安全压缩时，才标记 `blocked_unfit` 并走节点降级。
 
 ---
 

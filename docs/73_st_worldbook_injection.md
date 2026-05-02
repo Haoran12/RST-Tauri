@@ -1,6 +1,6 @@
 # 73 ST 世界书注入流程
 
-本文定义 ST 世界书从来源合并到 Prompt 落槽的运行时流程。数据模型见 [72_st_worldbook_model.md](72_st_worldbook_model.md)，详细判定链路参考 [reference/SillyTavernLorebook.md](reference/SillyTavernLorebook.md)。
+本文定义 ST 世界书从来源合并到 Prompt 落槽的运行时流程。数据模型见 [72_st_worldbook_model.md](72_st_worldbook_model.md)。实现依据 `E:\AIPlay\ST_latest\public\scripts\world-info.js`，详细判定链路参考 [reference/SillyTavernLorebook.md](reference/SillyTavernLorebook.md)。
 
 ## 1. 输入构造
 
@@ -23,14 +23,16 @@
 
 | 来源 | ST 存储位置 | 去重规则 |
 |---|---|---|
-| Chat lore | 当前聊天 `chat_metadata.world_info` | 如果同名书已在 global 中启用，跳过 |
-| Persona lore | `power_user.persona_description_lorebook` | 如果同名书已在 chat 或 global 中启用，跳过 |
+| Chat lore | 当前聊天 `chat_metadata['world_info']` | 如果同一世界书名称已在 global 中启用，跳过 |
+| Persona lore | `power_user.persona_description_lorebook` | 如果同一世界书名称已在 chat 或 global 中启用，跳过 |
 | Global lore | 全局设置 `world_info.globalSelect` / `selected_world_info` | 全局选择列表直接参与 |
-| Character lore | 角色卡 `data.extensions.world` + `world_info.charLore[].extraBooks` | 与 global 按 `world_info_character_strategy` 合并 |
+| Character lore | 角色卡 `data.extensions.world` + `world_info.charLore[].extraBooks` | 如果同名书已在 global、chat 或 persona 中启用，跳过；剩余内容与 global 按 `world_info_character_strategy` 合并 |
 
-角色卡内嵌 `data.character_book` 不直接作为 `CharacterBook` 参与扫描；必须先转换为外部 `WorldInfoEntry` 形态。若角色卡已经绑定 `data.extensions.world`，优先使用绑定的外部世界书。
+`data.extensions.world` 在 ST 中是世界书名称字符串；`world_info.charLore[].extraBooks` 按角色文件名匹配，存放额外世界书名称列表。加载世界书后，ST 把 `data.entries` 对象转为 entry 数组，并给每个 entry 加上 `world: worldName`。
 
-世界书来源合并不得读取 `active_api_config_id`。切换 API 配置后，Chat lore、Persona lore、Global lore、Character lore 的选择、去重、排序、递归和预算规则保持不变；只有最终 Provider 请求映射可能变化。
+角色卡内嵌 `data.character_book` 不直接参与扫描；必须先通过 Import Card Lore 转换并保存为外部世界书。若未执行导入，运行时只保留该内嵌书作为角色卡数据。
+
+RST 内部可用稳定 `lore_id` 管理资源，但 ST 兼容运行时和导出必须能映射回世界书名称字符串。来源合并不得读取 `active_api_config_id`。切换 API 配置后，Chat lore、Persona lore、Global lore、Character lore 的选择、去重、排序、递归和预算规则保持不变；只有最终 Provider 请求映射可能变化。
 
 ## 3. 排序与装饰器
 
@@ -38,7 +40,7 @@
 
 1. `Chat lore` 永远最前。
 2. `Persona lore` 次之。
-3. `Global lore` 与 `Character lore` 依据 `world_info_character_strategy`：
+3. `Global lore` 与 `Character lore` 依据 `world_info_character_strategy`。ST 默认值是 `character_first`：
    - `0 evenly`：两者合并后统一按 `order` 降序。
    - `1 character_first`：Character 内部按 `order` 降序，然后 Global 内部按 `order` 降序。
    - `2 global_first`：Global 内部按 `order` 降序，然后 Character 内部按 `order` 降序。
@@ -59,20 +61,21 @@
 9. 应用 decorators：`@@activate` 强制激活，`@@dont_activate` 禁止激活。
 10. 应用外部强制激活。
 11. `constant` 或 active sticky 直接进入候选。
-12. 匹配主关键词 `key`。
-13. 若 `selective = true`，继续匹配 `keysecondary` + `selectiveLogic`。
+12. 构造当前 entry 的扫描文本：`scanDepth ?? world_info_depth` 决定最多扫描多少条最近消息；若 `scanDepth` 小于等于当前递归 / min-activation 的起始深度，本轮扫描文本为空。
+13. 匹配主关键词 `key`。
+14. 若 `selective = true`，继续匹配 `keysecondary` + `selectiveLogic`。
 
 候选产生后：
 
 1. 对本轮候选执行 Inclusion Group 裁剪。
 2. 执行概率判定；sticky entry 不重新掷概率。
 3. 执行 token 预算；`ignoreBudget = true` 的 entry 不受预算限制。
-4. 若 `world_info_recursive` 且本轮成功激活了未 `preventRecursion` 的 entry，把它们的内容加入递归缓冲并继续扫描。
+4. 若 `world_info_recursive` 且本轮通过概率检查的 entry 中存在未 `preventRecursion` 的内容，把它们加入递归缓冲并继续扫描；ST 当前代码是在预算检查后继续用这些内容推进递归，因此 RST 若要严格复刻，应按代码行为而不是只按最终 prompt 落槽集合判断。
 5. 若配置了 `world_info_min_activations` 且未达到，增加扫描深度继续；`world_info_max_recursion_steps` 与 min activations 互斥。
 
 ## 5. Prompt 落槽
 
-扫描结束后，按 `entry.position` 分流：
+扫描结束后，ST 先对每个最终激活 entry 的 `content` 执行 `WORLD_INFO` placement 的 prompt-only Regex；只有 `AT_DEPTH` 词条会把自身 `depth` 传给 Regex 深度过滤，其他位置传 `null`。随后按 `entry.position` 分流：
 
 | position | 输出 |
 |---|---|

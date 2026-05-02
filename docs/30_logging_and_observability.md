@@ -67,6 +67,12 @@ Agent Trace 是 Agent 世界的回合决策追踪，回答"这个回合为什么
 - `./data/logs/archives/` 预留给全局日志归档；第一版清理以删除旧运行 Logs 为主。
 - 应用启动时由存储层创建缺失目录；业务模块不得自行拼接外部日志路径。
 
+SQLite schema 边界：
+
+- `world.sqlite` 使用 [14_agent_persistence.md](14_agent_persistence.md) 中的完整 Agent schema，`llm_call_logs` / `app_event_logs` 可通过外键或逻辑 ID 关联 `agent_sessions`、`world_turns` 与 `turn_traces`。
+- 全局 `app_logs.sqlite` 只创建日志相关表：`config_snapshots`、`llm_call_logs`、`llm_stream_chunks`、`app_event_logs`、`log_retention_state`。这些表与 World 内同名表保持字段兼容，但不得设置指向 `agent_sessions`、`world_turns`、`turn_traces` 的外键。
+- 全局日志表中的 `world_id` / `session_id` / `scene_turn_id` / `trace_id` 只是脱敏索引字段，用于从全局错误跳转到某个 World，不表示全局库拥有该 World 的 Agent 状态。
+
 ---
 
 ## 3. LLM 调用日志
@@ -130,7 +136,7 @@ Agent Trace 记录 Agent 模式下"程序如何判断"与"模型如何输出"。
 - CharacterCognitivePass 输入输出、schema 校验、程序修复、OutcomePlanner 兜底触发。
 - Validator 各规则结果。
 - OutcomePlanner 的 God-read 输入域、候选 StateUpdatePlan、EffectValidator 裁剪摘要与物理后果。
-- SurfaceRealizer 请求、流式响应拼接、used_fact_ids 与 NarrativeFactCheck 结果。
+- SurfaceRealizer 请求、结构化响应、used_fact_ids 与 NarrativeFactCheck 结果。第一版 SurfaceRealizer 不使用裸 `chat_stream`；未来若引入 `chat_structured_stream`，再记录结构化流式片段。
 - StateCommitter 的提交记录、rollback patch 和 trace 关联。
 
 ---
@@ -177,7 +183,7 @@ Agent Trace 记录 Agent 模式下"程序如何判断"与"模型如何输出"。
 
 ## 6. 定期删除机制
 
-默认开启按大小清理运行 Logs，默认上限为 **1GB**，实际值来自 `./data/settings/app_runtime.yaml` 编译后的 `RuntimeConfigSnapshot.log_retention`。清理只针对运行 Logs；Agent Trace 默认随 World 保留。
+默认开启按大小清理全局运行 Logs，默认上限为 **1GB**，实际值来自 `./data/settings/app_runtime.yaml` 编译后的 `RuntimeConfigSnapshot.log_retention`。自动清理只针对全局运行 Logs；Agent Trace 与 World 内回合相关 LLM Logs 默认随 World 保留，只能在用户确认后清理或导出。
 
 ### 6.1 触发时机
 
@@ -188,7 +194,7 @@ Agent Trace 记录 Agent 模式下"程序如何判断"与"模型如何输出"。
 
 ### 6.2 清理范围
 
-自动清理：
+自动清理范围仅限全局 `app_logs.sqlite`：
 
 - 全局 `debug` / `info` 级运行事件。
 - 全局旧流式 chunk。
@@ -199,6 +205,7 @@ Agent Trace 记录 Agent 模式下"程序如何判断"与"模型如何输出"。
 
 - Agent Trace。
 - Agent 世界内与 `scene_turn_id` 关联的关键回合记录。
+- Agent 世界内与 `scene_turn_id` / `trace_id` 关联的 LLM 调用日志。
 - `warn` / `error` / `fatal` 事件，除非空间仍超限且这些事件已经足够旧。
 - 仍被 `state_commit_records.trace_ids` 引用的记录。
 
