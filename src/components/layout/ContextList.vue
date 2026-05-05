@@ -279,6 +279,13 @@ onMounted(async () => {
                   <div class="entry-header">
                     <span class="entry-name">{{ getEntryName(entry) }}</span>
                     <NTag
+                      size="tiny"
+                      :type="getActivationModeType(entry)"
+                      :bordered="false"
+                    >
+                      {{ getActivationModeLabel(entry) }}
+                    </NTag>
+                    <NTag
                       v-if="entry.group"
                       size="tiny"
                       type="info"
