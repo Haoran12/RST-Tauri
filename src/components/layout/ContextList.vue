@@ -12,10 +12,13 @@ import {
   NPopconfirm,
   NText,
   NTag,
+  NInputNumber,
+  NCollapse,
+  NCollapseItem,
 } from 'naive-ui'
 import { computed, ref, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { SearchOutline, AddOutline, TrashOutline } from '@vicons/ionicons5'
+import { SearchOutline, AddOutline, TrashOutline, SettingsOutline } from '@vicons/ionicons5'
 import { useWorldbooksStore } from '@/stores/worldbooks'
 import type { WorldInfoEntry } from '@/types/st'
 import { WorldInfoPosition } from '@/types/st'
@@ -24,6 +27,11 @@ const route = useRoute()
 const worldbooksStore = useWorldbooksStore()
 const searchQuery = ref('')
 const loading = ref(false)
+
+// Global settings state
+const showGlobalSettings = ref(false)
+const globalScanDepth = ref(4)
+const globalTokenBudget = ref(32767)
 
 // Computed page type
 const isWorldbooksPage = computed(() => route.name === 'resources-worldbooks')
@@ -111,6 +119,12 @@ function createWorldbook() {
   window.dispatchEvent(new CustomEvent('create-worldbook'))
 }
 
+// Delete current worldbook
+async function deleteCurrentWorldbook() {
+  if (!worldbooksStore.currentWorldbookId) return
+  await worldbooksStore.deleteWorldbookById(worldbooksStore.currentWorldbookId)
+}
+
 // Get entry display name
 function getEntryName(entry: WorldInfoEntry): string {
   if (entry.comment && entry.comment.trim()) {
@@ -157,13 +171,40 @@ onMounted(async () => {
     <template v-if="isWorldbooksPage">
       <!-- File selector header -->
       <div class="list-header">
-        <span class="list-title">{{ pageTitle }}</span>
-        <NButton quaternary size="small" @click="createWorldbook">
+        <span class="list-title-worldbook">世界书</span>
+        <NButton quaternary size="small" @click="showGlobalSettings = !showGlobalSettings">
           <template #icon>
-            <NIcon><AddOutline /></NIcon>
+            <NIcon><SettingsOutline /></NIcon>
           </template>
         </NButton>
       </div>
+
+      <!-- Global Settings Panel -->
+      <NCollapse v-if="showGlobalSettings" class="global-settings-collapse">
+        <NCollapseItem title="全局设置" name="global">
+          <div class="global-settings-form">
+            <div class="setting-row">
+              <NText depth="3" class="setting-label">全局扫描深度</NText>
+              <NInputNumber
+                v-model:value="globalScanDepth"
+                :min="1"
+                :max="999"
+                size="small"
+                class="setting-input"
+              />
+            </div>
+            <div class="setting-row">
+              <NText depth="3" class="setting-label">全局 Token 预算</NText>
+              <NInputNumber
+                v-model:value="globalTokenBudget"
+                :min="1"
+                size="small"
+                class="setting-input"
+              />
+            </div>
+          </div>
+        </NCollapseItem>
+      </NCollapse>
 
       <!-- Worldbook file selector -->
       <div class="file-selector">
@@ -175,6 +216,30 @@ onMounted(async () => {
           size="small"
           @update:value="handleWorldbookSelect"
         />
+      </div>
+
+      <!-- File action buttons -->
+      <div class="file-actions">
+        <NButton size="small" type="primary" @click="createWorldbook">
+          <template #icon>
+            <NIcon><AddOutline /></NIcon>
+          </template>
+          新建
+        </NButton>
+        <NPopconfirm
+          v-if="worldbooksStore.currentWorldbookId"
+          @positive-click="deleteCurrentWorldbook"
+        >
+          <template #trigger>
+            <NButton size="small" type="error">
+              <template #icon>
+                <NIcon><TrashOutline /></NIcon>
+              </template>
+              删除
+            </NButton>
+          </template>
+          确定删除此世界书吗？
+        </NPopconfirm>
       </div>
 
       <!-- Entry list when worldbook is selected -->
@@ -312,6 +377,7 @@ onMounted(async () => {
   height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .list-header {
@@ -320,6 +386,7 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: center;
   border-bottom: 1px solid var(--color-border-subtle, #e0e0e6);
+  flex-shrink: 0;
 }
 
 .list-title {
@@ -327,9 +394,48 @@ onMounted(async () => {
   font-size: 14px;
 }
 
+.list-title-worldbook {
+  font-weight: 600;
+  font-size: 18px;
+}
+
+.global-settings-collapse {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--color-border-subtle, #e0e0e6);
+}
+
+.global-settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.setting-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.setting-label {
+  font-size: 13px;
+}
+
+.setting-input {
+  width: 120px;
+}
+
 .file-selector {
   padding: 8px 12px;
   border-bottom: 1px solid var(--color-border-subtle, #e0e0e6);
+  flex-shrink: 0;
+}
+
+.file-actions {
+  padding: 8px 12px;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-start;
+  flex-shrink: 0;
 }
 
 .entry-actions {
@@ -338,6 +444,7 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: center;
   border-bottom: 1px solid var(--color-border-subtle, #e0e0e6);
+  flex-shrink: 0;
 }
 
 .entry-count {
@@ -346,10 +453,12 @@ onMounted(async () => {
 
 .list-search {
   padding: 8px 12px;
+  flex-shrink: 0;
 }
 
 .list-content {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 0 4px;
 }
