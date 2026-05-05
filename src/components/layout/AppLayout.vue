@@ -22,6 +22,14 @@ const showInspectPanel = computed(() => {
   const inspectPages = ['st-chat', 'agent-worlds', 'agent-world-editor']
   return inspectPages.includes(route.name as string) && appShell.inspectPanelOpen
 })
+
+const contextSiderContentStyle = {
+  height: '100%',
+  minHeight: '0',
+  display: 'flex',
+  flexDirection: 'column',
+  overflow: 'hidden',
+} as const
 </script>
 
 <template>
@@ -37,6 +45,7 @@ const showInspectPanel = computed(() => {
         bordered
         :width="appShell.contextListWidth"
         :collapsed-width="220"
+        :content-style="contextSiderContentStyle"
         class="context-sider"
       >
         <ContextList />
@@ -76,6 +85,10 @@ const showInspectPanel = computed(() => {
 
 .context-sider {
   background-color: var(--color-bg-surface, #f5f7fa);
+}
+
+.context-sider :deep(.n-layout-sider-scroll-container) {
+  overflow: hidden !important;
 }
 
 .main-content {
