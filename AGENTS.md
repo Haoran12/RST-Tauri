@@ -2,7 +2,7 @@
 
 ## ⚠️ HIGHEST PRIORITY INSTRUCTION
 
-**Before every conversation turn, check the repository status. If any code or documentation has been modified, you MUST commit to git.**
+**After every conversation turn, check the repository status. If any code or documentation has been modified, you MUST commit to git.**
 
 ## Project Structure & Module Organization
 

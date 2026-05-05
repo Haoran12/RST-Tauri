@@ -397,10 +397,37 @@ pub async fn save_preset(app: AppHandle, preset: PresetFile) -> Result<(), Strin
         return Err("Preset must have a name".to_string());
     }
 
-    let value =
-        serde_json::to_value(&preset).map_err(|e| format!("Failed to serialize preset: {}", e))?;
+    // 过滤内置条目，只保存用户自定义条目和启用/排序状态
+    let preset_to_save = filter_builtin_items_for_save(preset);
 
-    store.write(&format!("presets/{}.json", preset.name), &value)
+    let value = serde_json::to_value(&preset_to_save)
+        .map_err(|e| format!("Failed to serialize preset: {}", e))?;
+
+    store.write(&format!("presets/{}.json", preset_to_save.name), &value)
+}
+
+/// 过滤内置条目，准备保存
+///
+/// 保存时只保留：
+/// 1. 用户自定义的 prompts 条目
+/// 2. 内置条目的启用状态和排序位置
+fn filter_builtin_items_for_save(mut preset: PresetFile) -> PresetFile {
+    if let Some(prompt) = &mut preset.prompt {
+        // 过滤 prompts，只保留非内置条目
+        prompt.prompts.retain(|item| !item.identifier.starts_with("builtin:"));
+
+        // 过滤 prompt_order，只保留启用状态和排序位置
+        for order in &mut prompt.prompt_order {
+            for item in &mut order.order {
+                // 内置条目只保留 enabled 和 position，清除其他字段
+                if item.identifier.starts_with("builtin:") {
+                    // 保持 enabled 和 position 即可
+                }
+            }
+        }
+    }
+
+    preset
 }
 
 /// 删除预设

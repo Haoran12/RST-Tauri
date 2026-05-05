@@ -4,13 +4,13 @@
 
 ## ⚠️ 最高指令
 
-**每轮对话开始之前，都必须检查仓库状态。只要有代码/文档被修改了，就必须提交 git。**
+**每轮对话结束后，都必须检查仓库状态。只要有代码/文档被修改了，就必须提交 git。**
 
 ## 项目概述
 
 RST-Tauri 是基于 Tauri + Vue 3 + Rust 的双模式 AI 聊天应用：
 - **SillyTavern 模式 (ST)**：复刻 SillyTavern 体验，JSON 文件存储
-- **Agent 模式**：高级角色扮演系统，SQLite 存储，三层语义隔离
+- **Agent 模式**：高级角色扮演系统, 动态演化机制，SQLite 存储，三层语义隔离
 
 技术栈：
 - 前端：Vue 3 + TypeScript + Naive UI + Pinia + Vue Router
