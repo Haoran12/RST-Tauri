@@ -130,7 +130,7 @@ function getCharacterWorldLoreId(character: CharacterCard | null) {
 }
 
 const sessionWorldbooks = computed(() => {
-  const result: Array<{ loreId: string; label: string; source: string }> = []
+  const result: Array<{ loreId: string; label: string; source: string; enabled: boolean }> = []
   const seen = new Set<string>()
   const disabled = new Set(chatStore.currentSession?.chat_metadata?.disabled_world_info ?? [])
 
