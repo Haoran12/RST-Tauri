@@ -16,10 +16,12 @@ import {
   type UploadCustomRequestOptions,
 } from 'naive-ui'
 import { useWorldbooksStore } from '@/stores/worldbooks'
+import { useRuntimeStore } from '@/stores/runtime'
 import WorldbookEntryEditor from '@/components/st/worldbook/WorldbookEntryEditor.vue'
 import type { WorldInfoEntry } from '@/types/st'
 
 const store = useWorldbooksStore()
+const runtimeStore = useRuntimeStore()
 const message = useMessage()
 
 // Modal state
@@ -29,11 +31,12 @@ const showEditMetaModal = ref(false)
 const editName = ref('')
 const editDescription = ref('')
 
-// Global settings state
+// Global settings state (application-level)
 const showGlobalSettings = ref(false)
-const globalScanDepth = ref<number | null>(null)
-const globalTokenBudget = ref<number | null>(null)
-const globalRecursiveScanning = ref(false)
+const globalScanDepth = ref(4)
+const globalTokenBudgetPercent = ref(25)
+const globalTokenBudgetCap = ref(0)
+const globalRecursiveScanning = ref(true)
 
 // Load worldbooks on mount
 onMounted(() => {
@@ -53,31 +56,31 @@ function handleCreateWorldbookEvent() {
 }
 
 function handleShowGlobalSettingsEvent() {
-  // Load current values from worldbook
-  if (store.currentWorldbook) {
-    globalScanDepth.value = store.currentWorldbook.scan_depth ?? null
-    globalTokenBudget.value = store.currentWorldbook.token_budget ?? null
-    globalRecursiveScanning.value = store.currentWorldbook.recursive_scanning ?? false
-  }
+  // Load current values from application-level settings
+  const settings = runtimeStore.worldInfoSettings
+  globalScanDepth.value = settings.world_info_depth
+  globalTokenBudgetPercent.value = settings.world_info_budget
+  globalTokenBudgetCap.value = settings.world_info_budget_cap
+  globalRecursiveScanning.value = settings.world_info_recursive
   showGlobalSettings.value = true
 }
 
-// Save global settings
+// Save global settings (application-level)
 async function saveGlobalSettings() {
-  if (!store.currentWorldbook) return
-
   try {
-    // Update local state
-    store.currentWorldbook.scan_depth = globalScanDepth.value
-    store.currentWorldbook.token_budget = globalTokenBudget.value
-    store.currentWorldbook.recursive_scanning = globalRecursiveScanning.value
-
-    // Save to file
-    await store.saveCurrentWorldbook()
+    await runtimeStore.updateWorldInfoSettings({
+      world_info_depth: globalScanDepth.value,
+      world_info_budget: globalTokenBudgetPercent.value,
+      world_info_budget_cap: globalTokenBudgetCap.value,
+      world_info_recursive: globalRecursiveScanning.value,
+    })
 
     message.success('全局设置已保存')
     showGlobalSettings.value = false
   } catch (e) {
+    message.error(String(e))
+  }
+}
     message.error(String(e))
   }
 }
@@ -344,22 +347,26 @@ async function handleExport() {
       style="width: 400px"
     >
       <NForm label-placement="left" label-width="120px">
-        <NFormItem label="全局扫描深度">
+        <NFormItem label="扫描深度">
           <NInputNumber
             v-model:value="globalScanDepth"
             :min="1"
             :max="999"
-            clearable
-            placeholder="默认"
             style="width: 100%"
           />
         </NFormItem>
-        <NFormItem label="全局 Token 预算">
+        <NFormItem label="Token 预算 (%)">
           <NInputNumber
-            v-model:value="globalTokenBudget"
+            v-model:value="globalTokenBudgetPercent"
             :min="1"
-            clearable
-            placeholder="默认"
+            :max="100"
+            style="width: 100%"
+          />
+        </NFormItem>
+        <NFormItem label="Token 预算上限">
+          <NInputNumber
+            v-model:value="globalTokenBudgetCap"
+            :min="0"
             style="width: 100%"
           />
         </NFormItem>
