@@ -315,6 +315,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .presets-view {
   height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 16px;
@@ -376,9 +377,11 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.section-editor-card :deep(.n-card__content) {
-  height: 100%;
+.section-editor-card :deep(.n-card-content) {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .section-header {

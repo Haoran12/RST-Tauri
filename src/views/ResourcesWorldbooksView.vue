@@ -379,6 +379,7 @@ async function handleExport() {
 <style scoped>
 .worldbooks-view {
   height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 16px;
@@ -442,9 +443,11 @@ async function handleExport() {
   overflow: hidden;
 }
 
-.entry-editor-card :deep(.n-card__content) {
-  height: 100%;
+.entry-editor-card :deep(.n-card-content) {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .no-entry-selected {
