@@ -9,9 +9,7 @@ import {
   NForm,
   NFormItem,
   NInputNumber,
-  NSwitch,
   NUpload,
-  NDivider,
   NText,
   useMessage,
   type UploadCustomRequestOptions,
@@ -29,9 +27,6 @@ const createName = ref('')
 const showEditMetaModal = ref(false)
 const editName = ref('')
 const editDescription = ref('')
-const editScanDepth = ref<number | null>(null)
-const editTokenBudget = ref<number | null>(null)
-const editRecursiveScanning = ref(false)
 
 // Global settings state
 const showGlobalSettings = ref(false)
@@ -82,9 +77,6 @@ function openEditMetaModal() {
   if (!store.currentWorldbook) return
   editName.value = store.currentWorldbook.name || ''
   editDescription.value = store.currentWorldbook.description || ''
-  editScanDepth.value = store.currentWorldbook.scan_depth ?? null
-  editTokenBudget.value = store.currentWorldbook.token_budget ?? null
-  editRecursiveScanning.value = store.currentWorldbook.recursive_scanning ?? false
   showEditMetaModal.value = true
 }
 
@@ -100,9 +92,6 @@ async function saveMeta() {
     if (store.currentWorldbook) {
       store.currentWorldbook.name = editName.value.trim()
       store.currentWorldbook.description = editDescription.value.trim()
-      store.currentWorldbook.scan_depth = editScanDepth.value
-      store.currentWorldbook.token_budget = editTokenBudget.value
-      store.currentWorldbook.recursive_scanning = editRecursiveScanning.value
     }
 
     // Save to file
@@ -315,27 +304,6 @@ async function handleExport() {
             type="textarea"
             placeholder="世界书描述"
           />
-        </NFormItem>
-        <NDivider>全局设置</NDivider>
-        <NFormItem label="扫描深度">
-          <NInputNumber
-            v-model:value="editScanDepth"
-            :min="1"
-            :max="999"
-            placeholder="默认"
-            clearable
-          />
-        </NFormItem>
-        <NFormItem label="Token 预算">
-          <NInputNumber
-            v-model:value="editTokenBudget"
-            :min="1"
-            placeholder="默认"
-            clearable
-          />
-        </NFormItem>
-        <NFormItem label="递归扫描">
-          <NSwitch v-model:value="editRecursiveScanning" />
         </NFormItem>
       </NForm>
     </NModal>
