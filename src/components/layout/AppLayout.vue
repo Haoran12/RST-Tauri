@@ -30,6 +30,20 @@ const contextSiderContentStyle = {
   flexDirection: 'column',
   overflow: 'hidden',
 } as const
+
+const mainLayoutContentStyle = {
+  height: '100%',
+  minHeight: '0',
+  overflow: 'hidden',
+} as const
+
+const mainContentStyle = {
+  height: '100%',
+  minHeight: '0',
+  display: 'flex',
+  flexDirection: 'column',
+  overflow: 'hidden',
+} as const
 </script>
 
 <template>
@@ -38,7 +52,12 @@ const contextSiderContentStyle = {
     <AppNav />
 
     <!-- Main Layout Area -->
-    <NLayout class="main-layout" has-sider :native-scrollbar="false">
+    <NLayout
+      class="main-layout"
+      has-sider
+      :native-scrollbar="true"
+      :content-style="mainLayoutContentStyle"
+    >
       <!-- Context List -->
       <NLayoutSider
         v-if="showContextList"
@@ -52,7 +71,11 @@ const contextSiderContentStyle = {
       </NLayoutSider>
 
       <!-- Main Content -->
-      <NLayoutContent class="main-content" :native-scrollbar="false">
+      <NLayoutContent
+        class="main-content"
+        :native-scrollbar="true"
+        :content-style="mainContentStyle"
+      >
         <router-view />
       </NLayoutContent>
 
@@ -81,6 +104,7 @@ const contextSiderContentStyle = {
   flex: 1;
   min-width: 0;
   min-height: 0;
+  height: 100%;
 }
 
 .context-sider {
@@ -93,6 +117,9 @@ const contextSiderContentStyle = {
 
 .main-content {
   height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .main-content :deep(.n-layout-scroll-container) {
