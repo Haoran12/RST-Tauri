@@ -734,6 +734,7 @@ watch(currentWorldId, async (worldId) => {
                 v-for="item in filteredPromptItems"
                 :key="item.identifier"
                 class="entry-item"
+                :class="{ 'entry-item-builtin': item.builtin }"
               >
                 <!-- Enable switch -->
                 <div class="entry-switch">
@@ -749,6 +750,14 @@ watch(currentWorldId, async (worldId) => {
                   <div class="entry-header">
                     <span class="entry-name">{{ item.name }}</span>
                     <NTag
+                      v-if="item.builtin"
+                      size="tiny"
+                      type="warning"
+                      :bordered="false"
+                    >
+                      内置
+                    </NTag>
+                    <NTag
                       size="tiny"
                       :type="getRoleType(item.role)"
                       :bordered="false"
@@ -758,13 +767,16 @@ watch(currentWorldId, async (worldId) => {
                   </div>
                   <div class="entry-meta">
                     <NText depth="3" class="entry-position">
-                      {{ item.identifier }}
+                      {{ item.description || item.identifier }}
                     </NText>
                   </div>
                 </div>
 
-                <!-- Delete button -->
-                <NPopconfirm @positive-click="deletePromptItem(item.identifier)">
+                <!-- Delete button (only for non-builtin items) -->
+                <NPopconfirm
+                  v-if="!item.builtin"
+                  @positive-click="deletePromptItem(item.identifier)"
+                >
                   <template #trigger>
                     <NButton quaternary circle size="tiny" type="error" class="delete-btn">
                       <template #icon>
@@ -976,6 +988,14 @@ watch(currentWorldId, async (worldId) => {
 
 .entry-item:hover {
   background-color: rgba(0, 0, 0, 0.04);
+}
+
+.entry-item-builtin {
+  background-color: rgba(250, 173, 20, 0.05);
+}
+
+.entry-item-builtin:hover {
+  background-color: rgba(250, 173, 20, 0.1);
 }
 
 .entry-selected {
