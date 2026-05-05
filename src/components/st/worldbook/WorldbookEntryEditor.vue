@@ -240,7 +240,7 @@ function cancelOverlay() {
               v-model:value="localEntry.order"
               :min="0"
               :max="999"
-              style="width: 80px;"
+              style="width: 100px;"
               @blur="saveChanges"
             />
           </div>
