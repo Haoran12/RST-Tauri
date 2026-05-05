@@ -251,7 +251,100 @@ fn load_combined_preset(store: &JsonStore, name: &str) -> Result<PresetFile, Str
         .read(&format!("presets/{}.json", name))
         .map_err(|e| format!("Failed to load preset '{}': {}", name, e))?;
 
-    serde_json::from_value(value).map_err(|e| format!("Failed to parse preset '{}': {}", name, e))
+    let mut preset: PresetFile = serde_json::from_value(value)
+        .map_err(|e| format!("Failed to parse preset '{}': {}", name, e))?;
+
+    // 合并内置提示词条目
+    merge_builtin_prompt_items(&mut preset);
+
+    Ok(preset)
+}
+
+/// 合并内置提示词条目到预设
+fn merge_builtin_prompt_items(preset: &mut PresetFile) {
+    use crate::st::preset::{
+        get_builtin_prompt_definitions, BuiltinPromptSource, PromptItem, PromptOrder,
+        PromptOrderItem,
+    };
+
+    let builtin_defs = get_builtin_prompt_definitions();
+
+    // 确保 prompt 字段存在
+    if preset.prompt.is_none() {
+        preset.prompt = Some(crate::st::preset::PromptPreset::new(&preset.name));
+    }
+    let prompt = preset.prompt.as_mut().unwrap();
+
+    // 确保 prompt_order 存在
+    if prompt.prompt_order.is_empty() {
+        prompt.prompt_order.push(PromptOrder {
+            character_id: 100000,
+            order: Vec::new(),
+        });
+    }
+
+    // 获取现有的 order map
+    let order = &mut prompt.prompt_order[0].order;
+    let order_map: std::collections::HashMap<String, (bool, Option<i32>)> = order
+        .iter()
+        .map(|item| {
+            (
+                item.identifier.clone(),
+                (item.enabled, item.position),
+            )
+        })
+        .collect();
+
+    // 清空并重建 prompts 列表，先添加内置条目
+    let mut new_prompts: Vec<PromptItem> = Vec::new();
+    let mut new_order: Vec<PromptOrderItem> = Vec::new();
+
+    for def in builtin_defs {
+        let (enabled, position) = order_map
+            .get(&def.identifier)
+            .copied()
+            .unwrap_or((def.default_enabled, None));
+
+        let editable = def.source == BuiltinPromptSource::Static;
+
+        new_prompts.push(PromptItem {
+            identifier: def.identifier.clone(),
+            name: def.name.clone(),
+            role: def.role.clone(),
+            content: def.content.clone(),
+            system_prompt: def.system_prompt,
+            marker: def.marker,
+            builtin: true,
+            editable,
+            description: def.description.clone(),
+        });
+
+        new_order.push(PromptOrderItem {
+            identifier: def.identifier.clone(),
+            enabled,
+            position,
+        });
+    }
+
+    // 添加用户自定义条目（非内置）
+    for item in &prompt.prompts {
+        if !item.identifier.starts_with("builtin:") {
+            let (enabled, position) = order_map
+                .get(&item.identifier)
+                .copied()
+                .unwrap_or((true, None));
+
+            new_prompts.push(item.clone());
+            new_order.push(PromptOrderItem {
+                identifier: item.identifier.clone(),
+                enabled,
+                position,
+            });
+        }
+    }
+
+    prompt.prompts = new_prompts;
+    prompt.prompt_order[0].order = new_order;
 }
 
 /// 列出所有预设
