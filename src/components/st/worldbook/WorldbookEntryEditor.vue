@@ -509,13 +509,14 @@ function cancelOverlay() {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 16px 24px;
 }
 
 .inline-field {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+  padding: 4px 0;
 }
 
 .inline-label {
@@ -533,7 +534,7 @@ function cancelOverlay() {
 .match-targets-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 8px 16px;
+  gap: 12px 24px;
 }
 
 .content-preview {
