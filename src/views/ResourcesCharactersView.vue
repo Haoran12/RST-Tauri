@@ -11,6 +11,9 @@ import CharacterList from '@/components/st/character/CharacterList.vue'
 <style scoped>
 .characters-view {
   height: 100%;
-  overflow: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 </style>

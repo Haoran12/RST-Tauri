@@ -14,6 +14,7 @@ use std::collections::HashMap;
 /// Sampler 预设
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SamplerPreset {
+    #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub source_api_id: Option<String>,
@@ -93,8 +94,12 @@ pub struct SamplerPreset {
     pub provider_overrides: HashMap<String, HashMap<String, serde_json::Value>>,
 }
 
-fn default_temperature() -> f64 { 1.0 }
-fn default_top_p() -> f64 { 1.0 }
+fn default_temperature() -> f64 {
+    1.0
+}
+fn default_top_p() -> f64 {
+    1.0
+}
 
 impl SamplerPreset {
     pub fn new(name: &str) -> Self {
@@ -142,6 +147,7 @@ impl SamplerPreset {
 /// Instruct 模板
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstructTemplate {
+    #[serde(default)]
     pub name: String,
 
     // 序列定义
@@ -201,7 +207,9 @@ pub struct InstructTemplate {
     pub extensions: HashMap<String, serde_json::Value>,
 }
 
-fn default_names_behavior() -> String { "none".to_string() }
+fn default_names_behavior() -> String {
+    "none".to_string()
+}
 
 impl InstructTemplate {
     pub fn new(name: &str) -> Self {
@@ -239,6 +247,7 @@ impl InstructTemplate {
 /// Context 模板
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextTemplate {
+    #[serde(default)]
     pub name: String,
 
     // 模板内容
@@ -303,6 +312,7 @@ impl ContextTemplate {
 /// System Prompt 模板
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemPrompt {
+    #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub content: String,
@@ -327,6 +337,7 @@ impl SystemPrompt {
 /// Reasoning 模板
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReasoningTemplate {
+    #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub prefix: String,
@@ -388,6 +399,7 @@ pub struct PromptOrder {
 /// Prompt 预设
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptPreset {
+    #[serde(default)]
     pub name: String,
 
     // 提示词列表

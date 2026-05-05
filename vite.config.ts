@@ -20,6 +20,31 @@ export default defineConfig({
     target: 'esnext',
     minify: !process.env.TAURI_DEBUG ? 'esbuild' : false,
     sourcemap: !!process.env.TAURI_DEBUG,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) {
+            return
+          }
+          if (id.includes('@tauri-apps')) {
+            return 'tauri'
+          }
+          if (id.includes('@vicons')) {
+            return 'icons'
+          }
+          if (id.includes('@codemirror') || id.includes('codemirror') || id.includes('yaml')) {
+            return 'editor'
+          }
+          if (id.includes('vue') || id.includes('pinia') || id.includes('vue-router')) {
+            return 'vue-vendor'
+          }
+          if (id.includes('naive-ui')) {
+            return 'naive-ui'
+          }
+          return 'vendor'
+        },
+      },
+    },
   },
   // Env variables starting with TAURI_ are injected
   envPrefix: ['VITE_', 'TAURI_'],

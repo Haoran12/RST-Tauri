@@ -87,27 +87,25 @@ impl LogRetentionManager {
 
     /// Get database file size
     async fn get_database_size(&self) -> Result<u64, String> {
-        let row = sqlx::query(
-            "SELECT SUM(pgsize) as size FROM dbstat WHERE aggregate = TRUE",
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| format!("Failed to get database size: {}", e))?;
+        let row = sqlx::query("SELECT SUM(pgsize) as size FROM dbstat WHERE aggregate = TRUE")
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to get database size: {}", e))?;
 
         use sqlx::Row;
-        Ok(row.and_then(|r| r.get::<Option<i64>, _>("size")).unwrap_or(0) as u64)
+        Ok(row
+            .and_then(|r| r.get::<Option<i64>, _>("size"))
+            .unwrap_or(0) as u64)
     }
 
     /// Delete old LLM logs based on retention policy
     async fn delete_old_llm_logs(&self) -> Result<u64, String> {
         let cutoff = Utc::now() - chrono::Duration::days(self.default_retention_days);
-        let result = sqlx::query(
-            "DELETE FROM llm_call_logs WHERE created_at < ?",
-        )
-        .bind(cutoff.to_rfc3339())
-        .execute(&self.pool)
-        .await
-        .map_err(|e| format!("Failed to delete old LLM logs: {}", e))?;
+        let result = sqlx::query("DELETE FROM llm_call_logs WHERE created_at < ?")
+            .bind(cutoff.to_rfc3339())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to delete old LLM logs: {}", e))?;
 
         Ok(result.rows_affected())
     }
@@ -115,19 +113,21 @@ impl LogRetentionManager {
     /// Delete old event logs based on retention policy
     async fn delete_old_event_logs(&self) -> Result<u64, String> {
         let cutoff = Utc::now() - chrono::Duration::days(self.default_retention_days);
-        let result = sqlx::query(
-            "DELETE FROM app_event_logs WHERE created_at < ?",
-        )
-        .bind(cutoff.to_rfc3339())
-        .execute(&self.pool)
-        .await
-        .map_err(|e| format!("Failed to delete old event logs: {}", e))?;
+        let result = sqlx::query("DELETE FROM app_event_logs WHERE created_at < ?")
+            .bind(cutoff.to_rfc3339())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to delete old event logs: {}", e))?;
 
         Ok(result.rows_affected())
     }
 
     /// Update retention state
-    async fn update_retention_state(&self, now: &chrono::DateTime<Utc>, size: u64) -> Result<(), String> {
+    async fn update_retention_state(
+        &self,
+        now: &chrono::DateTime<Utc>,
+        size: u64,
+    ) -> Result<(), String> {
         let retention_id = uuid::Uuid::new_v4().to_string();
         let cleanup_needed = size > self.default_size_limit_bytes;
 

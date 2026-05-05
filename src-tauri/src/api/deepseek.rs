@@ -4,6 +4,7 @@ use crate::api::openai_chat::OpenAIChatProvider;
 use crate::api::provider::*;
 use async_trait::async_trait;
 use futures::Stream;
+use std::path::PathBuf;
 use std::pin::Pin;
 
 /// DeepSeek uses OpenAI Chat Completions compatible API
@@ -12,10 +13,15 @@ pub struct DeepSeekProvider {
 }
 
 impl DeepSeekProvider {
-    pub fn new(api_key: String, base_url: Option<String>, default_model: String) -> Self {
+    pub fn new(
+        api_key: String,
+        base_url: Option<String>,
+        default_model: String,
+        data_dir: Option<PathBuf>,
+    ) -> Self {
         let base_url = base_url.unwrap_or_else(|| "https://api.deepseek.com/v1".to_string());
         Self {
-            inner: OpenAIChatProvider::new(api_key, Some(base_url), default_model),
+            inner: OpenAIChatProvider::new(api_key, Some(base_url), default_model, data_dir),
         }
     }
 }
@@ -32,6 +38,10 @@ impl AIProvider for DeepSeekProvider {
             "deepseek-coder".to_string(),
             "deepseek-reasoner".to_string(),
         ]
+    }
+
+    async fn list_models(&self) -> Result<Vec<ModelInfo>, String> {
+        self.inner.list_models().await
     }
 
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, String> {

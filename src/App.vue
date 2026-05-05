@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { NConfigProvider, NMessageProvider, NDialogProvider, darkTheme, lightTheme } from 'naive-ui'
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useAppShellStore } from '@/stores/appShell'
 import AppLayout from '@/components/layout/AppLayout.vue'
 
@@ -17,6 +17,22 @@ const theme = computed(() => {
   // TODO: implement system theme detection
   return lightTheme
 })
+
+// Sync theme class to html element for CSS variables
+watch(
+  () => appShell.theme,
+  (themeValue) => {
+    const html = document.documentElement
+    html.classList.remove('dark', 'light')
+    if (themeValue === 'dark') {
+      html.classList.add('dark')
+    } else if (themeValue === 'light') {
+      html.classList.add('light')
+    }
+    // 'system' - let CSS media query handle it (no class)
+  },
+  { immediate: true }
+)
 </script>
 
 <template>

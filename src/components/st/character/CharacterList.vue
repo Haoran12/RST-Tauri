@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
-  NCard,
   NButton,
   NEmpty,
   NSpin,
-  NGrid,
-  NGi,
   NUpload,
   NModal,
   NText,
@@ -18,23 +16,33 @@ import CharacterEditor from './CharacterEditor.vue'
 
 const store = useCharactersStore()
 const message = useMessage()
+const route = useRoute()
+const router = useRouter()
 
 const showImportModal = ref(false)
-const showEditorModal = ref(false)
-const selectedCharacterId = ref<string | null>(null)
-
-// Avatar URLs cache
-const avatarUrls = ref<Map<string, string>>(new Map())
 
 onMounted(async () => {
   await store.loadCharacters()
 })
 
-async function loadAvatarUrl(id: string) {
-  const url = await store.getAvatarUrl(id)
-  if (url) {
-    avatarUrls.value.set(id, url)
-  }
+const selectedCharacterId = computed(() => {
+  const value = route.query.character
+  return typeof value === 'string' ? value : null
+})
+
+const selectedCharacter = computed(() =>
+  store.characters.find(item => item.id === selectedCharacterId.value) ?? null,
+)
+
+const selectedName = computed(() =>
+  selectedCharacter.value?.character.data.name ?? '角色卡详情',
+)
+
+async function selectCharacter(id: string | null) {
+  await router.replace({
+    name: 'resources-characters',
+    query: id ? { character: id } : {},
+  })
 }
 
 function handleImportPng(options: { file: UploadFileInfo }) {
@@ -49,6 +57,7 @@ function handleImportPng(options: { file: UploadFileInfo }) {
         message.info('该角色卡包含内嵌世界书，可手动导入')
       }
       showImportModal.value = false
+      void selectCharacter(result.id)
     })
     .catch((e) => {
       message.error(`导入失败: ${e}`)
@@ -67,15 +76,11 @@ function handleImportJson(options: { file: UploadFileInfo }) {
         message.info('该角色卡包含内嵌世界书，可手动导入')
       }
       showImportModal.value = false
+      void selectCharacter(result.id)
     })
     .catch((e) => {
       message.error(`导入失败: ${e}`)
     })
-}
-
-function handleEditCharacter(id: string) {
-  selectedCharacterId.value = id
-  showEditorModal.value = true
 }
 
 async function handleExportPng(id: string) {
@@ -120,6 +125,9 @@ async function handleImportWorldbook(id: string) {
 async function handleDeleteCharacter(id: string) {
   try {
     await store.deleteCharacterById(id)
+    if (selectedCharacterId.value === id) {
+      await selectCharacter(null)
+    }
     message.success('删除成功')
   } catch (e) {
     message.error(`删除失败: ${e}`)
@@ -130,79 +138,67 @@ async function handleDeleteCharacter(id: string) {
 <template>
   <div class="character-list">
     <NSpin :show="store.isLoading">
-      <!-- Header -->
       <div class="header">
-        <NText strong size="large">角色卡列表</NText>
-        <NButton type="primary" @click="showImportModal = true">
-          导入角色卡
-        </NButton>
+        <div class="header-main">
+          <NText strong size="large">{{ selectedName }}</NText>
+          <NText depth="3" size="small">
+            {{ selectedCharacter ? '从左侧角色卡列表切换当前内容' : '从左侧选择一个角色卡查看内容' }}
+          </NText>
+        </div>
+        <div class="header-actions">
+          <NButton
+            v-if="selectedCharacterId"
+            secondary
+            @click="handleExportPng(selectedCharacterId)"
+          >
+            导出 PNG
+          </NButton>
+          <NButton
+            v-if="selectedCharacterId"
+            secondary
+            @click="handleExportJson(selectedCharacterId)"
+          >
+            导出 JSON
+          </NButton>
+          <NButton
+            v-if="selectedCharacterId && selectedCharacter?.character.data.character_book"
+            secondary
+            type="info"
+            @click="handleImportWorldbook(selectedCharacterId)"
+          >
+            导入世界书
+          </NButton>
+          <NButton
+            v-if="selectedCharacterId"
+            secondary
+            type="error"
+            @click="handleDeleteCharacter(selectedCharacterId)"
+          >
+            删除
+          </NButton>
+          <NButton type="primary" @click="showImportModal = true">
+            导入角色卡
+          </NButton>
+        </div>
       </div>
 
-      <!-- Character Grid -->
-      <NGrid v-if="store.characters.length > 0" :cols="4" :x-gap="16" :y-gap="16">
-        <NGi v-for="(character, index) in store.characters" :key="index">
-          <NCard
-            :title="character.data.name"
-            hoverable
-            @click="handleEditCharacter(String(index))"
-          >
-            <template #cover>
-              <div class="avatar-container">
-                <img
-                  v-if="avatarUrls.get(String(index))"
-                  :src="avatarUrls.get(String(index))"
-                  class="avatar"
-                  @load="loadAvatarUrl(String(index))"
-                />
-                <div v-else class="avatar-placeholder">
-                  <NText>无头像</NText>
-                </div>
-              </div>
-            </template>
+      <div class="editor-panel">
+        <CharacterEditor
+          v-if="selectedCharacterId"
+          :character-id="selectedCharacterId"
+          :close-on-save="false"
+          @close="selectCharacter(null)"
+        />
+        <NEmpty
+          v-else-if="store.characters.length > 0"
+          description="从左侧选择一个角色卡"
+        />
+        <NEmpty
+          v-else
+          description="暂无角色卡，请导入"
+        />
+      </div>
 
-            <div class="card-content">
-              <NText depth="3" :line-clamp="2">
-                {{ character.data.description || '无描述' }}
-              </NText>
-
-              <div v-if="character.data.character_book" class="worldbook-badge">
-                <NText type="info" size="small">含内嵌世界书</NText>
-              </div>
-            </div>
-
-            <template #action>
-              <div class="card-actions">
-                <NButton size="small" @click.stop="handleExportPng(String(index))">
-                  导出 PNG
-                </NButton>
-                <NButton size="small" @click.stop="handleExportJson(String(index))">
-                  导出 JSON
-                </NButton>
-                <NButton
-                  v-if="character.data.character_book"
-                  size="small"
-                  type="info"
-                  @click.stop="handleImportWorldbook(String(index))"
-                >
-                  导入世界书
-                </NButton>
-                <NButton
-                  size="small"
-                  type="error"
-                  @click.stop="handleDeleteCharacter(String(index))"
-                >
-                  删除
-                </NButton>
-              </div>
-            </template>
-          </NCard>
-        </NGi>
-      </NGrid>
-
-      <!-- Empty State -->
-      <NEmpty v-else description="暂无角色卡，请导入" />
-
-      <!-- Import Modal -->
       <NModal
         v-model:show="showImportModal"
         preset="card"
@@ -227,66 +223,81 @@ async function handleDeleteCharacter(id: string) {
           </NUpload>
         </div>
       </NModal>
-
-      <!-- Editor Modal -->
-      <NModal
-        v-model:show="showEditorModal"
-        preset="card"
-        title="编辑角色卡"
-        style="width: 800px"
-      >
-        <CharacterEditor
-          v-if="selectedCharacterId"
-          :character-id="selectedCharacterId"
-        />
-      </NModal>
     </NSpin>
   </div>
 </template>
 
 <style scoped>
 .character-list {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 24px;
+}
+
+.character-list :deep(.n-spin-container),
+.character-list :deep(.n-spin-content) {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-shrink: 0;
 }
 
-.avatar-container {
-  width: 100%;
-  height: 200px;
+.header-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.header-actions {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #f5f5f5;
-}
-
-.avatar {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}
-
-.avatar-placeholder {
-  color: #999;
-}
-
-.card-content {
-  padding: 8px 0;
-}
-
-.worldbook-badge {
-  margin-top: 8px;
-}
-
-.card-actions {
-  display: flex;
+  justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.editor-panel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-surface, #fff);
+  border: 1px solid var(--color-border-subtle, #e0e0e6);
+  border-radius: 8px;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+}
+
+.editor-panel::-webkit-scrollbar {
+  width: 8px;
+}
+
+.editor-panel::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+}
+
+.editor-panel::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.5);
+  border-radius: 4px;
+  min-height: 30px;
+}
+
+.editor-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.7);
 }
 
 .import-options {

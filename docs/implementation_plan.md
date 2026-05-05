@@ -7,7 +7,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 
 ## 项目概述
 
-- **SillyTavern 模式**：复刻 SillyTavern 体验，支持角色卡 V3 PNG / JSON、外部世界书、预设、Regex 与 API 配置。ST 兼容资源使用 SillyTavern 文件形态：角色卡以 PNG metadata 为主，外部世界书以 `entries: Record<string, WorldInfoEntry>` JSON 保存，API 连接配置与角色卡 / 世界书 / 预设解耦。总览见 [70_st_mode.md](70_st_mode.md)，角色卡见 [71_st_character_cards.md](71_st_character_cards.md)，世界书模型见 [72_st_worldbook_model.md](72_st_worldbook_model.md)，注入流程见 [73_st_worldbook_injection.md](73_st_worldbook_injection.md)，预设见 [74_st_presets.md](74_st_presets.md)，运行时组装见 [75_st_runtime_assembly.md](75_st_runtime_assembly.md)，Regex 见 [76_st_regex.md](76_st_regex.md)。
+- **SillyTavern 模式**：复刻 SillyTavern 体验，支持角色卡 V3 PNG / JSON、外部世界书、预设、Regex、图片 / PDF 附件与 API 配置。ST 兼容资源使用 SillyTavern 文件形态：角色卡以 PNG metadata 为主，外部世界书以 `entries: Record<string, WorldInfoEntry>` JSON 保存，API 连接配置与角色卡 / 世界书 / 预设解耦；聊天附件以 RST 本地附件库 + 消息引用方式持久化。总览见 [70_st_mode.md](70_st_mode.md)，角色卡见 [71_st_character_cards.md](71_st_character_cards.md)，世界书模型见 [72_st_worldbook_model.md](72_st_worldbook_model.md)，注入流程见 [73_st_worldbook_injection.md](73_st_worldbook_injection.md)，预设见 [74_st_presets.md](74_st_presets.md)，运行时组装见 [75_st_runtime_assembly.md](75_st_runtime_assembly.md)，Regex 见 [76_st_regex.md](76_st_regex.md)，多模态附件见 [77_st_multimodal_attachments.md](77_st_multimodal_attachments.md)。
 - **Agent 模式**：基于 RP Agent 架构的高级角色扮演系统，分层"客观世界 / 人物具身状态 / 主观认知与意图 / 结果规划与状态更新 / 叙事输出"，SQLite 存储。数据模型入口见 [10_agent_data_model.md](10_agent_data_model.md)，运行时见 [11_agent_runtime.md](11_agent_runtime.md)，程序化派生见 [12_agent_simulation.md](12_agent_simulation.md)，对抗技能见 [19_agent_combat_and_skills.md](19_agent_combat_and_skills.md)，LLM I/O 入口见 [13_agent_llm_io.md](13_agent_llm_io.md)，场景节点见 [21_agent_scene_llm_io.md](21_agent_scene_llm_io.md)，结果/叙事节点见 [22_agent_outcome_narration_io.md](22_agent_outcome_narration_io.md)，持久化见 [14_agent_persistence.md](14_agent_persistence.md)，地点系统见 [15_agent_location_system.md](15_agent_location_system.md)，世界编辑器见 [40_agent_world_editor.md](40_agent_world_editor.md)。
 - **前端 UI**：应用 Shell、一级页面、路由、资源列表、检查面板、主题 token 与关键工作流见 [41_frontend_interaction.md](41_frontend_interaction.md)。跨 ST / Agent 的 Plain / JSON / YAML 结构化文本编辑器见 [42_structured_text_editor.md](42_structured_text_editor.md)。
 
@@ -43,7 +43,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 5. 基础聊天 + AI Provider 抽象。
 6. 集成 OpenAI Responses API、OpenAI Chat Completions API、DeepSeek API。
 7. 全局运行 Logs：`./data/logs/app_logs.sqlite` + Provider logging wrapper + 可配置清理上限（默认 1GB）。
-8. 基于 CodeMirror 6 的结构化文本编辑器：Plain / JSON / YAML 模式、语言包注册表、编辑时缩进、括号 / 引号诊断、JSON key quick fix 和父级 draft 集成。
+8. 结构化文本编辑器（规划中）：目标为基于 CodeMirror 6 提供 Plain / JSON / YAML 模式、语言包注册表、编辑时缩进、括号 / 引号诊断、JSON key quick fix 和父级 draft 集成；当前仓库尚未落地独立编辑器模块。
 
 ### 阶段二：SillyTavern 模式
 
@@ -57,7 +57,11 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 8. 关键词触发系统（含正则 / 匹配目标扩展）。
 9. Regex 扩展兼容（global / preset / scoped 脚本、prompt-only / display-only、内嵌脚本授权）。
 10. 预设系统：Sampler / Instruct / Context / System Prompt / Reasoning / Prompt Preset 导入导出；保留 ST 原字段，但运行时与 API Provider 连接配置解耦。
-11. 多 API 支持（加入 Anthropic Messages / Gemini / Claude Code Interface；GLM、本地模型或 Ollama 可作为后续扩展）；切换 API 配置不得改写角色卡、世界书、预设、Regex allow list 或聊天 metadata。
+11. ST 多模态附件：`./data/chat_attachments/` 本地附件库、`attachment_ref` 消息 parts、图片 / PDF 元数据、远端上传缓存、URL 导入先镜像到本地、聊天 JSON 不内嵌 base64。
+12. Provider 契约编译层：后端启动时加载 `config/llm_api_contracts.json`，编译为 `LlmApiContractsSnapshot`；统一供 `CapabilityResolver` / `ProviderRequestMapper` 使用，不允许散落硬编码 provider 规则。
+13. ST 多模态运行时：AttachmentResolver + CapabilityResolver + ProviderRequestMapper，多模态能力矩阵覆盖 OpenAI Responses / OpenAI Chat Completions / Anthropic Messages / Gemini；DeepSeek 与未声明 capability 的 Claude Code Interface 发送前 fail fast。
+14. Provider 契约连接缓存：按 `api_config_id + provider + protocol + model + base_url (+ provider_variant)` 缓存已编译契约视图，避免每次请求读盘解析 `llm_api_contracts.json`。
+15. 多 API 支持（加入 Anthropic Messages / Gemini / Claude Code Interface；GLM、本地模型或 Ollama 可作为后续扩展）；切换 API 配置不得改写角色卡、世界书、预设、Regex allow list、聊天 metadata 或历史 `attachment_ref`。
 
 ### 阶段三：Agent 模式 — 数据模型层
 
@@ -118,11 +122,12 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 
 ### 阶段七：用户角色扮演
 
-1. 用户角色选择。
-2. 用户输入心理活动 / 言行。
-3. 用户对结果规划 / 文风的"导演"权（DirectorHint）。
-4. 同一 World 下创建当前主线、过去线和未来预演会话。
-5. 过去线补完既有 HistoricalEvent 的开放细节，并按正史资格提升或保留为非正史。
+1. 会话视角选择：`Character`（从当前 World 角色中选择扮演对象）或 `Director`（世界外导演，不直接扮演角色）。
+2. 用户输入心理活动 / 言行：自然文本 + 轻量标记（`*...*`、引号、`[[导演块]]`），先经 InputPreparser 再交给 SceneStateExtractor。
+3. 用户对结果规划 / 文风的"导演"权（DirectorHint）；`Director` 模式默认只提供 SceneNarration / DirectorHint / MetaCommand，不直接驱动任意 NPC 的 IntentPlan / L3。
+4. 同一 World 下创建当前主线、过去线和未来预演会话；Agent 工作区提供 Session Launcher、角色 / 导演模式选择、`period_anchor` 选择与最近会话入口。
+5. 命令面板与元命令：`/scene` 切换场景锚点、`/back` 回退会话到历史 turn 并截断其后内容、`/fork` 复制当前 World 副本并进入；命令输入以 `/` 开头时绝对进入 Command 模式，未知命令或参数错误只 warning 并忽略。
+6. 过去线补完既有 HistoricalEvent 的开放细节，并按正史资格提升或保留为非正史。
 
 ### 阶段八：优化与扩展
 
@@ -139,28 +144,31 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 
 ### 前端
 
-- `src/stores/agent.ts` — Agent 状态管理。
-- `src/stores/agentWorldEditor.ts` — Agent 世界编辑器 draft、validation、impact 与提交状态。
 - `src/services/api.ts` — Tauri IPC 封装。
-- `src/components/shared/structured-text-editor/StructuredTextEditor.vue` — ST / Agent 共用的 CodeMirror 6 Plain / JSON / YAML 大文本编辑器。
-- `src/components/shared/structured-text-editor/cm6Setup.ts` — CodeMirror 6 extension 组合、theme、language compartments、lint 与 keymap 配置。
-- `src/components/shared/structured-text-editor/languageRegistry.ts` — Structured Text Editor 语言包注册表，管理 builtin / bundled / trusted_plugin language support。
-- `src/types/structuredText.ts` — StructuredTextBinding / Draft / Diagnostic 类型。
-- `src/components/agent/world-editor/WorldEditorShell.vue` — Agent 世界编辑器主界面。
-- `src/components/agent/CharacterMindView.vue` — 心智视图。
-- `src/components/agent/ValidationReport.vue` — 验证报告。
+- `src/stores/chat.ts` — ST 聊天状态管理。
+- `src/stores/runtime.ts` — 运行时组装、发送预览与 Provider 映射前端状态。
+- `src/views/STChatView.vue` — ST 聊天主界面与附件/发送流程入口。
+- `src/views/AgentWorldView.vue` — Agent 工作区概览页（当前为只读骨架）。
+- `src/views/AgentWorldEditorView.vue` — Agent World Editor 原型页（当前为表单草稿与 patch 预览骨架）。
+- `src/components/st/character/CharacterEditor.vue` — 角色卡编辑器。
+- `src/components/st/worldbook/WorldbookEntryEditor.vue` — 世界书词条编辑器。
 
 ### 后端
 
-- `src-tauri/src/agent/runtime.rs` — 主循环。
+- `src-tauri/src/agent/runtime/runtime.rs` — AgentRuntime 主循环骨架。
+- `src-tauri/src/agent/runtime/state_committer.rs` — 单写提交骨架。
+- `src-tauri/src/agent/runtime/turn_state.rs` — 回合临时状态辅助类型。
 - `src-tauri/src/agent/knowledge/store.rs` — 知识库 CRUD。
-- `src-tauri/src/agent/knowledge/access_policy.rs` — Knowledge 访问权限唯一入口。
-- `src-tauri/src/agent/knowledge/access.rs` — AccessibleKnowledge 构建。
+- `src-tauri/src/agent/knowledge/access_resolver.rs` — Knowledge 访问权限最终判定。
+- `src-tauri/src/agent/knowledge/access_protocol.rs` — AccessibleKnowledge 构建与索引预筛。
 - `src-tauri/src/agent/knowledge/reveal.rs` — 揭示事件处理。
 - `src-tauri/src/agent/location/resolver.rs` — 地点别名解析与父级链构建。
 - `src-tauri/src/agent/location/fact_resolver.rs` — 地区事实继承、自然地理影响与访问裁剪。
 - `src-tauri/src/agent/location/route_planner.rs` — 路线图与路程估算。
 - `src-tauri/src/agent/cognitive/cognitive_pass.rs` — 融合调用。
+- `src-tauri/src/agent/prompting/mod.rs` — PromptBuilder、schema 注入与预算报告。
+- `src-tauri/src/agent/simulation/scene_initializer.rs` — SceneInitializer LLM 节点。
+- `src-tauri/src/agent/simulation/scene_extractor.rs` — SceneStateExtractor LLM 节点。
 - `src-tauri/src/agent/simulation/scene_filter.rs` — 场景过滤（含 observable_facets）。
 - `src-tauri/src/agent/simulation/attribute_resolver.rs` — 基础属性 effective 值、AttributeTier / AttributeDelta 派生。
 - `src-tauri/src/agent/simulation/input_assembly.rs` — 拒绝 Layer 1 泄露。
@@ -168,7 +176,9 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 - `src-tauri/src/agent/simulation/physics_resolver.rs` — 物理与灵力数值骨架。
 - `src-tauri/src/agent/simulation/effect_validator.rs` — 技能契约与候选效果硬校验。
 - `src-tauri/src/agent/simulation/outcome_planner.rs` — OutcomePlanner LLM 编排候选结果。
+- `src-tauri/src/agent/presentation/surface_realizer.rs` — SurfaceRealizer LLM 节点。
 - `src-tauri/src/agent/validation/validator.rs` — 验证器入口。
+- `src-tauri/src/agent/validation/temporal_validator.rs` — 时间线一致性校验骨架。
 - `src-tauri/src/agent/world_editor/validator.rs` — World Editor patch 校验。
 - `src-tauri/src/agent/world_editor/commit.rs` — World Editor paused-only 单事务提交与 editor commit journal。
 - `src-tauri/src/agent/models/knowledge.rs` — KnowledgeEntry 定义。
@@ -176,11 +186,15 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 - `src-tauri/src/agent/models/scene.rs` — 场景模型。
 - `src-tauri/src/agent/models/mana_field.rs` — 灵力场。
 - `src-tauri/src/storage/sqlite_store.rs` — 存储层。
+- `src-tauri/src/storage/json_store.rs` — JSON 资源文件读写与 `safe_join` 路径约束。
+- `src-tauri/src/storage/st_resources.rs` — ST 资源模型与 API 配置读写。
+- `src-tauri/src/storage/attachment_upload_cache.rs` — 多模态附件远端上传缓存。
 - `src-tauri/src/config/loader.rs` / `validator.rs` / `registry.rs` — 运行配置加载、校验与快照发布。
-- `src-tauri/src/text_format/json.rs` / `yaml.rs` — 保存前 JSON / YAML 复检、格式化与 diagnostics。
+- `src-tauri/src/config/llm_contracts.rs` — `config/llm_api_contracts.json` 加载、编译与连接级契约缓存。
 - `src-tauri/src/logging/llm_logger.rs` — Provider logging wrapper。
 - `src-tauri/src/logging/event_logger.rs` — 应用异常事件日志。
 - `src-tauri/src/logging/retention.rs` — 读取 `RuntimeConfigSnapshot` 的日志清理策略。
+- `config/llm_api_contracts.json` — 一等 Provider 请求/响应字段白名单、协议差异、结构化输出与多模态输入契约清单。
 
 ---
 
@@ -199,12 +213,18 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 | 数据形态铁律 | 自由文本仅在三处出现：用户输入、SceneStateExtractor 输入、SurfaceRealizer 输出。SceneInitializer 只接收结构化 SceneSeed、llm_readable 公开上下文与场景相关私有约束，其他全程结构化 JSON | 避免规则匹配失效与"屎山"起点 |
 | 三层数据语义 | Layer 1 (Truth) / Layer 2 (Per-Character Access) / Layer 3 (Subjective)，强制隔离 | 受限 LLM 不接触 Layer 1 原始对象；God-read 节点只产出候选更新，防止全知泄露与直接写状态 |
 | 同 World 多时期会话 | World 维护 `WorldMainlineCursor`；`AgentSession.period_anchor` 早于主线光标时进入过去线，同一 World 多份聊天共享 canonical Truth | 用户可扮演不同时期 / 不同人物补完世界，但聊天会话不等于独立世界状态 |
+| 会话视角 | `AgentSession.player_mode` 明确区分 `Character` 与 `Director`；导演是偏置输入视角，不是管理员权限 | 避免 `player_character_id = null` 的语义歧义，并把玩家扮演权限与导演偏置权限分开 |
 | 过去线正史资格 | 过去线读取结构化 TruthGuidance 引导场景与仲裁；硬冲突只警告不中断，用户选择冲突后非正史或整条非正史 | 保留自由游玩体验，同时防止矛盾内容污染正史 |
 | 正史与 provisional truth | 过去线新细节先写 `provisional_session_truth`；只有无冲突且仍具正史资格时才提升为 canonical Knowledge / Event | 避免生成过程中把后续可能废弃的细节直接写入世界真相 |
+| 输入预解析 | 用户输入先经轻量 InputPreparser：`*...*`、`[[...]]`、引号片段与 `/command` 分段；command 命中时直接短路到 MetaCommand | 提升 RP 输入解析稳定性，同时保持自然输入体验，不把所有语义判断都塞给 LLM |
+| Agent 元命令 | `/scene`、`/back`、`/fork` 使用前端命令面板 + 稳定引用，不要求用户手写复杂参数；`/back` 是受依赖检查保护的会话回退，`/fork` 是复制 World 而非同 World 平行主线 | 保持工具型流畅体验，同时不破坏 canonical rollback 与单主线约束 |
 | 知识统一模型 | KnowledgeEntry 统一承载世界/势力/角色档案/记忆，按 access_policy 谓词控制，并维护 SQLite 访问派生索引 | 单一访问权限入口（KnowledgeAccessResolver），索引只做候选预筛 |
 | ST 资源兼容形态 | ST 模式角色卡以 PNG metadata 为主，JSON 只作为导入/导出形态；外部世界书持久化必须是 `entries: Record<string, WorldInfoEntry>`，数组只作 UI / 运行时临时视图；预设和 Regex 保留 ST 原字段 | 避免导入导出与 SillyTavern 真实代码不兼容，同时防止编辑器内部视图污染文件格式 |
 | ST API 解耦边界 | API 配置只保存 provider、endpoint、model、key、代理和超时；角色卡、世界书、预设、聊天 metadata 与 Regex allow list 不以 API 配置分组，切换 API 配置不改写任何 ST 资源文件 | 支持同一 ST 资源跨 Provider 使用，避免连接配置切换造成角色/世界/预设副作用 |
+| ST 多模态附件 | 图片 / PDF 源文件独立保存在 `./data/chat_attachments/`；聊天消息只保存 `attachment_ref`；Provider 远端 `file_id` / `file_uri` 只作运行时缓存；不支持多模态的 Provider 发送前 fail fast | 避免聊天 JSON 膨胀、外部 URL 漂移、远端句柄失效污染历史会话，以及“模型其实没看图/PDF”却被静默降级误导用户 |
 | 结构化文本编辑器 | ST 与 Agent 共用基于 CodeMirror 6 的 Structured Text Editor，首版内置 Plain / JSON / YAML，并通过受控语言包注册表支持后续扩展；ST content 即使以 JSON / YAML 或其他文本语言编辑也保存为 string，Agent structured content 必须解析为 `serde_json::Value` 后再交给业务 validator | 复用成熟编辑器能力，避免自研光标、选择、undo、缩进和 lint UI；第三方语言包属于可执行前端代码，必须走受信插件或预装机制 |
+| Provider 契约源 | `config/llm_api_contracts.json` 作为一等 Provider 适配的本地契约清单，约束 allowed/conditional/forbidden 字段、协议差异、结构化输出与多模态输入形态；后端必须在启动时编译为 `LlmApiContractsSnapshot` 并供请求热路径读取 | 避免把各 Provider 的字段白名单、多模态消息形态和降级边界散落到多个适配器里，减少协议漂移 |
+| Provider 契约缓存 | 针对当前启用的 API 连接按 `api_config_id + provider + protocol + model + base_url (+ provider_variant)` 缓存已编译契约视图；切换连接只失效对应项 | 避免每次请求重新读取/解析契约文件，同时让不同 endpoint / model / Claude Code 变体拥有独立能力判断 |
 | 地点系统 | LocationNode.parent_id 表达层级归属；LocationSpatialRelation 表达自然地理覆盖 / 穿过 / 重叠；LocationEdge 带权图表达相邻 / 路线；RegionFact 可沿 parent 链继承 | 支持地点归属、自然地理影响、地区事实默认适用与路程估算，同时避免把弱推断固化成硬设定 |
 | Agent 世界编辑器 | 首版只做结构化 CRUD：World settings、LocationGraph、KnowledgeEntry、CharacterRecord 与 L1 关系 / 授权；运行中提交必须 paused-only，并写独立 editor commit journal | 支持开局前建世界与运行中安全修订，同时避免作者编辑伪装成运行回合或绕过派生索引 / 校验边界 |
 | 场景域 God-read | SceneInitializer / SceneStateExtractor 可读取程序裁剪后的当前场景相关私有约束；不得全库读取隐藏 Knowledge / GodOnly，也不得把私有约束写成外显事实 | 避免初始化和输入解析与隐藏真相冲突，同时限制泄露面 |

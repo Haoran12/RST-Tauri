@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import {
   NForm,
   NFormItem,
   NInput,
   NButton,
+  NSpin,
   NSpace,
   NUpload,
   NText,
@@ -12,10 +13,17 @@ import {
   type UploadFileInfo,
 } from 'naive-ui'
 import { useCharactersStore } from '@/stores/characters'
+import { getCharacter, saveCharacter } from '@/services/storage'
 import type { TavernCardV3 } from '@/types/st'
+import type {
+  StructuredTextBinding,
+  StructuredTextLanguageId,
+} from '@/types/structuredText'
+import StructuredTextEditor from '@/components/shared/structured-text-editor/StructuredTextEditor.vue'
 
 const props = defineProps<{
   characterId: string
+  closeOnSave?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -27,27 +35,205 @@ const message = useMessage()
 
 const form = ref<TavernCardV3 | null>(null)
 const avatarUrl = ref<string | null>(null)
+const isLoading = ref(false)
+const isSaving = ref(false)
+const loadError = ref<string | null>(null)
+const isDirty = ref(false)
+const dirtyVersion = ref(0)
+const textModes = ref<Record<string, StructuredTextLanguageId>>({})
+const editorRefs = ref<Record<string, InstanceType<typeof StructuredTextEditor> | null>>({})
 
-onMounted(async () => {
-  await store.loadCharacter(props.characterId)
-  form.value = store.currentCharacter ? { ...store.currentCharacter } : null
-  avatarUrl.value = await store.getAvatarUrl(props.characterId)
+type CharacterTextFieldKey =
+  | 'description'
+  | 'personality'
+  | 'scenario'
+  | 'first_mes'
+  | 'mes_example'
+  | 'system_prompt'
+  | 'post_history_instructions'
+  | 'creator_notes'
+
+interface CharacterTextFieldConfig {
+  key: CharacterTextFieldKey
+  label: string
+  rows: number
+}
+
+const textFieldConfigs: CharacterTextFieldConfig[] = [
+  { key: 'description', label: '描述', rows: 4 },
+  { key: 'personality', label: '性格', rows: 3 },
+  { key: 'scenario', label: '场景', rows: 3 },
+  { key: 'first_mes', label: '第一条消息', rows: 4 },
+  { key: 'mes_example', label: '示例对话', rows: 4 },
+  { key: 'system_prompt', label: '系统提示词', rows: 3 },
+  { key: 'post_history_instructions', label: '后历史指令', rows: 2 },
+  { key: 'creator_notes', label: '创作者备注', rows: 2 },
+]
+
+const stringBinding: StructuredTextBinding = {
+  resourceKind: 'st_preset',
+  fieldPath: 'content',
+  allowedModes: ['plain', 'json', 'yaml'],
+  defaultMode: 'plain',
+  storageKind: 'string',
+}
+
+onMounted(() => {
+  void loadCharacterForEditor()
 })
+
+watch(
+  () => props.characterId,
+  async (_newId, oldId) => {
+    await persistCurrentCharacter({ characterId: oldId, silent: true, closeAfterSave: false })
+    await loadCharacterForEditor()
+  },
+)
+
+onBeforeUnmount(() => {
+  void persistCurrentCharacter({ silent: true, closeAfterSave: false })
+})
+
+async function loadCharacterForEditor() {
+  isLoading.value = true
+  loadError.value = null
+
+  try {
+    const character = await getCharacter(props.characterId)
+    store.currentCharacter = character
+    form.value = structuredClone(character)
+    avatarUrl.value = await store.getAvatarUrl(props.characterId)
+    textModes.value = Object.fromEntries(
+      textFieldConfigs.map(field => [field.key, 'plain' as StructuredTextLanguageId]),
+    )
+    isDirty.value = false
+  } catch (e) {
+    form.value = null
+    loadError.value = String(e)
+  } finally {
+    isLoading.value = false
+  }
+}
 
 const hasEmbeddedWorldbook = computed(
   () => form.value?.data.character_book != null
 )
 
-async function handleSave() {
+function markDirty() {
+  isDirty.value = true
+  dirtyVersion.value += 1
+}
+
+function updateTextField(key: CharacterTextFieldKey, value: string) {
   if (!form.value) return
+  form.value.data[key] = value
+  markDirty()
+}
+
+function updateStringField(
+  key: 'name' | 'creator' | 'character_version',
+  value: string,
+) {
+  if (!form.value) return
+  form.value.data[key] = value
+  markDirty()
+}
+
+function updateTags(value: string) {
+  if (!form.value) return
+  form.value.data.tags = value
+    .split(',')
+    .map(t => t.trim())
+    .filter(Boolean)
+  markDirty()
+}
+
+async function collectEditorText(silent: boolean) {
+  if (!form.value) return false
+
+  for (const field of textFieldConfigs) {
+    const editor = editorRefs.value[field.key]
+    if (!editor) {
+      continue
+    }
+
+    const result = await editor.validate()
+    if (result.diagnostics.some(item => item.severity === 'blocker')) {
+      if (!silent) {
+        message.error(`字段“${field.label}”存在 blocker，修复后才能保存。`)
+      }
+      return false
+    }
+
+    form.value.data[field.key] = String(result.text ?? '')
+  }
+
+  return true
+}
+
+function syncCharacterListItem(id: string, character: TavernCardV3) {
+  const index = store.characters.findIndex(item => item.id === id)
+  if (index >= 0) {
+    store.characters[index] = { id, character }
+  }
+}
+
+async function persistCurrentCharacter(options: {
+  characterId?: string
+  silent?: boolean
+  closeAfterSave?: boolean
+} = {}) {
+  if (!form.value || isLoading.value || isSaving.value || !isDirty.value) {
+    return
+  }
+
+  const silent = options.silent ?? false
+  const saveVersion = dirtyVersion.value
+  const id = options.characterId ?? props.characterId
+  isSaving.value = true
 
   try {
-    store.currentCharacter = form.value
-    await store.saveCurrentCharacter(props.characterId)
-    message.success('保存成功')
+    const canSave = await collectEditorText(silent)
+    if (!canSave || !form.value) {
+      return
+    }
+
+    const character = structuredClone(form.value)
+    store.currentCharacter = character
+    syncCharacterListItem(id, character)
+    await saveCharacter(id, character)
+    if (dirtyVersion.value === saveVersion) {
+      isDirty.value = false
+    }
+    if (!silent) {
+      message.success('保存成功')
+    }
+    if (options.closeAfterSave ?? (props.closeOnSave ?? true)) {
+      emit('close')
+    }
   } catch (e) {
-    message.error(`保存失败: ${e}`)
+    message.error(`${silent ? '自动保存失败' : '保存失败'}: ${e}`)
+  } finally {
+    isSaving.value = false
   }
+}
+
+async function handleSave() {
+  await persistCurrentCharacter({ silent: false })
+}
+
+function handleEditorFocusOut(event: FocusEvent) {
+  const nextTarget = event.relatedTarget
+  const currentTarget = event.currentTarget
+  if (
+    nextTarget instanceof Node &&
+    currentTarget instanceof HTMLElement &&
+    currentTarget.contains(nextTarget)
+  ) {
+    return
+  }
+
+  void persistCurrentCharacter({ silent: true, closeAfterSave: false })
 }
 
 async function handleAvatarUpload(options: { file: UploadFileInfo }) {
@@ -67,18 +253,24 @@ async function handleImportWorldbook() {
   try {
     const loreId = await store.importWorldbook(props.characterId)
     message.success(`世界书导入成功，ID: ${loreId}`)
-    // Reload character to get updated extensions
-    await store.loadCharacter(props.characterId)
-    form.value = store.currentCharacter ? { ...store.currentCharacter } : null
+    await loadCharacterForEditor()
   } catch (e) {
     message.error(`导入世界书失败: ${e}`)
   }
 }
+
+function setEditorRef(
+  key: CharacterTextFieldKey,
+  instance: InstanceType<typeof StructuredTextEditor> | null,
+) {
+  editorRefs.value[key] = instance
+}
 </script>
 
 <template>
-  <div class="character-editor">
-    <div v-if="form" class="editor-content">
+  <div class="character-editor" @focusout="handleEditorFocusOut">
+    <NSpin :show="isLoading">
+      <div v-if="form" class="editor-content">
       <!-- Avatar Section -->
       <div class="avatar-section">
         <div class="avatar-preview">
@@ -99,89 +291,48 @@ async function handleImportWorldbook() {
       <!-- Form Section -->
       <NForm label-placement="top">
         <NFormItem label="名称">
-          <NInput v-model:value="form.data.name" />
-        </NFormItem>
-
-        <NFormItem label="描述">
           <NInput
-            v-model:value="form.data.description"
-            type="textarea"
-            :rows="4"
+            :value="form.data.name"
+            @update:value="value => updateStringField('name', value)"
           />
         </NFormItem>
 
-        <NFormItem label="性格">
-          <NInput
-            v-model:value="form.data.personality"
-            type="textarea"
-            :rows="3"
-          />
-        </NFormItem>
-
-        <NFormItem label="场景">
-          <NInput
-            v-model:value="form.data.scenario"
-            type="textarea"
-            :rows="3"
-          />
-        </NFormItem>
-
-        <NFormItem label="第一条消息">
-          <NInput
-            v-model:value="form.data.first_mes"
-            type="textarea"
-            :rows="4"
-          />
-        </NFormItem>
-
-        <NFormItem label="示例对话">
-          <NInput
-            v-model:value="form.data.mes_example"
-            type="textarea"
-            :rows="4"
-          />
-        </NFormItem>
-
-        <NFormItem label="系统提示词">
-          <NInput
-            v-model:value="form.data.system_prompt"
-            type="textarea"
-            :rows="3"
-          />
-        </NFormItem>
-
-        <NFormItem label="后历史指令">
-          <NInput
-            v-model:value="form.data.post_history_instructions"
-            type="textarea"
-            :rows="2"
-          />
-        </NFormItem>
-
-        <NFormItem label="创作者备注">
-          <NInput
-            v-model:value="form.data.creator_notes"
-            type="textarea"
-            :rows="2"
+        <NFormItem
+          v-for="field in textFieldConfigs"
+          :key="field.key"
+          :label="field.label"
+        >
+          <StructuredTextEditor
+            :ref="(instance) => setEditorRef(field.key, instance as InstanceType<typeof StructuredTextEditor> | null)"
+            :model-value="form.data[field.key] ?? ''"
+            :mode="textModes[field.key] ?? 'plain'"
+            :binding="stringBinding"
+            :min-height="Math.max(180, field.rows * 30 + 60)"
+            :use-backend-validation="true"
+            @update:model-value="value => updateTextField(field.key, value)"
+            @update:mode="(mode) => { textModes[field.key] = mode }"
           />
         </NFormItem>
 
         <NFormItem label="标签">
           <NInput
             :value="form.data.tags?.join(', ')"
-            @update:value="
-              (v: string) =>
-                (form!.data.tags = v.split(',').map((t) => t.trim()).filter(Boolean))
-            "
+            @update:value="updateTags"
           />
         </NFormItem>
 
         <NFormItem label="创作者">
-          <NInput v-model:value="form.data.creator" />
+          <NInput
+            :value="form.data.creator"
+            @update:value="value => updateStringField('creator', value)"
+          />
         </NFormItem>
 
         <NFormItem label="角色版本">
-          <NInput v-model:value="form.data.character_version" />
+          <NInput
+            :value="form.data.character_version"
+            @update:value="value => updateStringField('character_version', value)"
+          />
         </NFormItem>
       </NForm>
 
@@ -199,19 +350,41 @@ async function handleImportWorldbook() {
       <!-- Actions -->
       <NSpace justify="end">
         <NButton @click="emit('close')">取消</NButton>
-        <NButton type="primary" @click="handleSave">保存</NButton>
+        <NButton type="primary" :loading="isSaving" @click="handleSave">保存</NButton>
       </NSpace>
-    </div>
+      </div>
 
-    <div v-else>
-      <NText>加载中...</NText>
-    </div>
+      <div v-else class="editor-empty">
+        <NText v-if="loadError" type="error">{{ loadError }}</NText>
+        <NText v-else>加载中...</NText>
+      </div>
+    </NSpin>
   </div>
 </template>
 
 <style scoped>
 .character-editor {
+  height: 100%;
+  overflow-y: auto;
   padding: 16px;
+  scrollbar-width: thin;
+}
+
+.character-editor::-webkit-scrollbar {
+  width: 6px;
+}
+
+.character-editor::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.character-editor::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 3px;
+}
+
+.character-editor::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .editor-content {
@@ -233,7 +406,7 @@ async function handleImportWorldbook() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f5f5f5;
+  background: var(--color-bg-subtle, #f5f5f5);
   border-radius: 8px;
 }
 
@@ -244,15 +417,20 @@ async function handleImportWorldbook() {
 }
 
 .avatar-placeholder {
-  color: #999;
+  color: var(--color-text-secondary, #999);
 }
 
 .worldbook-section {
   padding: 16px;
-  background: #f9f9f9;
+  background: var(--color-bg-subtle, #f9f9f9);
   border-radius: 8px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.editor-empty {
+  padding: 24px;
+  text-align: center;
 }
 </style>

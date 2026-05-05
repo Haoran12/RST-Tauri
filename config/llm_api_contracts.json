@@ -148,6 +148,39 @@
         "transport": "SSE",
         "terminal_event": "response.completed or response.failed; SDKs may expose typed events",
         "parse_policy": "Assemble response.output_text.delta for display, but persist raw events for logs."
+      },
+      "input_capabilities": {
+        "text": {"supported": true},
+        "image": {
+          "supported": true,
+          "content_part_types": ["input_image"],
+          "transport_options": [
+            {"kind": "inline_data_url", "field_paths": ["input[].content[].image_url"]},
+            {"kind": "provider_file", "field_paths": ["input[].content[].file_id"]}
+          ],
+          "detail_options": ["auto", "low", "high"],
+          "default_transport_policy": {
+            "small_one_shot": "inline_data_url",
+            "reused_or_large": "provider_file"
+          }
+        },
+        "pdf": {
+          "supported": true,
+          "content_part_types": ["input_file"],
+          "transport_options": [
+            {"kind": "provider_file", "field_paths": ["input[].content[].file_id"]},
+            {"kind": "inline_base64", "field_paths": ["input[].content[].file_data"]},
+            {"kind": "external_url", "field_paths": ["input[].content[].file_url"]}
+          ],
+          "default_transport_policy": {
+            "small_one_shot": "inline_base64",
+            "reused_or_large": "provider_file"
+          }
+        },
+        "product_policy_notes": [
+          "RST should prefer local source files plus inline or provider_file transports; do not rely on third-party URLs as the only durable source.",
+          "Provider file handles are cacheable runtime artifacts, not persistent source-of-truth user data."
+        ]
       }
     },
     "openai_chat_completions": {
@@ -233,6 +266,38 @@
         "chunk_object": "chat.completion.chunk",
         "terminal_event": "data: [DONE]",
         "core_chunk_fields": ["id", "object", "created", "model", "choices[].delta", "choices[].finish_reason", "usage"]
+      },
+      "input_capabilities": {
+        "text": {"supported": true},
+        "image": {
+          "supported": true,
+          "content_part_types": ["image_url"],
+          "transport_options": [
+            {"kind": "inline_data_url", "field_paths": ["messages[].content[].image_url.url"]},
+            {"kind": "external_url", "field_paths": ["messages[].content[].image_url.url"]}
+          ],
+          "detail_options": ["auto", "low", "high"],
+          "default_transport_policy": {
+            "small_one_shot": "inline_data_url",
+            "reused_or_large": "inline_data_url"
+          }
+        },
+        "pdf": {
+          "supported": true,
+          "content_part_types": ["file"],
+          "transport_options": [
+            {"kind": "provider_file", "field_paths": ["messages[].content[].file.file_id"]},
+            {"kind": "inline_base64", "field_paths": ["messages[].content[].file.file_data"]}
+          ],
+          "default_transport_policy": {
+            "small_one_shot": "inline_base64",
+            "reused_or_large": "provider_file"
+          }
+        },
+        "product_policy_notes": [
+          "For RST, prefer data URLs for image input rather than assuming a file_id-based image path.",
+          "For PDF input, prefer provider_file when a Files API handle is available."
+        ]
       }
     },
     "anthropic_messages": {
@@ -296,6 +361,38 @@
         "transport": "SSE",
         "event_types": ["message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop", "ping", "error"],
         "parse_policy": "Assemble text_delta from content_block_delta; read final stop_reason from message_delta."
+      },
+      "input_capabilities": {
+        "text": {"supported": true},
+        "image": {
+          "supported": true,
+          "content_part_types": ["image"],
+          "transport_options": [
+            {"kind": "inline_base64", "field_paths": ["messages[].content[].source"]},
+            {"kind": "provider_file", "field_paths": ["messages[].content[].source"]},
+            {"kind": "external_url", "field_paths": ["messages[].content[].source"]}
+          ],
+          "default_transport_policy": {
+            "small_one_shot": "inline_base64",
+            "reused_or_large": "provider_file"
+          }
+        },
+        "pdf": {
+          "supported": true,
+          "content_part_types": ["document"],
+          "transport_options": [
+            {"kind": "inline_base64", "field_paths": ["messages[].content[].source"]},
+            {"kind": "provider_file", "field_paths": ["messages[].content[].source"]},
+            {"kind": "external_url", "field_paths": ["messages[].content[].source"]}
+          ],
+          "default_transport_policy": {
+            "small_one_shot": "inline_base64",
+            "reused_or_large": "provider_file"
+          }
+        },
+        "product_policy_notes": [
+          "Anthropic supports image/document blocks, but RST should still keep a local source file and treat provider file IDs as cacheable runtime artifacts."
+        ]
       }
     },
     "anthropic_openai_compatible": {
@@ -390,6 +487,36 @@
         "transport": "REST streaming endpoint",
         "endpoint_path": "/v1beta/{model=models/*}:streamGenerateContent",
         "parse_policy": "Parse GenerateContentResponse chunks and assemble candidates[].content.parts[].text."
+      },
+      "input_capabilities": {
+        "text": {"supported": true},
+        "image": {
+          "supported": true,
+          "content_part_types": ["inlineData", "fileData"],
+          "transport_options": [
+            {"kind": "inline_base64", "field_paths": ["contents[].parts[].inlineData"]},
+            {"kind": "provider_file", "field_paths": ["contents[].parts[].fileData.fileUri"]}
+          ],
+          "default_transport_policy": {
+            "small_one_shot": "inline_base64",
+            "reused_or_large": "provider_file"
+          }
+        },
+        "pdf": {
+          "supported": true,
+          "content_part_types": ["inlineData", "fileData"],
+          "transport_options": [
+            {"kind": "inline_base64", "field_paths": ["contents[].parts[].inlineData"]},
+            {"kind": "provider_file", "field_paths": ["contents[].parts[].fileData.fileUri"]}
+          ],
+          "default_transport_policy": {
+            "small_one_shot": "inline_base64",
+            "reused_or_large": "provider_file"
+          }
+        },
+        "product_policy_notes": [
+          "Gemini Files API uses fileUri references. RST should not treat fileUri as a persistent source-of-truth replacement for local files."
+        ]
       }
     },
     "deepseek_chat": {
@@ -461,6 +588,197 @@
         "chunk_object": "chat.completion.chunk",
         "terminal_event": "data: [DONE]",
         "core_chunk_fields": ["id", "choices[].delta.content", "choices[].delta.reasoning_content", "choices[].finish_reason", "created", "model", "object", "usage"]
+      },
+      "input_capabilities": {
+        "text": {"supported": true},
+        "image": {
+          "supported": false,
+          "reason": "Current official DeepSeek chat contract documents messages[].content as text/null rather than multimodal content parts."
+        },
+        "pdf": {
+          "supported": false,
+          "reason": "Current official DeepSeek chat contract does not document native document/PDF message input."
+        },
+        "product_policy_notes": [
+          "RST should fail fast before request send when a chat contains image/PDF attachments for DeepSeek.",
+          "Do not silently OCR or extract text and pretend it is equivalent native multimodal input."
+        ]
+      }
+    },
+    "list_models": {
+      "openai": {
+        "endpoint": {
+          "method": "GET",
+          "path": "/v1/models",
+          "default_base_url": "https://api.openai.com"
+        },
+        "headers": {
+          "required": ["Authorization: Bearer <api_key>"],
+          "optional": []
+        },
+        "query_parameters": {
+          "optional": ["after", "before", "limit"]
+        },
+        "response_fields": {
+          "required_or_core": ["object", "data"],
+          "data_item_fields": ["data[].id", "data[].object", "data[].owned_by", "data[].created"],
+          "notes": "Returns list of available models. OpenAI-compatible format used by multiple providers."
+        },
+        "response_example": {
+          "object": "list",
+          "data": [
+            {"id": "gpt-4o", "object": "model", "owned_by": "openai", "created": 1715367049},
+            {"id": "gpt-4o-mini", "object": "model", "owned_by": "openai", "created": 1721172741}
+          ]
+        }
+      },
+      "openai_responses": {
+        "inherits": "list_models.openai",
+        "notes": "OpenAI Responses API uses the same /v1/models endpoint as Chat Completions."
+      },
+      "openai_chat": {
+        "inherits": "list_models.openai",
+        "notes": "OpenAI Chat Completions uses the same /v1/models endpoint."
+      },
+      "anthropic": {
+        "endpoint": {
+          "method": "GET",
+          "path": "/v1/models",
+          "default_base_url": "https://api.anthropic.com"
+        },
+        "headers": {
+          "required": ["x-api-key: <api_key>", "anthropic-version: 2023-06-01"],
+          "optional": []
+        },
+        "query_parameters": {
+          "optional": ["after_id", "before_id", "limit"],
+          "limit_default": 20,
+          "limit_max": 1000
+        },
+        "response_fields": {
+          "required_or_core": ["data", "has_more"],
+          "data_item_fields": [
+            "data[].id",
+            "data[].type",
+            "data[].display_name",
+            "data[].created_at",
+            "data[].max_input_tokens",
+            "data[].max_tokens",
+            "data[].capabilities"
+          ],
+          "capabilities_fields": [
+            "data[].capabilities.batch.supported",
+            "data[].capabilities.citations.supported",
+            "data[].capabilities.code_execution.supported",
+            "data[].capabilities.image_input.supported",
+            "data[].capabilities.pdf_input.supported",
+            "data[].capabilities.structured_outputs.supported",
+            "data[].capabilities.thinking.supported"
+          ],
+          "notes": "Anthropic returns rich model metadata including capabilities."
+        },
+        "response_example": {
+          "data": [
+            {
+              "id": "claude-sonnet-4-20250514",
+              "type": "model",
+              "display_name": "Claude Sonnet 4",
+              "created_at": "2025-05-14T00:00:00Z",
+              "max_input_tokens": 200000,
+              "max_tokens": 16384,
+              "capabilities": {
+                "batch": {"supported": true},
+                "citations": {"supported": true},
+                "code_execution": {"supported": true},
+                "image_input": {"supported": true},
+                "pdf_input": {"supported": true},
+                "structured_outputs": {"supported": true},
+                "thinking": {"supported": true}
+              }
+            }
+          ],
+          "has_more": false,
+          "first_id": "claude-opus-4-20250514",
+          "last_id": "claude-3-5-haiku-20241022"
+        }
+      },
+      "gemini": {
+        "endpoint": {
+          "method": "GET",
+          "path": "/v1beta/models",
+          "default_base_url": "https://generativelanguage.googleapis.com"
+        },
+        "auth": {
+          "supported": [
+            "Query parameter: ?key=<api_key>",
+            "Header: x-goog-api-key: <api_key>"
+          ],
+          "recommended": "Query parameter for simplicity"
+        },
+        "query_parameters": {
+          "optional": ["pageSize", "pageToken"],
+          "pageSize_max": 1000
+        },
+        "response_fields": {
+          "required_or_core": ["models"],
+          "model_item_fields": [
+            "models[].name",
+            "models[].version",
+            "models[].displayName",
+            "models[].description",
+            "models[].inputTokenLimit",
+            "models[].outputTokenLimit",
+            "models[].supportedGenerationMethods"
+          ],
+          "notes": "Gemini returns detailed model info including token limits and supported methods."
+        },
+        "response_example": {
+          "models": [
+            {
+              "name": "models/gemini-2.5-pro-preview-05-06",
+              "version": "001",
+              "displayName": "Gemini 2.5 Pro Preview 05-06",
+              "description": "Latest Gemini Pro model",
+              "inputTokenLimit": 1000000,
+              "outputTokenLimit": 65536,
+              "supportedGenerationMethods": ["generateContent", "countTokens"],
+              "temperature": 1.0,
+              "topP": 0.95,
+              "topK": 64
+            }
+          ],
+          "nextPageToken": null
+        }
+      },
+      "deepseek": {
+        "endpoint": {
+          "method": "GET",
+          "path": "/models",
+          "default_base_url": "https://api.deepseek.com"
+        },
+        "headers": {
+          "required": ["Authorization: Bearer <api_key>"],
+          "optional": []
+        },
+        "query_parameters": {
+          "optional": []
+        },
+        "response_fields": {
+          "required_or_core": ["object", "data"],
+          "data_item_fields": ["data[].id", "data[].object", "data[].owned_by"],
+          "notes": "DeepSeek uses OpenAI-compatible format for listing models."
+        },
+        "response_example": {
+          "object": "list",
+          "data": [
+            {"id": "deepseek-chat", "object": "model", "owned_by": "deepseek"},
+            {"id": "deepseek-coder", "object": "model", "owned_by": "deepseek"},
+            {"id": "deepseek-reasoner", "object": "model", "owned_by": "deepseek"}
+          ]
+        }
+      },
+      "claude_code": {
+        "notes": "Claude Code Interface does not have a dedicated list models endpoint. Use Anthropic /v1/models if base_url points to api.anthropic.com, or fallback to hardcoded model list."
       }
     },
     "aliyun_qwen_openai_chat": {
@@ -732,6 +1050,41 @@
         "drop_openai_only_fields": true,
         "notes": "This is the canonical Coding Plan interface for Claude Code-like integrations. OpenAI-compatible Coding Plan contracts are fallback compatibility surfaces, not separate first-class providers."
       },
+      "input_capabilities": {
+        "text": {"supported": true},
+        "image": {
+          "supported": "provider_declared_only",
+          "content_part_types": ["image"],
+          "transport_options": [
+            {"kind": "inline_base64", "field_paths": ["messages[].content[].source"]},
+            {"kind": "provider_file", "field_paths": ["messages[].content[].source"]},
+            {"kind": "external_url", "field_paths": ["messages[].content[].source"]}
+          ],
+          "default_transport_policy": {
+            "small_one_shot": "inline_base64",
+            "reused_or_large": "provider_file"
+          },
+          "reason": "Claude Code Interface is a compatibility surface. Image support must be gated by the selected provider_variant or endpoint capability."
+        },
+        "pdf": {
+          "supported": "provider_declared_only",
+          "content_part_types": ["document"],
+          "transport_options": [
+            {"kind": "inline_base64", "field_paths": ["messages[].content[].source"]},
+            {"kind": "provider_file", "field_paths": ["messages[].content[].source"]},
+            {"kind": "external_url", "field_paths": ["messages[].content[].source"]}
+          ],
+          "default_transport_policy": {
+            "small_one_shot": "inline_base64",
+            "reused_or_large": "provider_file"
+          },
+          "reason": "Document/PDF support must be treated as provider_variant capability, not assumed from the abstract Claude Code request shape alone."
+        },
+        "product_policy_notes": [
+          "If the selected Claude Code-compatible endpoint does not explicitly declare image/document support, RST should fail fast before request send.",
+          "Do not interpret generic content-block shape as proof that every Claude Code-compatible backend supports multimodal input."
+        ]
+      },
       "provider_variants": {
         "aliyun_coding_plan": {
           "display_name": "Alibaba Cloud Model Studio Coding Plan",
@@ -912,6 +1265,40 @@
     }
   },
   "adapter_defaults": {
+    "multimodal_attachment_policy": {
+      "purpose": "RST product-level rules for mapping local chat attachments to provider-specific request shapes.",
+      "source_of_truth_rule": "Local files stored by RST remain the source of truth. Remote file IDs/URIs are runtime caches only.",
+      "chat_storage_rule": "Persist attachment references in chat records; do not inline full base64 payloads into chat JSON.",
+      "default_kind_scope": ["image", "pdf"],
+      "unsupported_provider_behavior": "Fail fast before request send when the selected provider/model does not support the attachment kind.",
+      "silent_downgrade_forbidden": [
+        "Do not silently OCR an image and send only text.",
+        "Do not silently extract PDF text and pretend the document was sent natively.",
+        "Do not silently drop attachment parts when switching providers."
+      ],
+      "preferred_transport_order": {
+        "image": ["provider_file", "inline_base64_or_data_url", "external_url_if_explicitly_allowed"],
+        "pdf": ["provider_file", "inline_base64", "external_url_if_explicitly_allowed"]
+      },
+      "url_policy": {
+        "default": "mirror_to_local_first",
+        "notes": "Even when a provider accepts external URLs, RST should first mirror the attachment into local storage for durability and replay consistency."
+      },
+      "logging_policy": {
+        "forbid_local_absolute_paths": true,
+        "forbid_full_inline_base64_bodies": true,
+        "allow_fields": ["attachment_id", "mime_type", "size_bytes", "sha256", "transport_kind", "remote_handle_summary"]
+      }
+    },
+    "model_capability_snapshot_shape": {
+      "purpose": "Minimal runtime capability view cached per provider/model selection.",
+      "fields": {
+        "supports_text_input": "boolean",
+        "supports_image_input": "boolean | provider_declared_only",
+        "supports_pdf_input": "boolean | provider_declared_only",
+        "preferred_transport": "inline | provider_file | mixed"
+      }
+    },
     "provider_parameter_matrix": {
       "summary": "Provider support matrix for sampling, streaming, and reasoning parameters. Used by ProviderRequestMapper to transform neutral requests to provider-specific format.",
       "high_priority_providers": ["openai", "deepseek", "anthropic", "gemini", "claude_code_interface"],

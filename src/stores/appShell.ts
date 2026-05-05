@@ -2,6 +2,9 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
 export const useAppShellStore = defineStore('appShell', () => {
+  type RecentSessionItem = { id: string; type: 'st' | 'agent'; name: string; updatedAt: string }
+  type RecentResourceItem = { id: string; type: string; name: string; updatedAt: string }
+
   // Navigation state
   const navCollapsed = ref(false)
   const contextListWidth = ref(280)
@@ -12,8 +15,8 @@ export const useAppShellStore = defineStore('appShell', () => {
   const theme = ref<'system' | 'light' | 'dark'>('system')
 
   // Recent items
-  const recentSessions = ref<Array<{ id: string; type: 'st' | 'agent'; name: string; updatedAt: string }>>([])
-  const recentResources = ref<Array<{ id: string; type: string; name: string; updatedAt: string }>>([])
+  const recentSessions = ref<RecentSessionItem[]>([])
+  const recentResources = ref<RecentResourceItem[]>([])
 
   // Global UI state
   const globalLoading = ref(false)
@@ -30,6 +33,14 @@ export const useAppShellStore = defineStore('appShell', () => {
 
   function setTheme(newTheme: 'system' | 'light' | 'dark') {
     theme.value = newTheme
+  }
+
+  function setRecentSessions(items: RecentSessionItem[]) {
+    recentSessions.value = items
+  }
+
+  function setRecentResources(items: RecentResourceItem[]) {
+    recentResources.value = items
   }
 
   function showGlobalMessage(type: 'info' | 'success' | 'warning' | 'error', text: string) {
@@ -56,6 +67,8 @@ export const useAppShellStore = defineStore('appShell', () => {
     toggleNav,
     toggleInspectPanel,
     setTheme,
+    setRecentSessions,
+    setRecentResources,
     showGlobalMessage,
     clearGlobalMessage,
   }

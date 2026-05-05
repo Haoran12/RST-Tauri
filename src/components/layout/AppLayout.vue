@@ -12,54 +12,66 @@ const appShell = useAppShellStore()
 
 const showContextList = computed(() => {
   // Pages that show context list
-  const contextPages = ['library', 'st-chat', 'agent-worlds', 'resources-characters', 'resources-worldbooks', 'resources-presets', 'resources-regex', 'api-configs', 'logs']
+  // Note: 'api-configs' has its own list layout, so excluded here
+  const contextPages = ['library', 'st-chat', 'agent-worlds', 'resources-characters', 'resources-worldbooks', 'resources-presets', 'resources-regex']
   return contextPages.includes(route.name as string)
 })
 
 const showInspectPanel = computed(() => {
   // Pages that show inspect panel
-  const inspectPages = ['st-chat', 'agent-worlds', 'agent-world-editor', 'logs']
+  const inspectPages = ['st-chat', 'agent-worlds', 'agent-world-editor']
   return inspectPages.includes(route.name as string) && appShell.inspectPanelOpen
 })
 </script>
 
 <template>
-  <NLayout class="app-layout" has-sider>
+  <div class="app-shell">
     <!-- Primary Navigation -->
     <AppNav />
 
-    <!-- Context List -->
-    <NLayoutSider
-      v-if="showContextList"
-      bordered
-      :width="appShell.contextListWidth"
-      :collapsed-width="220"
-      class="context-sider"
-    >
-      <ContextList />
-    </NLayoutSider>
+    <!-- Main Layout Area -->
+    <NLayout class="main-layout" has-sider :native-scrollbar="false">
+      <!-- Context List -->
+      <NLayoutSider
+        v-if="showContextList"
+        bordered
+        :width="appShell.contextListWidth"
+        :collapsed-width="220"
+        class="context-sider"
+      >
+        <ContextList />
+      </NLayoutSider>
 
-    <!-- Main Content -->
-    <NLayoutContent class="main-content">
-      <router-view />
-    </NLayoutContent>
+      <!-- Main Content -->
+      <NLayoutContent class="main-content" :native-scrollbar="false">
+        <router-view />
+      </NLayoutContent>
 
-    <!-- Inspect Panel -->
-    <NLayoutSider
-      v-if="showInspectPanel"
-      bordered
-      :width="appShell.inspectPanelWidth"
-      class="inspect-sider"
-    >
-      <InspectPanel />
-    </NLayoutSider>
-  </NLayout>
+      <!-- Inspect Panel -->
+      <NLayoutSider
+        v-if="showInspectPanel"
+        bordered
+        :width="appShell.inspectPanelWidth"
+        class="inspect-sider"
+      >
+        <InspectPanel />
+      </NLayoutSider>
+    </NLayout>
+  </div>
 </template>
 
 <style scoped>
-.app-layout {
+.app-shell {
   height: 100vh;
   width: 100vw;
+  display: flex;
+  overflow: hidden;
+}
+
+.main-layout {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
 
 .context-sider {
@@ -67,8 +79,14 @@ const showInspectPanel = computed(() => {
 }
 
 .main-content {
+  height: 100%;
+}
+
+.main-content :deep(.n-layout-scroll-container) {
+  height: 100%;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   overflow: hidden;
 }
 

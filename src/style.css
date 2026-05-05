@@ -25,9 +25,19 @@
   --spacing-xl: 32px;
 }
 
-/* Dark Theme */
+/* Dark Theme - activated by .dark class on html element */
+html.dark {
+  --color-bg-app: #16171d;
+  --color-bg-surface: #1f2028;
+  --color-bg-subtle: #2a2b35;
+  --color-border-subtle: #2e303a;
+  --color-text-primary: #f3f4f6;
+  --color-text-secondary: #9ca3af;
+}
+
+/* Fallback for system preference when no explicit theme is set */
 @media (prefers-color-scheme: dark) {
-  :root {
+  html:not(.light) {
     --color-bg-app: #16171d;
     --color-bg-surface: #1f2028;
     --color-bg-subtle: #2a2b35;

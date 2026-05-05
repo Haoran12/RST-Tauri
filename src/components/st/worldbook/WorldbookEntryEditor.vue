@@ -11,14 +11,21 @@ import {
   NButton,
   NSpace,
   NDivider,
-  NCollapse,
-  NCollapseItem,
   NDynamicTags,
   NCheckbox,
   NEmpty,
+  NModal,
+  useMessage,
 } from 'naive-ui'
 import type { WorldInfoEntry } from '@/types/st'
 import { WorldInfoLogic, WorldInfoPosition, ExtensionPromptRole, createWorldInfoEntry } from '@/types/st'
+import type {
+  StructuredTextDiagnostic,
+  StructuredTextLanguageId,
+} from '@/types/structuredText'
+import { DEFAULT_BINDINGS } from '@/types/structuredText'
+import StructuredTextEditor from '@/components/shared/structured-text-editor/StructuredTextEditor.vue'
+import { validateStructuredText } from '@/services/storage'
 
 const props = defineProps<{
   entry: WorldInfoEntry | null
@@ -30,8 +37,19 @@ const emit = defineEmits<{
   (e: 'delete'): void
 }>()
 
+const message = useMessage()
+
 // Local state for editing
 const localEntry = ref<WorldInfoEntry>(createWorldInfoEntry(0))
+const contentMode = ref<StructuredTextLanguageId>(DEFAULT_BINDINGS.st_worldbook_content.defaultMode)
+
+// Content overlay state
+const showContentOverlay = ref(false)
+const overlayContent = ref('')
+const overlayContentMode = ref<StructuredTextLanguageId>(DEFAULT_BINDINGS.st_worldbook_content.defaultMode)
+const overlayEditorRef = ref<InstanceType<typeof StructuredTextEditor> | null>(null)
+const overlayDiagnostics = ref<StructuredTextDiagnostic[]>([])
+const isSavingOverlay = ref(false)
 
 // Watch for entry changes
 watch(
@@ -39,8 +57,10 @@ watch(
   (newEntry) => {
     if (newEntry) {
       localEntry.value = { ...newEntry }
+      contentMode.value = DEFAULT_BINDINGS.st_worldbook_content.defaultMode
     } else {
       localEntry.value = createWorldInfoEntry(0)
+      contentMode.value = DEFAULT_BINDINGS.st_worldbook_content.defaultMode
     }
   },
   { immediate: true }
@@ -48,35 +68,35 @@ watch(
 
 // Position options
 const positionOptions = [
-  { label: 'Before Character', value: WorldInfoPosition.BEFORE_CHAR },
-  { label: 'After Character', value: WorldInfoPosition.AFTER_CHAR },
-  { label: 'Author\'s Note Top', value: WorldInfoPosition.AN_TOP },
-  { label: 'Author\'s Note Bottom', value: WorldInfoPosition.AN_BOTTOM },
-  { label: 'At Depth', value: WorldInfoPosition.AT_DEPTH },
-  { label: 'Example Message Top', value: WorldInfoPosition.EM_TOP },
-  { label: 'Example Message Bottom', value: WorldInfoPosition.EM_BOTTOM },
-  { label: 'Outlet', value: WorldInfoPosition.OUTLET },
+  { label: '角色前', value: WorldInfoPosition.BEFORE_CHAR },
+  { label: '角色后', value: WorldInfoPosition.AFTER_CHAR },
+  { label: '作者备注顶部', value: WorldInfoPosition.AN_TOP },
+  { label: '作者备注底部', value: WorldInfoPosition.AN_BOTTOM },
+  { label: '指定深度', value: WorldInfoPosition.AT_DEPTH },
+  { label: '示例消息顶部', value: WorldInfoPosition.EM_TOP },
+  { label: '示例消息底部', value: WorldInfoPosition.EM_BOTTOM },
+  { label: '出口', value: WorldInfoPosition.OUTLET },
 ]
 
-// Logic options
+// Logic options (次关键词匹配逻辑，主关键词始终为 OR)
 const logicOptions = [
-  { label: 'AND ANY (all primary + any secondary)', value: WorldInfoLogic.AND_ANY },
-  { label: 'NOT ALL (not all primary)', value: WorldInfoLogic.NOT_ALL },
-  { label: 'NOT ANY (not any primary)', value: WorldInfoLogic.NOT_ANY },
-  { label: 'AND ALL (all primary + all secondary)', value: WorldInfoLogic.AND_ALL },
+  { label: 'AND ANY (任一次关键词)', value: WorldInfoLogic.AND_ANY },
+  { label: 'NOT ALL (非所有次关键词)', value: WorldInfoLogic.NOT_ALL },
+  { label: 'NOT ANY (无次关键词)', value: WorldInfoLogic.NOT_ANY },
+  { label: 'AND ALL (所有次关键词)', value: WorldInfoLogic.AND_ALL },
 ]
 
 // Role options
 const roleOptions = [
-  { label: 'System', value: ExtensionPromptRole.SYSTEM },
-  { label: 'User', value: ExtensionPromptRole.USER },
-  { label: 'Assistant', value: ExtensionPromptRole.ASSISTANT },
+  { label: '系统', value: ExtensionPromptRole.SYSTEM },
+  { label: '用户', value: ExtensionPromptRole.USER },
+  { label: '助手', value: ExtensionPromptRole.ASSISTANT },
 ]
 
 // Group options (existing groups + new)
 const groupOptions = computed(() => {
   const existing = props.groups.map((g) => ({ label: g, value: g }))
-  return [{ label: '(No Group)', value: '' }, ...existing]
+  return [{ label: '(无分组)', value: '' }, ...existing]
 })
 
 // Is AT_DEPTH position
@@ -88,14 +108,52 @@ const isOutlet = computed(() => localEntry.value.position === WorldInfoPosition.
 // Has group
 const hasGroup = computed(() => localEntry.value.group && localEntry.value.group.trim())
 
-// Save changes
-function saveChanges() {
+// Save changes (auto-save on blur/leave)
+async function saveChanges() {
   emit('update', { ...localEntry.value })
 }
 
-// Delete entry
-function deleteEntry() {
-  emit('delete')
+// Open content overlay
+function openContentOverlay() {
+  overlayContent.value = localEntry.value.content ?? ''
+  overlayContentMode.value = contentMode.value
+  overlayDiagnostics.value = []
+  showContentOverlay.value = true
+}
+
+// Save content from overlay
+async function saveOverlayContent() {
+  const validation = overlayEditorRef.value
+    ? await overlayEditorRef.value.validate()
+    : await validateStructuredText({
+        text: overlayContent.value,
+        mode: overlayContentMode.value,
+        binding: DEFAULT_BINDINGS.st_worldbook_content,
+      })
+
+  overlayDiagnostics.value = validation.diagnostics
+  overlayContent.value = validation.text
+
+  if (overlayDiagnostics.value.some(item => item.severity === 'blocker')) {
+    message.error('内容存在 blocker，请修复后再保存。')
+    return
+  }
+
+  isSavingOverlay.value = true
+  try {
+    localEntry.value.content = overlayContent.value
+    contentMode.value = overlayContentMode.value
+    await saveChanges()
+    showContentOverlay.value = false
+    message.success('内容已保存')
+  } finally {
+    isSavingOverlay.value = false
+  }
+}
+
+// Cancel overlay
+function cancelOverlay() {
+  showContentOverlay.value = false
 }
 </script>
 
@@ -103,328 +161,379 @@ function deleteEntry() {
   <NCard v-if="entry" class="entry-editor" size="small">
     <NForm label-placement="left" label-width="100px" size="small">
       <!-- Basic Info -->
-      <NFormItem label="Comment">
+      <NFormItem label="条目名称">
         <NInput
           v-model:value="localEntry.comment"
-          placeholder="Entry name/comment"
+          placeholder="条目名称/备注"
           @blur="saveChanges"
         />
       </NFormItem>
 
-      <NFormItem label="Content">
-        <NInput
-          v-model:value="localEntry.content"
-          type="textarea"
-          placeholder="Lore content..."
-          :rows="6"
-          @blur="saveChanges"
+      <!-- Status (常驻) -->
+      <NFormItem label="常驻">
+        <NSwitch v-model:value="localEntry.constant" @update:value="saveChanges" />
+        <span class="hint">始终包含在上下文中</span>
+      </NFormItem>
+
+      <!-- Scan Settings (常驻) -->
+      <NFormItem label="扫描深度">
+        <NInputNumber
+          :value="localEntry.scan_depth ?? undefined"
+          :min="0"
+          :max="999"
+          placeholder="使用全局设置"
+          @update:value="(v: number | null) => { localEntry.scan_depth = v; saveChanges() }"
         />
+      </NFormItem>
+
+      <!-- Content Edit Button -->
+      <NFormItem label="内容">
+        <NButton v-if="localEntry.content" type="success" secondary @click="openContentOverlay">
+          编辑内容
+          <span class="content-preview">{{ localEntry.content.slice(0, 50) }}{{ localEntry.content.length > 50 ? '...' : '' }}</span>
+        </NButton>
+        <NButton v-else type="success" @click="openContentOverlay">
+          编辑内容
+        </NButton>
       </NFormItem>
 
       <NDivider />
 
       <!-- Keywords -->
-      <NFormItem label="Primary Keys">
+      <NFormItem label="主关键词">
         <NDynamicTags v-model:value="localEntry.key" @change="saveChanges" />
       </NFormItem>
 
-      <NFormItem label="Secondary">
+      <NFormItem label="次关键词">
         <NDynamicTags v-model:value="localEntry.keysecondary" @change="saveChanges" />
       </NFormItem>
 
-      <NFormItem label="Selective">
-        <NSwitch v-model:value="localEntry.selective" @update:value="saveChanges" />
-        <span class="hint">Require secondary keys</span>
-      </NFormItem>
-
-      <NFormItem v-if="localEntry.selective" label="Logic">
-        <NSelect
-          v-model:value="localEntry.selective_logic"
-          :options="logicOptions"
-          @update:value="saveChanges"
-        />
+      <!-- Selective & Logic on same row -->
+      <NFormItem label="选择性">
+        <div class="inline-row">
+          <NSwitch v-model:value="localEntry.selective" @update:value="saveChanges" />
+          <span class="hint">需要次关键词匹配</span>
+          <NSelect
+            v-if="localEntry.selective"
+            v-model:value="localEntry.selective_logic"
+            :options="logicOptions"
+            style="width: 280px; margin-left: 12px;"
+            @update:value="saveChanges"
+          />
+        </div>
       </NFormItem>
 
       <NDivider />
 
       <!-- Position & Order -->
-      <NCollapse>
-        <NCollapseItem title="Position & Order" name="position">
-          <NFormItem label="Position">
-            <NSelect
-              v-model:value="localEntry.position"
-              :options="positionOptions"
-              @update:value="saveChanges"
-            />
-          </NFormItem>
+      <NFormItem label="位置">
+        <NSelect
+          v-model:value="localEntry.position"
+          :options="positionOptions"
+          @update:value="saveChanges"
+        />
+      </NFormItem>
 
-          <NFormItem v-if="isAtDepth" label="Depth">
-            <NInputNumber
-              v-model:value="localEntry.depth"
-              :min="0"
-              :max="999"
-              @blur="saveChanges"
-            />
-          </NFormItem>
+      <NFormItem v-if="isAtDepth" label="深度">
+        <NInputNumber
+          v-model:value="localEntry.depth"
+          :min="0"
+          :max="999"
+          @blur="saveChanges"
+        />
+      </NFormItem>
 
-          <NFormItem v-if="isAtDepth" label="Role">
-            <NSelect
-              v-model:value="localEntry.role"
-              :options="roleOptions"
-              @update:value="saveChanges"
-            />
-          </NFormItem>
+      <NFormItem v-if="isAtDepth" label="角色">
+        <NSelect
+          v-model:value="localEntry.role"
+          :options="roleOptions"
+          @update:value="saveChanges"
+        />
+      </NFormItem>
 
-          <NFormItem v-if="isOutlet" label="Outlet Name">
-            <NInput
-              v-model:value="localEntry.outlet_name"
-              placeholder="Outlet identifier"
-              @blur="saveChanges"
-            />
-          </NFormItem>
+      <NFormItem v-if="isOutlet" label="出口名称">
+        <NInput
+          v-model:value="localEntry.outlet_name"
+          placeholder="出口标识符"
+          @blur="saveChanges"
+        />
+      </NFormItem>
 
-          <NFormItem label="Order">
-            <NInputNumber
-              v-model:value="localEntry.order"
-              :min="0"
-              :max="999"
-              @blur="saveChanges"
-            />
-            <span class="hint">Lower = earlier in prompt</span>
-          </NFormItem>
-        </NCollapseItem>
-
-        <!-- Probability & Budget -->
-        <NCollapseItem title="Probability & Budget" name="probability">
-          <NFormItem label="Probability">
-            <NInputNumber
-              v-model:value="localEntry.probability"
-              :min="0"
-              :max="100"
-              :step="1"
-              @blur="saveChanges"
-            />
-            <span class="hint">%</span>
-          </NFormItem>
-
-          <NFormItem label="Use Probability">
-            <NSwitch v-model:value="localEntry.use_probability" @update:value="saveChanges" />
-          </NFormItem>
-
-          <NFormItem label="Ignore Budget">
-            <NSwitch v-model:value="localEntry.ignore_budget" @update:value="saveChanges" />
-          </NFormItem>
-        </NCollapseItem>
-
-        <!-- Group -->
-        <NCollapseItem title="Group" name="group">
-          <NFormItem label="Group">
-            <NSelect
-              v-model:value="localEntry.group"
-              :options="groupOptions"
-              :tag="true"
-              filterable
-              @update:value="saveChanges"
-            />
-          </NFormItem>
-
-          <NFormItem v-if="hasGroup" label="Override">
-            <NSwitch v-model:value="localEntry.group_override" @update:value="saveChanges" />
-            <span class="hint">Replace other entries in group</span>
-          </NFormItem>
-
-          <NFormItem v-if="hasGroup" label="Weight">
-            <NInputNumber
-              v-model:value="localEntry.group_weight"
-              :min="0"
-              :max="100"
-              @blur="saveChanges"
-            />
-          </NFormItem>
-        </NCollapseItem>
-
-        <!-- Recursion -->
-        <NCollapseItem title="Recursion" name="recursion">
-          <NFormItem label="Exclude Recursion">
-            <NSwitch v-model:value="localEntry.exclude_recursion" @update:value="saveChanges" />
-          </NFormItem>
-
-          <NFormItem label="Prevent Recursion">
-            <NSwitch v-model:value="localEntry.prevent_recursion" @update:value="saveChanges" />
-          </NFormItem>
-
-          <NFormItem label="Delay Until">
-            <NInputNumber
-              :value="typeof localEntry.delay_until_recursion === 'number' ? localEntry.delay_until_recursion : 0"
-              :min="0"
-              :max="999"
-              @update:value="(v: number | null) => { if (v !== null) { localEntry.delay_until_recursion = v; saveChanges() } }"
-            />
-            <span class="hint">Recursion depth</span>
-          </NFormItem>
-        </NCollapseItem>
-
-        <!-- Scan Settings -->
-        <NCollapseItem title="Scan Settings" name="scan">
-          <NFormItem label="Scan Depth">
-            <NInputNumber
-              :value="localEntry.scan_depth ?? undefined"
-              :min="0"
-              :max="999"
-              placeholder="Use global"
-              @update:value="(v: number | null) => { localEntry.scan_depth = v; saveChanges() }"
-            />
-          </NFormItem>
-
-          <NFormItem label="Case Sensitive">
-            <NSwitch
-              :value="localEntry.case_sensitive ?? false"
-              @update:value="(v: boolean) => { localEntry.case_sensitive = v; saveChanges() }"
-            />
-          </NFormItem>
-
-          <NFormItem label="Match Whole">
-            <NSwitch
-              :value="localEntry.match_whole_words ?? false"
-              @update:value="(v: boolean) => { localEntry.match_whole_words = v; saveChanges() }"
-            />
-          </NFormItem>
-        </NCollapseItem>
-
-        <!-- Time Control -->
-        <NCollapseItem title="Time Control" name="time">
-          <NFormItem label="Sticky">
-            <NInputNumber
-              :value="localEntry.sticky ?? undefined"
-              :min="0"
-              :max="999"
-              placeholder="Disabled"
-              @update:value="(v: number | null) => { localEntry.sticky = v; saveChanges() }"
-            />
-            <span class="hint">Stay active for N turns</span>
-          </NFormItem>
-
-          <NFormItem label="Cooldown">
-            <NInputNumber
-              :value="localEntry.cooldown ?? undefined"
-              :min="0"
-              :max="999"
-              placeholder="Disabled"
-              @update:value="(v: number | null) => { localEntry.cooldown = v; saveChanges() }"
-            />
-            <span class="hint">Wait N turns before re-activation</span>
-          </NFormItem>
-
-          <NFormItem label="Delay">
-            <NInputNumber
-              :value="localEntry.delay ?? undefined"
-              :min="0"
-              :max="999"
-              placeholder="Disabled"
-              @update:value="(v: number | null) => { localEntry.delay = v; saveChanges() }"
-            />
-            <span class="hint">Wait N turns before first activation</span>
-          </NFormItem>
-        </NCollapseItem>
-
-        <!-- Match Targets -->
-        <NCollapseItem title="Match Targets" name="targets">
-          <NSpace vertical>
-            <NCheckbox
-              :checked="localEntry.match_persona_description"
-              @update:checked="(v: boolean) => { localEntry.match_persona_description = v; saveChanges() }"
-            >
-              Persona Description
-            </NCheckbox>
-            <NCheckbox
-              :checked="localEntry.match_character_description"
-              @update:checked="(v: boolean) => { localEntry.match_character_description = v; saveChanges() }"
-            >
-              Character Description
-            </NCheckbox>
-            <NCheckbox
-              :checked="localEntry.match_character_personality"
-              @update:checked="(v: boolean) => { localEntry.match_character_personality = v; saveChanges() }"
-            >
-              Character Personality
-            </NCheckbox>
-            <NCheckbox
-              :checked="localEntry.match_character_depth_prompt"
-              @update:checked="(v: boolean) => { localEntry.match_character_depth_prompt = v; saveChanges() }"
-            >
-              Character Depth Prompt
-            </NCheckbox>
-            <NCheckbox
-              :checked="localEntry.match_scenario"
-              @update:checked="(v: boolean) => { localEntry.match_scenario = v; saveChanges() }"
-            >
-              Scenario
-            </NCheckbox>
-            <NCheckbox
-              :checked="localEntry.match_creator_notes"
-              @update:checked="(v: boolean) => { localEntry.match_creator_notes = v; saveChanges() }"
-            >
-              Creator Notes
-            </NCheckbox>
-          </NSpace>
-        </NCollapseItem>
-
-        <!-- Triggers -->
-        <NCollapseItem title="Triggers" name="triggers">
-          <NFormItem label="Triggers">
-            <NDynamicTags v-model:value="localEntry.triggers" @change="saveChanges" />
-          </NFormItem>
-
-          <NFormItem label="Automation ID">
-            <NInput
-              v-model:value="localEntry.automation_id"
-              placeholder="Automation identifier"
-              @blur="saveChanges"
-            />
-          </NFormItem>
-        </NCollapseItem>
-
-        <!-- Status -->
-        <NCollapseItem title="Status" name="status">
-          <NFormItem label="Disabled">
-            <NSwitch v-model:value="localEntry.disable" @update:value="saveChanges" />
-          </NFormItem>
-
-          <NFormItem label="Constant">
-            <NSwitch v-model:value="localEntry.constant" @update:value="saveChanges" />
-            <span class="hint">Always include in context</span>
-          </NFormItem>
-
-          <NFormItem label="Vectorized">
-            <NSwitch v-model:value="localEntry.vectorized" @update:value="saveChanges" />
-          </NFormItem>
-        </NCollapseItem>
-      </NCollapse>
+      <NFormItem label="顺序">
+        <NInputNumber
+          v-model:value="localEntry.order"
+          :min="0"
+          :max="999"
+          @blur="saveChanges"
+        />
+        <span class="hint">数值越小越靠前</span>
+      </NFormItem>
 
       <NDivider />
 
-      <!-- Actions -->
-      <NSpace justify="end">
-        <NButton type="error" size="small" @click="deleteEntry">
-          Delete Entry
-        </NButton>
-      </NSpace>
+      <!-- Probability & Budget -->
+      <NFormItem label="概率">
+        <NInputNumber
+          v-model:value="localEntry.probability"
+          :min="0"
+          :max="100"
+          :step="1"
+          @blur="saveChanges"
+        />
+        <span class="hint">%</span>
+      </NFormItem>
+
+      <NFormItem label="启用概率">
+        <NSwitch v-model:value="localEntry.use_probability" @update:value="saveChanges" />
+      </NFormItem>
+
+      <NFormItem label="忽略预算">
+        <NSwitch v-model:value="localEntry.ignore_budget" @update:value="saveChanges" />
+      </NFormItem>
+
+      <NDivider />
+
+      <!-- Group -->
+      <NFormItem label="分组">
+        <NSelect
+          v-model:value="localEntry.group"
+          :options="groupOptions"
+          :tag="true"
+          filterable
+          @update:value="saveChanges"
+        />
+      </NFormItem>
+
+      <NFormItem v-if="hasGroup" label="覆盖">
+        <NSwitch v-model:value="localEntry.group_override" @update:value="saveChanges" />
+        <span class="hint">替换同组其他条目</span>
+      </NFormItem>
+
+      <NFormItem v-if="hasGroup" label="权重">
+        <NInputNumber
+          v-model:value="localEntry.group_weight"
+          :min="0"
+          :max="100"
+          @blur="saveChanges"
+        />
+      </NFormItem>
+
+      <NDivider />
+
+      <!-- Recursion -->
+      <NFormItem label="排除递归">
+        <NSwitch v-model:value="localEntry.exclude_recursion" @update:value="saveChanges" />
+      </NFormItem>
+
+      <NFormItem label="阻止递归">
+        <NSwitch v-model:value="localEntry.prevent_recursion" @update:value="saveChanges" />
+      </NFormItem>
+
+      <NFormItem label="延迟至">
+        <NInputNumber
+          :value="typeof localEntry.delay_until_recursion === 'number' ? localEntry.delay_until_recursion : 0"
+          :min="0"
+          :max="999"
+          @update:value="(v: number | null) => { if (v !== null) { localEntry.delay_until_recursion = v; saveChanges() } }"
+        />
+        <span class="hint">递归深度</span>
+      </NFormItem>
+
+      <NDivider />
+
+      <!-- Time Control -->
+      <NFormItem label="持续回合">
+        <NInputNumber
+          :value="localEntry.sticky ?? undefined"
+          :min="0"
+          :max="999"
+          placeholder="禁用"
+          @update:value="(v: number | null) => { localEntry.sticky = v; saveChanges() }"
+        />
+        <span class="hint">激活后持续 N 回合</span>
+      </NFormItem>
+
+      <NFormItem label="冷却">
+        <NInputNumber
+          :value="localEntry.cooldown ?? undefined"
+          :min="0"
+          :max="999"
+          placeholder="禁用"
+          @update:value="(v: number | null) => { localEntry.cooldown = v; saveChanges() }"
+        />
+        <span class="hint">再次激活前等待 N 回合</span>
+      </NFormItem>
+
+      <NFormItem label="延迟">
+        <NInputNumber
+          :value="localEntry.delay ?? undefined"
+          :min="0"
+          :max="999"
+          placeholder="禁用"
+          @update:value="(v: number | null) => { localEntry.delay = v; saveChanges() }"
+        />
+        <span class="hint">首次激活前等待 N 回合</span>
+      </NFormItem>
+
+      <NDivider />
+
+      <!-- Match Targets -->
+      <NFormItem label="匹配目标">
+        <NSpace vertical>
+          <NCheckbox
+            :checked="localEntry.match_persona_description"
+            @update:checked="(v: boolean) => { localEntry.match_persona_description = v; saveChanges() }"
+          >
+            人物描述
+          </NCheckbox>
+          <NCheckbox
+            :checked="localEntry.match_character_description"
+            @update:checked="(v: boolean) => { localEntry.match_character_description = v; saveChanges() }"
+          >
+            角色描述
+          </NCheckbox>
+          <NCheckbox
+            :checked="localEntry.match_character_personality"
+            @update:checked="(v: boolean) => { localEntry.match_character_personality = v; saveChanges() }"
+          >
+            角色性格
+          </NCheckbox>
+          <NCheckbox
+            :checked="localEntry.match_character_depth_prompt"
+            @update:checked="(v: boolean) => { localEntry.match_character_depth_prompt = v; saveChanges() }"
+          >
+            角色深度提示
+          </NCheckbox>
+          <NCheckbox
+            :checked="localEntry.match_scenario"
+            @update:checked="(v: boolean) => { localEntry.match_scenario = v; saveChanges() }"
+          >
+            场景
+          </NCheckbox>
+          <NCheckbox
+            :checked="localEntry.match_creator_notes"
+            @update:checked="(v: boolean) => { localEntry.match_creator_notes = v; saveChanges() }"
+          >
+            创建者备注
+          </NCheckbox>
+        </NSpace>
+      </NFormItem>
+
+      <NDivider />
+
+      <!-- Triggers -->
+      <NFormItem label="触发词">
+        <NDynamicTags v-model:value="localEntry.triggers" @change="saveChanges" />
+      </NFormItem>
+
+      <NFormItem label="自动化ID">
+        <NInput
+          v-model:value="localEntry.automation_id"
+          placeholder="自动化标识符"
+          @blur="saveChanges"
+        />
+      </NFormItem>
     </NForm>
+
+    <!-- Content Edit Overlay -->
+    <NModal
+      v-model:show="showContentOverlay"
+      preset="card"
+      title="编辑内容"
+      style="width: min(92vw, 900px);"
+      :mask-closable="false"
+    >
+      <div class="overlay-content">
+        <StructuredTextEditor
+          ref="overlayEditorRef"
+          :model-value="overlayContent"
+          :binding="DEFAULT_BINDINGS.st_worldbook_content"
+          :mode="overlayContentMode"
+          :min-height="400"
+          :use-backend-validation="true"
+          @update:model-value="(value) => { overlayContent = value }"
+          @update:mode="(mode) => { overlayContentMode = mode }"
+          @diagnostics-change="(diagnostics) => { overlayDiagnostics = diagnostics }"
+        />
+      </div>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="cancelOverlay">取消</NButton>
+          <NButton type="primary" :loading="isSavingOverlay" @click="saveOverlayContent">
+            保存
+          </NButton>
+        </NSpace>
+      </template>
+    </NModal>
   </NCard>
   <NCard v-else class="entry-editor" size="small">
-    <NEmpty description="Select an entry to edit" />
+    <NEmpty description="选择一个条目进行编辑" />
   </NCard>
 </template>
 
 <style scoped>
 .entry-editor {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.entry-editor :deep(.n-card-content) {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
 }
 
 .hint {
-  color: #999;
+  color: var(--color-text-secondary, #999);
   font-size: 12px;
   margin-left: 8px;
+}
+
+.inline-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.content-preview {
+  margin-left: 8px;
+  color: var(--color-text-secondary, #999);
+  font-size: 12px;
+}
+
+.overlay-content {
+  min-height: 400px;
+}
+</style>
+
+<style>
+/* 全局滚动条样式 - 确保 WebView 中可见 */
+.entry-editor .n-card-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.entry-editor .n-card-content::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+}
+
+.entry-editor .n-card-content::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.5);
+  border-radius: 4px;
+  min-height: 30px;
+}
+
+.entry-editor .n-card-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.7);
+}
+
+.entry-editor .n-card-content::-webkit-scrollbar-corner {
+  background: transparent;
 }
 </style>

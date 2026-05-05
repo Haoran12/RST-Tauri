@@ -1,5 +1,9 @@
 # Repository Guidelines
 
+## ⚠️ HIGHEST PRIORITY INSTRUCTION
+
+**Before every conversation turn, check the repository status. If any code or documentation has been modified, you MUST commit to git.**
+
 ## Project Structure & Module Organization
 
 This is a Tauri project for Ran's SmartTavern (RST). Keep source-of-truth guidance in `README.md`, focused design documents under `docs/`, frontend code in `src/`, and Rust backend code in `src-tauri/`.
@@ -73,3 +77,4 @@ Recent commits are short Chinese summaries, for example `继续完整文档` and
 ## Agent-Specific Instructions
 
 Do not overwrite unrelated local edits. Start concept changes in `docs/01_architecture.md`, then propagate details to mode, data, runtime, backend, and testing docs. Keep LLM responsibilities and deterministic program logic separate. Agent prompt-budget changes must keep `PromptBuilder` / `InputAssembly` as the budget gate: token estimation, P0/P1/P2/P3 priority, compression, pruning, and multi-character CognitivePass scheduling belong in docs before implementation, with Trace/Logs recording budget decisions.
+Record development task completion status in `docs/Tasks_list.md` and keep that file updated as work progresses.

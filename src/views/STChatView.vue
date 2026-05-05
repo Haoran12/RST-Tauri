@@ -1,57 +1,58 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, onBeforeUnmount, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
-  NLayout,
-  NLayoutSider,
-  NLayoutContent,
   NButton,
-  NInput,
-  NInputGroup,
   NEmpty,
-  NSpin,
-  NList,
-  NListItem,
-  NThing,
-  NAvatar,
-  NText,
-  NScrollbar,
   NIcon,
+  NInput,
+  NScrollbar,
+  NSpin,
+  NText,
   useMessage,
 } from 'naive-ui'
 import {
+  AttachOutline,
+  ChevronBackOutline,
   SendOutline,
-  AddOutline,
-  TrashOutline,
   StopOutline,
+  TrashOutline,
 } from '@vicons/ionicons5'
 import { useChatStore } from '@/stores/chat'
 import { useSettingsStore } from '@/stores/settings'
+import { useRuntimeStore } from '@/stores/runtime'
+import { useWorldbooksStore } from '@/stores/worldbooks'
+import type { CharacterCard, ChatAttachmentRef } from '@/types/st'
+import { getChatAttachmentBlob } from '@/services/storage'
+
+const route = useRoute()
+const router = useRouter()
+const message = useMessage()
 
 const chatStore = useChatStore()
 const settingsStore = useSettingsStore()
-const message = useMessage()
+const runtimeStore = useRuntimeStore()
+const worldbooksStore = useWorldbooksStore()
 
 const inputText = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
+const isInitialLoading = ref(false)
+const previewUrls = ref<Record<string, string>>({})
 
-// Computed
 const hasActiveApiConfig = computed(() => settingsStore.activeApiConfig !== null)
 const canSend = computed(() => {
-  return inputText.value.trim() && !chatStore.isGenerating && hasActiveApiConfig.value
+  return (inputText.value.trim() || chatStore.hasPendingAttachments) && !chatStore.isGenerating && hasActiveApiConfig.value
 })
 
-// Methods
 async function handleSend() {
   if (!canSend.value) return
-
   const content = inputText.value.trim()
   inputText.value = ''
-
   if (!settingsStore.activeApiConfig) {
-    message.error('请先选择一个 API 配置')
+    message.error('请先选择 API 配置')
     return
   }
-
   await chatStore.sendMessageStream(content, settingsStore.activeApiConfig)
   scrollToBottom()
 }
@@ -65,255 +66,462 @@ function handleKeyDown(e: KeyboardEvent) {
 
 function scrollToBottom() {
   nextTick(() => {
-    if (messagesContainer.value) {
-      const scrollbar = messagesContainer.value.querySelector('.n-scrollbar-container')
-      if (scrollbar) {
-        scrollbar.scrollTop = scrollbar.scrollHeight
-      }
-    }
+    const el = messagesContainer.value?.querySelector('.n-scrollbar-container') as HTMLElement | null
+    if (el) el.scrollTop = el.scrollHeight
   })
 }
 
-async function createNewSession() {
-  const name = `聊天 ${new Date().toLocaleString()}`
-  await chatStore.createSession(name)
+function openFilePicker() {
+  fileInput.value?.click()
 }
 
-async function selectSession(id: string) {
-  await chatStore.loadSession(id)
-  scrollToBottom()
-}
-
-async function deleteSession(id: string, e: Event) {
-  e.stopPropagation()
-  await chatStore.deleteSession(id)
+async function onFileChange(e: Event) {
+  const target = e.target as HTMLInputElement
+  const files = Array.from(target.files ?? [])
+  if (!files.length) return
+  try {
+    await chatStore.addPendingAttachments(files)
+  } catch (err) {
+    message.error(String(err))
+  } finally {
+    target.value = ''
+  }
 }
 
 function formatTime(dateStr: string) {
   return new Date(dateStr).toLocaleTimeString()
 }
 
-// Load sessions on mount
+function getPreviewUrl(attachment: ChatAttachmentRef): string | null {
+  return previewUrls.value[attachment.attachment_id] ?? null
+}
+
+async function loadPreviewUrl(attachment: ChatAttachmentRef) {
+  if (previewUrls.value[attachment.attachment_id]) return
+  try {
+    const bytes = await getChatAttachmentBlob(attachment.attachment_id)
+    const blob = new Blob([new Uint8Array(bytes)], { type: attachment.mime_type })
+    previewUrls.value = { ...previewUrls.value, [attachment.attachment_id]: URL.createObjectURL(blob) }
+  } catch {
+    // ignore
+  }
+}
+
+function releaseUnusedPreviews() {
+  const activeIds = new Set<string>()
+  chatStore.pendingAttachments.forEach(a => activeIds.add(a.attachment_id))
+  chatStore.messages.forEach(m => m.attachments?.forEach(a => activeIds.add(a.attachment_id)))
+  const next: Record<string, string> = {}
+  for (const [id, url] of Object.entries(previewUrls.value)) {
+    if (activeIds.has(id)) next[id] = url
+    else URL.revokeObjectURL(url)
+  }
+  previewUrls.value = next
+}
+
+function worldbookName(loreId: string) {
+  return worldbooksStore.worldbookList.find(w => w.id === loreId)?.name ?? loreId
+}
+
+function getCharacterWorldLoreId(character: CharacterCard | null) {
+  const worldName = character?.data.extensions?.world
+  if (typeof worldName !== 'string') return null
+  return worldbooksStore.worldbookList.find(w => w.name === worldName)?.id ?? null
+}
+
+const sessionWorldbooks = computed(() => {
+  const result: Array<{ loreId: string; label: string; source: string }> = []
+  const seen = new Set<string>()
+  const disabled = new Set(chatStore.currentSession?.chat_metadata?.disabled_world_info ?? [])
+
+  const add = (loreId: string, label: string, source: string) => {
+    if (!loreId || seen.has(loreId)) return
+    seen.add(loreId)
+    result.push({ loreId, label, source, enabled: !disabled.has(loreId) })
+  }
+
+  const chatLoreId = chatStore.currentSession?.chat_metadata?.world_info
+  if (chatLoreId) add(chatLoreId, worldbookName(chatLoreId), '聊天')
+
+  for (const loreId of runtimeStore.globalState.world_info_settings.global_select) {
+    add(loreId, worldbookName(loreId), '全局')
+  }
+
+  const charLoreId = getCharacterWorldLoreId(chatStore.currentCharacter)
+  if (charLoreId) add(charLoreId, worldbookName(charLoreId), '角色')
+
+  const charName = chatStore.currentCharacter?.data.name
+  if (charName) {
+    const binding = runtimeStore.globalState.world_info_settings.char_lore.find(b => b.name === charName)
+    for (const loreId of binding?.extra_books ?? []) {
+      add(loreId, worldbookName(loreId), '附加')
+    }
+  }
+
+  return result
+})
+
+async function toggleWorldbook(loreId: string, enabled: boolean) {
+  try {
+    await chatStore.setWorldbookDisabled(loreId, !enabled)
+  } catch (err) {
+    message.error(String(err))
+  }
+}
+
+function routeSessionId() {
+  const v = route.params.sessionId
+  return Array.isArray(v) ? v[0] : v
+}
+
+async function syncRouteSession() {
+  const id = routeSessionId()
+  if (!id || chatStore.currentSession?.id === id) return
+  await chatStore.loadSession(id)
+  scrollToBottom()
+}
+
 onMounted(async () => {
-  await chatStore.loadSessions()
-  await settingsStore.loadApiConfigs()
+  isInitialLoading.value = true
+  try {
+    await Promise.all([
+      chatStore.loadSessions(),
+      settingsStore.loadApiConfigs(),
+      runtimeStore.loadGlobalState(),
+      worldbooksStore.loadWorldbooks(),
+    ])
+    settingsStore.setActiveApiConfig(runtimeStore.activeApiConfigId)
+    await syncRouteSession()
+  } finally {
+    isInitialLoading.value = false
+  }
+})
+
+watch(() => route.params.sessionId, syncRouteSession)
+watch(() => chatStore.currentSession?.id, scrollToBottom)
+
+watch(
+  () => [
+    chatStore.pendingAttachments.map(a => a.attachment_id).join(','),
+    chatStore.messages.map(m => (m.attachments ?? []).map(a => a.attachment_id).join(',')).join('|'),
+  ],
+  async () => {
+    const all = [...chatStore.pendingAttachments, ...chatStore.messages.flatMap(m => m.attachments ?? [])]
+    for (const a of all) await loadPreviewUrl(a)
+    releaseUnusedPreviews()
+  },
+  { immediate: true }
+)
+
+onBeforeUnmount(() => {
+  Object.values(previewUrls.value).forEach(URL.revokeObjectURL)
 })
 </script>
 
 <template>
-  <div class="chat-view">
-    <NLayout has-sider>
-      <!-- Session List -->
-      <NLayoutSider
-        bordered
-        :width="240"
-        :native-scrollbar="false"
-        content-style="padding: 12px;"
-      >
-        <div class="session-header">
-          <NText strong>会话列表</NText>
-          <NButton quaternary circle size="small" @click="createNewSession">
-            <template #icon>
-              <NIcon :component="AddOutline" />
-            </template>
+  <div class="st-chat">
+    <!-- Main: Chat -->
+    <main class="chat-main">
+      <template v-if="!chatStore.hasSession">
+        <div class="chat-empty">
+          <NEmpty description="选择或创建会话开始聊天" />
+        </div>
+      </template>
+
+      <template v-else>
+        <!-- Header -->
+        <header class="chat-header">
+          <NButton quaternary circle @click="router.push({ name: 'library' })">
+            <template #icon><NIcon :component="ChevronBackOutline" /></template>
           </NButton>
+          <div class="chat-title">
+            <h1>{{ chatStore.currentSession?.name ?? '聊天' }}</h1>
+          </div>
+          <div v-if="!hasActiveApiConfig" class="api-warning">未选择 API</div>
+        </header>
+
+        <!-- Worldbooks -->
+        <div v-if="sessionWorldbooks.length" class="worldbooks-bar">
+          <div v-for="wb in sessionWorldbooks" :key="wb.loreId" class="wb-tag" :class="{ disabled: !wb.enabled }" @click="toggleWorldbook(wb.loreId, !wb.enabled)">
+            {{ wb.label }}
+          </div>
         </div>
 
-        <NSpin :show="chatStore.sessions.length === 0">
-          <NList hoverable clickable>
-            <NListItem
-              v-for="session in chatStore.sessions"
-              :key="session.id"
-              :class="{ active: chatStore.currentSession?.id === session.id }"
-              @click="selectSession(session.id)"
-            >
-              <NThing :title="session.name" :description="session.messages.length + ' 条消息'" />
-              <template #suffix>
-                <NButton
-                  quaternary
-                  circle
-                  size="tiny"
-                  @click="(e: Event) => deleteSession(session.id, e)"
-                >
-                  <template #icon>
-                    <NIcon :component="TrashOutline" />
-                  </template>
-                </NButton>
-              </template>
-            </NListItem>
-          </NList>
-        </NSpin>
-      </NLayoutSider>
-
-      <!-- Chat Area -->
-      <NLayoutContent>
-        <div v-if="!chatStore.hasSession" class="empty-chat">
-          <NEmpty description="选择或创建一个会话开始聊天" />
-        </div>
-
-        <template v-else>
-          <!-- Messages -->
-          <div ref="messagesContainer" class="messages-container">
-            <NScrollbar>
-              <div class="messages-list">
-                <div
-                  v-for="msg in chatStore.messages"
-                  :key="msg.id"
-                  :class="['message', msg.role]"
-                >
-                  <div class="message-avatar">
-                    <NAvatar round size="small">
-                      {{ msg.role === 'user' ? 'U' : 'A' }}
-                    </NAvatar>
-                  </div>
-                  <div class="message-content">
-                    <div class="message-header">
-                      <NText depth="3" style="font-size: 12px">
-                        {{ formatTime(msg.created_at) }}
-                      </NText>
-                    </div>
-                    <div class="message-text">
-                      {{ msg.content }}
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Generating indicator -->
-                <div v-if="chatStore.isGenerating" class="message assistant">
-                  <div class="message-avatar">
-                    <NAvatar round size="small">A</NAvatar>
-                  </div>
-                  <div class="message-content">
-                    <NSpin size="small" />
-                    <span v-if="chatStore.streamingContent" class="message-text">
-                      {{ chatStore.streamingContent }}
-                    </span>
+        <!-- Messages -->
+        <div ref="messagesContainer" class="messages">
+          <NScrollbar>
+            <div v-if="chatStore.messages.length === 0" class="messages-empty">
+              <NText depth="3">开始对话吧</NText>
+            </div>
+            <div v-else class="message-list">
+              <div v-for="msg in chatStore.messages" :key="msg.id" :class="['msg', msg.role]">
+                <div class="msg-time">{{ formatTime(msg.created_at) }}</div>
+                <div class="msg-content">
+                  <div class="msg-text">{{ msg.content }}</div>
+                  <div v-if="msg.attachments?.length" class="msg-attachments">
+                    <img
+                      v-for="att in msg.attachments"
+                      :key="att.attachment_id"
+                      :src="getPreviewUrl(att) ?? ''"
+                      class="att-thumb"
+                    >
                   </div>
                 </div>
               </div>
-            </NScrollbar>
-          </div>
+              <div v-if="chatStore.isGenerating" class="msg assistant">
+                <div class="msg-time">生成中</div>
+                <div class="msg-content">
+                  <NSpin v-if="!chatStore.streamingContent" size="small" />
+                  <div v-else class="msg-text">{{ chatStore.streamingContent }}</div>
+                </div>
+              </div>
+            </div>
+          </NScrollbar>
+        </div>
 
-          <!-- Input Area -->
-          <div class="input-area">
-            <NInputGroup>
-              <NInput
-                v-model:value="inputText"
-                type="textarea"
-                placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
-                :autosize="{ minRows: 1, maxRows: 4 }"
-                :disabled="chatStore.isGenerating"
-                @keydown="handleKeyDown"
-              />
-              <NButton
-                v-if="!chatStore.isGenerating"
-                type="primary"
-                :disabled="!canSend"
-                @click="handleSend"
-              >
-                <template #icon>
-                  <NIcon :component="SendOutline" />
-                </template>
-              </NButton>
-              <NButton
-                v-else
-                type="error"
-                @click="chatStore.stopGeneration"
-              >
-                <template #icon>
-                  <NIcon :component="StopOutline" />
-                </template>
-              </NButton>
-            </NInputGroup>
+        <!-- Input -->
+        <footer class="input-bar">
+          <input ref="fileInput" type="file" multiple accept="image/*,.pdf" hidden @change="onFileChange">
 
-            <div v-if="!hasActiveApiConfig" class="api-warning">
-              <NText type="warning">请先在设置中选择一个 API 配置</NText>
+          <div v-if="chatStore.pendingAttachments.length" class="pending-atts">
+            <div v-for="att in chatStore.pendingAttachments" :key="att.attachment_id" class="pending-att">
+              <img v-if="att.kind === 'image'" :src="getPreviewUrl(att) ?? ''" class="pending-thumb">
+              <span v-else class="pending-file">{{ att.filename }}</span>
+              <button class="pending-remove" @click="chatStore.removePendingAttachment(att.attachment_id)">
+                <NIcon :component="TrashOutline" size="12" />
+              </button>
             </div>
           </div>
-        </template>
-      </NLayoutContent>
-    </NLayout>
+
+          <div class="input-row">
+            <NButton quaternary :disabled="chatStore.isGenerating" @click="openFilePicker">
+              <template #icon><NIcon :component="AttachOutline" /></template>
+            </NButton>
+            <NInput
+              v-model:value="inputText"
+              type="textarea"
+              placeholder="输入消息..."
+              :autosize="{ minRows: 1, maxRows: 4 }"
+              :disabled="chatStore.isGenerating"
+              @keydown="handleKeyDown"
+            />
+            <NButton v-if="!chatStore.isGenerating" type="primary" :disabled="!canSend" @click="handleSend">
+              <template #icon><NIcon :component="SendOutline" /></template>
+            </NButton>
+            <NButton v-else type="error" @click="chatStore.stopGeneration">
+              <template #icon><NIcon :component="StopOutline" /></template>
+            </NButton>
+          </div>
+        </footer>
+      </template>
+    </main>
   </div>
 </template>
 
 <style scoped>
-.chat-view {
+.st-chat {
   height: 100%;
+  display: flex;
+  background: var(--n-color);
+}
+
+/* Main */
+.chat-main {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }
 
-.session-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.empty-chat {
+.chat-empty {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.messages-container {
-  flex: 1;
-  overflow: hidden;
-}
-
-.messages-list {
-  padding: 16px;
-}
-
-.message {
+.chat-header {
+  padding: 12px 16px;
   display: flex;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.message.user {
-  flex-direction: row-reverse;
-}
-
-.message.user .message-content {
-  align-items: flex-end;
-}
-
-.message-avatar {
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--n-border-color);
   flex-shrink: 0;
 }
 
-.message-content {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-width: 70%;
+.chat-title {
+  flex: 1;
+  min-width: 0;
 }
 
-.message-text {
-  background: var(--n-color);
-  padding: 8px 12px;
-  border-radius: 8px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.message.user .message-text {
-  background: var(--n-color-target);
-}
-
-.input-area {
-  padding: 16px;
-  border-top: 1px solid var(--n-border-color);
+.chat-title h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
 }
 
 .api-warning {
-  margin-top: 8px;
-  text-align: center;
+  font-size: 12px;
+  color: var(--n-warning-color);
 }
 
-.n-list-item.active {
+/* Worldbooks */
+.worldbooks-bar {
+  padding: 8px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-bottom: 1px solid var(--n-border-color);
+  flex-shrink: 0;
+}
+
+.wb-tag {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--n-primary-color) 10%, var(--n-color));
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.wb-tag:hover {
+  background: color-mix(in srgb, var(--n-primary-color) 18%, var(--n-color));
+}
+
+.wb-tag.disabled {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+/* Messages */
+.messages {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.messages-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.message-list {
+  padding: 16px;
+}
+
+.msg {
+  margin-bottom: 14px;
+  max-width: 85%;
+}
+
+.msg.user {
+  margin-left: auto;
+}
+
+.msg-time {
+  font-size: 11px;
+  color: var(--n-text-color-3);
+  margin-bottom: 4px;
+}
+
+.msg.user .msg-time {
+  text-align: right;
+}
+
+.msg-content {
+  display: inline-block;
+}
+
+.msg-text {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--n-color);
+  border: 1px solid var(--n-border-color);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.msg.user .msg-text {
+  background: color-mix(in srgb, var(--n-primary-color) 14%, var(--n-color));
+  border-color: color-mix(in srgb, var(--n-primary-color) 25%, var(--n-border-color));
+}
+
+.msg-attachments {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.att-thumb {
+  width: 120px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--n-border-color);
+}
+
+/* Input */
+.input-bar {
+  padding: 12px 14px;
+  border-top: 1px solid var(--n-border-color);
+  flex-shrink: 0;
+}
+
+.pending-atts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.pending-att {
+  position: relative;
+}
+
+.pending-thumb {
+  width: 60px;
+  height: 60px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--n-border-color);
+}
+
+.pending-file {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 6px;
   background: var(--n-color-hover);
+}
+
+.pending-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: var(--n-error-color);
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.input-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.input-row .n-input {
+  flex: 1;
 }
 </style>

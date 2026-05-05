@@ -1,6 +1,8 @@
 // ST Runtime Assembly Types
 // 运行时组装相关类型定义
 
+import type { ChatAttachmentRef } from '@/types/st';
+
 // ============================================================================
 // 全局应用状态
 // ============================================================================
@@ -13,12 +15,7 @@
 export interface GlobalAppState {
   active_api_config_id: string | null;
 
-  active_sampler_preset: string;
-  active_instruct_preset: string;
-  active_context_preset: string;
-  active_sysprompt_preset: string;
-  active_reasoning_preset: string;
-  active_prompt_preset: string;
+  active_preset: string;
 
   auto_select_preset: boolean;
 
@@ -56,12 +53,42 @@ export interface CharLoreBinding {
 }
 
 /**
- * Regex 扩展设置（简化版）
+ * Regex 扩展设置
  */
 export interface RegexExtensionSettings {
-  global_regex: string[];
-  preset_allowed_regex: string[];
-  character_allowed_regex: Record<string, string[]>;
+  regex: RegexScriptData[];
+  regex_presets: RegexPreset[];
+  character_allowed_regex: string[];
+  preset_allowed_regex: Record<string, string[]>;
+}
+
+export interface RegexScriptData {
+  id: string;
+  script_name: string;
+  find_regex: string;
+  replace_string: string;
+  trim_strings: string[];
+  placement: number[];
+  disabled: boolean;
+  markdown_only: boolean;
+  prompt_only: boolean;
+  run_on_edit: boolean;
+  substitute_regex: number;
+  min_depth: number | null;
+  max_depth: number | null;
+}
+
+export interface RegexPreset {
+  id: string;
+  name: string;
+  is_selected: boolean;
+  global: RegexPresetItem[];
+  scoped: RegexPresetItem[];
+  preset: RegexPresetItem[];
+}
+
+export interface RegexPresetItem {
+  id: string;
 }
 
 // ============================================================================
@@ -83,7 +110,8 @@ export interface STSessionData {
  * ST 聊天元数据
  */
 export interface STChatMetadata {
-  world_info?: string;
+  world_info?: string | null;
+  disabled_world_info?: string[];
   [key: string]: unknown;
 }
 
@@ -96,6 +124,7 @@ export interface STChatMessage {
   content: string;
   created_at: string;
   name?: string;
+  attachments?: ChatAttachmentRef[];
 }
 
 // ============================================================================
@@ -120,6 +149,15 @@ export interface AssembledRequest {
 export interface AssembledMessage {
   role: string;
   content: string;
+  attachments: AssembledAttachmentRef[];
+}
+
+export interface AssembledAttachmentRef {
+  attachment_id: string;
+  kind: 'image' | 'pdf' | string;
+  mime_type: string;
+  filename: string;
+  size_bytes?: number | null;
 }
 
 /**
@@ -170,12 +208,7 @@ export interface AssembleRequestInput {
   api_config_id: string;
   character_id: string | null;
   session_id: string;
-  sampler_preset: string | null;
-  instruct_template: string | null;
-  context_template: string | null;
-  system_prompt: string | null;
-  reasoning_template: string | null;
-  prompt_preset: string | null;
+  preset_name: string | null;
   world_info_settings: STWorldInfoSettings;
   chat_lore_id?: string | null;
   global_lore_ids?: string[];
@@ -214,18 +247,14 @@ export interface WorldInfoInjectionInput {
 export function createDefaultGlobalAppState(): GlobalAppState {
   return {
     active_api_config_id: null,
-    active_sampler_preset: '',
-    active_instruct_preset: '',
-    active_context_preset: '',
-    active_sysprompt_preset: '',
-    active_reasoning_preset: '',
-    active_prompt_preset: '',
+    active_preset: 'Default',
     auto_select_preset: false,
     world_info_settings: createDefaultWorldInfoSettings(),
     regex_settings: {
-      global_regex: [],
-      preset_allowed_regex: [],
-      character_allowed_regex: {},
+      regex: [],
+      regex_presets: [],
+      character_allowed_regex: [],
+      preset_allowed_regex: {},
     },
   };
 }

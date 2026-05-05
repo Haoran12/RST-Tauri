@@ -419,6 +419,34 @@ pub struct ApiConfig {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatAttachmentKind {
+    Image,
+    Pdf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatAttachmentRef {
+    pub attachment_id: String,
+    pub kind: ChatAttachmentKind,
+    pub mime_type: String,
+    pub filename: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatAttachmentRecord {
+    pub attachment_id: String,
+    pub kind: ChatAttachmentKind,
+    pub mime_type: String,
+    pub filename: String,
+    pub blob_filename: String,
+    pub size_bytes: u64,
+    pub created_at: String,
+}
+
 /// 预设类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Preset {
@@ -448,7 +476,19 @@ pub struct ChatSession {
     pub character_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub chat_metadata: ChatSessionMetadata,
     pub messages: Vec<ChatMessage>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ChatSessionMetadata {
+    #[serde(default)]
+    pub world_info: Option<String>,
+    #[serde(default)]
+    pub disabled_world_info: Vec<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -457,6 +497,8 @@ pub struct ChatMessage {
     pub role: String,
     pub content: String,
     pub created_at: String,
+    #[serde(default)]
+    pub attachments: Vec<ChatAttachmentRef>,
 }
 
 // ============================================================================

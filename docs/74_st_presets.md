@@ -23,26 +23,55 @@ SillyTavern 原设计中，预设按 API 类型（kobold / novel / openai / text
 
 `source_api_id` 和导出目标 `apiId` 只用于 ST 兼容迁移，不参与 RST 运行时身份判断。运行时预设身份使用 RST 的稳定 `preset_key`（稳定 ID 或规范化路径）；`preset_key` 不随当前 API 配置变化。
 
-## 2. 预设类型
+## 2. 预设文件结构
 
-| 类型 | 文件夹 | 用途 |
-|---|---|---|
-| Sampler Preset | `./data/presets/samplers/` | 采样参数（temperature、top_p、repetition_penalty 等） |
-| Instruct Template | `./data/presets/instruct/` | 对话格式模板（input/output/system sequence 等） |
-| Context Template | `./data/presets/context/` | 上下文组装模板（story_string、chat_start 等） |
-| System Prompt | `./data/presets/sysprompt/` | 系统提示词模板 |
-| Reasoning Template | `./data/presets/reasoning/` | 思维链格式模板（prefix、suffix、separator） |
-| Prompt Preset | `./data/presets/prompts/` | 完整提示词组装配置（Main Prompt、Jailbreak、WI Format 等） |
+一个预设文件包含所有预设类型，存储在 `./data/presets/` 目录下，每个预设一个 JSON 文件。RST 不再使用 `presets/samplers/`、`presets/instruct/` 等分目录作为运行时持久化来源：
+
+```
+./data/presets/
+├── Default.json
+├── Creative.json
+├── ChatML.json
+└── ...
+```
+
+预设文件内部结构：
+
+```typescript
+interface PresetFile {
+  name: string;
+  
+  // 采样参数
+  sampler?: SamplerPreset;
+  
+  // 对话格式模板
+  instruct?: InstructTemplate;
+  
+  // 上下文组装模板
+  context?: ContextTemplate;
+  
+  // 系统提示词
+  sysprompt?: SystemPrompt;
+  
+  // 思维链格式
+  reasoning?: ReasoningTemplate;
+  
+  // 完整提示词组装
+  prompt?: PromptPreset;
+  
+  // 元数据
+  source_api_id?: string;
+  extensions?: Record<string, any>;
+}
+```
 
 ## 3. 数据结构
 
-### 3.1 Sampler Preset
+### 3.1 Sampler Preset（采样参数）
 
 ```typescript
 interface SamplerPreset {
-  name: string;
-  source_api_id?: string;
-
+  name?: string;
   temperature: number;
   top_p: number;
   top_k: number;
@@ -77,17 +106,15 @@ interface SamplerPreset {
   sampler_priority?: string[];
   temperature_last?: boolean;
 
-  extensions?: Record<string, any>;
   provider_overrides?: Record<string, Record<string, any>>;
 }
 ```
 
-### 3.2 Instruct Template
+### 3.2 Instruct Template（对话格式模板）
 
 ```typescript
 interface InstructTemplate {
-  name: string;
-
+  name?: string;
   input_sequence: string;
   output_sequence: string;
   system_sequence: string;
@@ -113,16 +140,14 @@ interface InstructTemplate {
   sequences_as_stop_strings: boolean;
 
   activation_regex?: string;
-  extensions?: Record<string, any>;
 }
 ```
 
-### 3.3 Context Template
+### 3.3 Context Template（上下文模板）
 
 ```typescript
 interface ContextTemplate {
-  name: string;
-
+  name?: string;
   story_string: string;
   example_separator: string;
   chat_start: string;
@@ -137,39 +162,34 @@ interface ContextTemplate {
   always_force_name2: boolean;
   trim_sentences: boolean;
   single_line: boolean;
-
-  extensions?: Record<string, any>;
 }
 ```
 
-### 3.4 System Prompt
+### 3.4 System Prompt（系统提示词）
 
 ```typescript
 interface SystemPrompt {
-  name: string;
+  name?: string;
   content: string;
-  extensions?: Record<string, any>;
 }
 ```
 
-### 3.5 Reasoning Template
+### 3.5 Reasoning Template（思维链格式）
 
 ```typescript
 interface ReasoningTemplate {
-  name: string;
+  name?: string;
   prefix: string;
   suffix: string;
   separator: string;
-  extensions?: Record<string, any>;
 }
 ```
 
-### 3.6 Prompt Preset
+### 3.6 Prompt Preset（提示词组装）
 
 ```typescript
 interface PromptPreset {
-  name: string;
-
+  name?: string;
   prompts: PromptItem[];
   prompt_order: PromptOrderItem[];
 
@@ -182,8 +202,6 @@ interface PromptPreset {
   continue_nudge_prompt: string;
   group_nudge_prompt: string;
   impersonation_prompt: string;
-
-  extensions?: Record<string, any>;
 }
 
 interface PromptItem {
@@ -215,23 +233,15 @@ interface PromptOrderItem {
 
 ```typescript
 interface PresetManager {
-  listPresets(type: PresetType): Promise<string[]>;
-  loadPreset(type: PresetType, name: string): Promise<Preset>;
-  savePreset(type: PresetType, preset: Preset): Promise<void>;
-  deletePreset(type: PresetType, name: string): Promise<void>;
-  exportPreset(type: PresetType, name: string): Promise<string>;
-  importPreset(type: PresetType, data: string): Promise<string>;
-  getActivePreset(type: PresetType): string | null;
-  setActivePreset(type: PresetType, name: string): void;
+  listPresets(): Promise<string[]>;
+  loadPreset(name: string): Promise<PresetFile>;
+  savePreset(preset: PresetFile): Promise<void>;
+  deletePreset(name: string): Promise<void>;
+  exportPreset(name: string): Promise<string>;
+  importPreset(data: string): Promise<string>;
+  getActivePreset(): string | null;
+  setActivePreset(name: string): void;
 }
-
-type PresetType =
-  | 'sampler'
-  | 'instruct'
-  | 'context'
-  | 'sysprompt'
-  | 'reasoning'
-  | 'prompt';
 ```
 
 ## 5. 自动选择
@@ -244,7 +254,6 @@ interface AutoSelectConfig {
   bindings: {
     characterName?: string;
     groupName?: string;
-    presetType: PresetType;
     presetName: string;
   }[];
 }
@@ -258,45 +267,90 @@ function autoSelectPreset(characterName: string, group: string | null): void;
 
 ## 6. 默认预设
 
-应用启动时在 `./data/presets/` 下创建默认预设：
+应用启动或首次列出 / 读取预设时，若 `./data/presets/Default.json` 缺失，存储层必须自动创建默认预设：
 
 ```
 ./data/presets/
-├── samplers/
-│   ├── Default.json
-│   ├── Neutral.json
-│   ├── Deterministic.json
-│   └── Universal-Creative.json
-├── instruct/
-│   ├── ChatML.json
-│   ├── Alpaca.json
-│   ├── Llama 3 Instruct.json
-│   └── Vicuna 1.1.json
-├── context/
-│   ├── Default.json
-│   ├── ChatML.json
-│   └── NovelAI.json
-├── sysprompt/
-│   └── Default.json
-├── reasoning/
-│   └── Default.json
-└── prompts/
-    └── Default.json
+└── Default.json
 ```
 
-## 7. Master Import / Export
+`Default.json` 包含完整六类配置，且不绑定任何 API 配置、model、endpoint 或鉴权字段。全局状态缺失或旧版六字段 active preset 迁移失败时，`active_preset` 回退为 `Default`；默认预设不能通过 UI 或命令删除。
 
-支持将所有预设类型打包导出为单一 JSON 文件：
+## 7. 导入导出
 
-```typescript
-interface MasterPresetExport {
-  sampler?: SamplerPreset;
-  instruct?: InstructTemplate;
-  context?: ContextTemplate;
-  sysprompt?: SystemPrompt;
-  reasoning?: ReasoningTemplate;
-  prompt?: PromptPreset;
+### 7.1 RST 格式导出
+
+导出为单一 JSON 文件，包含完整的 `PresetFile` 结构。
+
+### 7.2 导入格式兼容
+
+支持导入以下格式：
+
+#### 7.2.1 RST PresetFile 格式
+
+```json
+{
+  "name": "My Preset",
+  "sampler": { ... },
+  "instruct": { ... },
+  "context": { ... },
+  "sysprompt": { ... },
+  "reasoning": { ... },
+  "prompt": { ... }
 }
 ```
 
-导入时自动检测类型并分发到对应预设管理器，仍然剔除其中的 API Provider / URL / Key / model 信息。
+#### 7.2.2 ST Master 格式
+
+ST 的 Advanced Formatting 导出格式，包含多个 section：
+
+```json
+{
+  "instruct": { "name": "...", "input_sequence": "...", ... },
+  "context": { "name": "...", "story_string": "...", ... },
+  "sysprompt": { "name": "...", "content": "..." },
+  "reasoning": { "name": "...", "prefix": "...", ... },
+  "preset": { "temp": 1.0, "top_p": 1.0, ... }
+}
+```
+
+导入时自动合并到 `PresetFile` 结构。
+
+#### 7.2.3 ST 单类型预设
+
+自动检测并转换：
+
+| 类型 | 检测字段 | 转换目标 |
+|---|---|---|
+| Instruct Template | `input_sequence`, `output_sequence` | `instruct` |
+| Context Template | `story_string` | `context` |
+| System Prompt | `content` (无 `prompts`) | `sysprompt` |
+| Reasoning Template | `prefix`, `suffix` | `reasoning` |
+| Text Completion | `temp`, `top_k`, `top_p`, `rep_pen` | `sampler` |
+
+#### 7.2.4 字段名映射
+
+ST Text Completion 预设使用缩写字段名，导入时自动映射：
+
+| ST 字段 | RST 字段 |
+|---|---|
+| `temp` | `temperature` |
+| `rep_pen` | `repetition_penalty` |
+
+### 7.3 解耦原则
+
+导入时自动剔除以下字段（API 连接相关）：
+
+- `api_server`
+- `streaming_url`
+- `model` / `model_novel` / `custom_model`
+- `preset_settings` / `preset_settings_novel`
+- `seed`
+- `server_urls`
+- 其他连接配置字段
+
+这些字段仅用于 ST 兼容迁移追踪，不参与 RST 运行时。
+
+### 7.4 ST 兼容导出（规划中）
+
+导出为 ST 兼容格式时，按目标 `apiId` 重新写入 ST 期望目录 / 文件结构。

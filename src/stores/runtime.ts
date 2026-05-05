@@ -12,7 +12,7 @@ import {
   getGlobalState,
   saveGlobalState,
   setActiveApiConfig,
-  setActivePresets,
+  setActivePreset,
   buildCompleteChatRequest,
 } from '@/services/runtime';
 import { createDefaultGlobalAppState } from '@/types/runtime';
@@ -29,6 +29,7 @@ export const useRuntimeStore = defineStore('runtime', () => {
 
   // Computed
   const activeApiConfigId = computed(() => globalState.value.active_api_config_id);
+  const activePresetName = computed(() => globalState.value.active_preset);
 
   const worldInfoSettings = computed(() => globalState.value.world_info_settings);
 
@@ -75,36 +76,15 @@ export const useRuntimeStore = defineStore('runtime', () => {
   }
 
   /**
-   * 设置激活的预设
+   * 设置激活的完整预设
    */
-  async function setPresets(presets: {
-    sampler?: string;
-    instruct?: string;
-    context?: string;
-    sysprompt?: string;
-    reasoning?: string;
-    prompt?: string;
-  }) {
-    if (presets.sampler !== undefined) {
-      globalState.value.active_sampler_preset = presets.sampler;
+  async function setPresetName(presetName: string) {
+    const name = presetName.trim();
+    if (!name) {
+      return;
     }
-    if (presets.instruct !== undefined) {
-      globalState.value.active_instruct_preset = presets.instruct;
-    }
-    if (presets.context !== undefined) {
-      globalState.value.active_context_preset = presets.context;
-    }
-    if (presets.sysprompt !== undefined) {
-      globalState.value.active_sysprompt_preset = presets.sysprompt;
-    }
-    if (presets.reasoning !== undefined) {
-      globalState.value.active_reasoning_preset = presets.reasoning;
-    }
-    if (presets.prompt !== undefined) {
-      globalState.value.active_prompt_preset = presets.prompt;
-    }
-
-    await setActivePresets(presets);
+    globalState.value.active_preset = name;
+    await setActivePreset(name);
   }
 
   /**
@@ -149,12 +129,7 @@ export const useRuntimeStore = defineStore('runtime', () => {
         characterId,
         globalState.value.world_info_settings,
         {
-          samplerPreset: globalState.value.active_sampler_preset || undefined,
-          instructTemplate: globalState.value.active_instruct_preset || undefined,
-          contextTemplate: globalState.value.active_context_preset || undefined,
-          systemPrompt: globalState.value.active_sysprompt_preset || undefined,
-          reasoningTemplate: globalState.value.active_reasoning_preset || undefined,
-          promptPreset: globalState.value.active_prompt_preset || undefined,
+          presetName: globalState.value.active_preset || undefined,
           ...options,
         }
       );
@@ -186,6 +161,7 @@ export const useRuntimeStore = defineStore('runtime', () => {
 
     // Computed
     activeApiConfigId,
+    activePresetName,
     worldInfoSettings,
     hasActiveApiConfig,
 
@@ -193,7 +169,7 @@ export const useRuntimeStore = defineStore('runtime', () => {
     loadGlobalState,
     persistGlobalState,
     setApiConfigId,
-    setPresets,
+    setPresetName,
     updateWorldInfoSettings,
     setGlobalLoreSelection,
     buildChatRequest,

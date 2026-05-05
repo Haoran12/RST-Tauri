@@ -1,7 +1,7 @@
 /**
  * ST Preset system
  *
- * 预设系统，支持 Sampler/Instruct/Context/SystemPrompt/Reasoning/Prompt 六类预设。
+ * 预设系统，一个预设文件包含六类配置：Sampler/Instruct/Context/SystemPrompt/Reasoning/Prompt。
  * 预设与 API 配置解耦，可跨 Provider 共享。
  * 参考: docs/74_st_presets.md
  */
@@ -11,8 +11,7 @@
 // ============================================================================
 
 export interface SamplerPreset {
-  name: string
-  source_api_id?: string
+  name?: string
 
   // 基础采样参数
   temperature?: number
@@ -54,12 +53,11 @@ export interface SamplerPreset {
   sampler_priority?: string[]
   temperature_last?: boolean
 
-  // 扩展
-  extensions?: Record<string, unknown>
+  // Provider 覆盖
   provider_overrides?: Record<string, Record<string, unknown>>
 }
 
-export function createSamplerPreset(name: string): SamplerPreset {
+export function createDefaultSamplerPreset(name = ''): SamplerPreset {
   return {
     name,
     temperature: 1.0,
@@ -90,7 +88,6 @@ export function createSamplerPreset(name: string): SamplerPreset {
     negative_prompt: '',
     sampler_priority: [],
     temperature_last: false,
-    extensions: {},
     provider_overrides: {},
   }
 }
@@ -100,7 +97,7 @@ export function createSamplerPreset(name: string): SamplerPreset {
 // ============================================================================
 
 export interface InstructTemplate {
-  name: string
+  name?: string
 
   // 序列定义
   input_sequence?: string
@@ -133,12 +130,9 @@ export interface InstructTemplate {
 
   // 激活正则
   activation_regex?: string
-
-  // 扩展
-  extensions?: Record<string, unknown>
 }
 
-export function createInstructTemplate(name: string): InstructTemplate {
+export function createDefaultInstructTemplate(name = ''): InstructTemplate {
   return {
     name,
     input_sequence: '',
@@ -161,7 +155,6 @@ export function createInstructTemplate(name: string): InstructTemplate {
     skip_examples: false,
     sequences_as_stop_strings: false,
     activation_regex: '',
-    extensions: {},
   }
 }
 
@@ -170,7 +163,7 @@ export function createInstructTemplate(name: string): InstructTemplate {
 // ============================================================================
 
 export interface ContextTemplate {
-  name: string
+  name?: string
 
   // 模板内容
   story_string?: string
@@ -190,12 +183,9 @@ export interface ContextTemplate {
   always_force_name2?: boolean
   trim_sentences?: boolean
   single_line?: boolean
-
-  // 扩展
-  extensions?: Record<string, unknown>
 }
 
-export function createContextTemplate(name: string): ContextTemplate {
+export function createDefaultContextTemplate(name = ''): ContextTemplate {
   return {
     name,
     story_string: '',
@@ -209,7 +199,6 @@ export function createContextTemplate(name: string): ContextTemplate {
     always_force_name2: false,
     trim_sentences: false,
     single_line: false,
-    extensions: {},
   }
 }
 
@@ -218,16 +207,14 @@ export function createContextTemplate(name: string): ContextTemplate {
 // ============================================================================
 
 export interface SystemPrompt {
-  name: string
+  name?: string
   content?: string
-  extensions?: Record<string, unknown>
 }
 
-export function createSystemPrompt(name: string): SystemPrompt {
+export function createDefaultSystemPrompt(name = ''): SystemPrompt {
   return {
     name,
     content: '',
-    extensions: {},
   }
 }
 
@@ -236,20 +223,18 @@ export function createSystemPrompt(name: string): SystemPrompt {
 // ============================================================================
 
 export interface ReasoningTemplate {
-  name: string
+  name?: string
   prefix?: string
   suffix?: string
   separator?: string
-  extensions?: Record<string, unknown>
 }
 
-export function createReasoningTemplate(name: string): ReasoningTemplate {
+export function createDefaultReasoningTemplate(name = ''): ReasoningTemplate {
   return {
     name,
     prefix: '',
     suffix: '',
     separator: '',
-    extensions: {},
   }
 }
 
@@ -277,7 +262,7 @@ export interface PromptOrder {
 }
 
 export interface PromptPreset {
-  name: string
+  name?: string
 
   // 提示词列表
   prompts?: PromptItem[]
@@ -294,12 +279,9 @@ export interface PromptPreset {
   continue_nudge_prompt?: string
   group_nudge_prompt?: string
   impersonation_prompt?: string
-
-  // 扩展
-  extensions?: Record<string, unknown>
 }
 
-export function createPromptPreset(name: string): PromptPreset {
+export function createDefaultPromptPreset(name = ''): PromptPreset {
   return {
     name,
     prompts: [],
@@ -312,29 +294,50 @@ export function createPromptPreset(name: string): PromptPreset {
     continue_nudge_prompt: '',
     group_nudge_prompt: '',
     impersonation_prompt: '',
-    extensions: {},
   }
 }
 
 // ============================================================================
-// Preset Type
+// Preset File - 预设文件（包含所有类型）
 // ============================================================================
 
-export type PresetType =
-  | 'sampler'
-  | 'instruct'
-  | 'context'
-  | 'sysprompt'
-  | 'reasoning'
-  | 'prompt'
+export interface PresetFile {
+  name: string
 
-export const PresetTypeFolder: Record<PresetType, string> = {
-  sampler: 'samplers',
-  instruct: 'instruct',
-  context: 'context',
-  sysprompt: 'sysprompt',
-  reasoning: 'reasoning',
-  prompt: 'prompts',
+  // 采样参数
+  sampler?: SamplerPreset
+
+  // 对话格式模板
+  instruct?: InstructTemplate
+
+  // 上下文组装模板
+  context?: ContextTemplate
+
+  // 系统提示词
+  sysprompt?: SystemPrompt
+
+  // 思维链格式
+  reasoning?: ReasoningTemplate
+
+  // 完整提示词组装
+  prompt?: PromptPreset
+
+  // 元数据
+  source_api_id?: string
+  extensions?: Record<string, unknown>
+}
+
+export function createDefaultPresetFile(name: string): PresetFile {
+  return {
+    name,
+    sampler: createDefaultSamplerPreset(name),
+    instruct: createDefaultInstructTemplate(name),
+    context: createDefaultContextTemplate(name),
+    sysprompt: createDefaultSystemPrompt(name),
+    reasoning: createDefaultReasoningTemplate(name),
+    prompt: createDefaultPromptPreset(name),
+    extensions: {},
+  }
 }
 
 // ============================================================================
@@ -344,7 +347,6 @@ export const PresetTypeFolder: Record<PresetType, string> = {
 export interface AutoSelectBinding {
   character_name?: string
   group_name?: string
-  preset_type: PresetType
   preset_name: string
 }
 

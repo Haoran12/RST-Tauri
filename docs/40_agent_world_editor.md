@@ -4,6 +4,8 @@
 
 World Editor 是作者与维护者编辑 Agent World 结构化 Truth 的入口。它服务于开局前创建世界，也服务于运行中暂停后的安全修订；它不是 LLM 节点，不参与回合推理，不绕过运行时验证边界。
 
+> 当前实现状态（2026-05-04）：后端已存在 `world_editor/editor.rs`、`validator.rs`、`commit.rs` 与相关数据模型 / schema；前端当前只有 [AgentWorldEditorView.vue](../src/views/AgentWorldEditorView.vue) 的原型页，主要提供表单草稿和 patch 预览，尚未落地本文件描述的完整四区编辑器、实体导航和校验 / 影响面板体系。
+
 相关基础文档：
 
 - 总体架构、LLM / 程序边界与关键铁律见 [01_architecture.md](01_architecture.md)。
@@ -237,7 +239,7 @@ Editor commit 与 runtime commit 的边界：
 
 ## 6. 前端实现边界
 
-建议模块结构：
+目标模块结构：
 
 ```text
 src/components/agent/world-editor/

@@ -108,6 +108,14 @@ pub struct LogContext {
 
 流式日志必须尽量还原原貌：原始 chunk 永远保留顺序；可读文本只是派生展示层，不允许回写为业务响应。
 
+多模态补充：
+
+- `request_json` 可记录发送给 Provider 的 `image` / `document` 内容块结构、`attachment_id`、`mime_type`、传输方式与文件句柄类型。
+- 日志中不得保存本地绝对文件路径。
+- 对 inline base64 发送的图片 / PDF，日志默认不保存完整 base64 正文；只保存 `attachment_id`、`mime_type`、字节数、sha256、`transport=inline_base64` 与必要的 Provider 字段壳。
+- 对 `ProviderFile` 发送的图片 / PDF，可记录远端 `file_id` / `file_uri`，但它只是运行时句柄，不代表本地真源。
+- 若用户最初通过 URL 导入附件，日志中 `original_source_url` 只可写脱敏或截断后的 provenance，不得把带签名的原始 URL 原样落库。
+
 ---
 
 ## 4. Agent Trace 记录点
@@ -249,7 +257,189 @@ Agent Trace 记录 Agent 模式下"程序如何判断"与"模型如何输出"。
 
 ---
 
-## 8. 验证要求
+## 8. 日志页面规划
+
+日志页面是只读调试工具，入口为 `/logs`，对应前端 `src/views/LogsView.vue`。页面只能读取、筛选、展示、导出或触发经过用户确认的清理任务；不得修改 ST 会话、Agent World、Trace、canonical Truth、Provider 配置或运行时分支。
+
+### 8.1 页面目标
+
+日志页面首版回答四类问题：
+
+- 某次 LLM 调用实际向 Provider 发送了什么、收到了什么、耗时和错误是什么。
+- 某个 Agent 回合为什么这样运行，Trace 中哪些步骤关联了哪些 LLM 请求。
+- 全局运行 Logs 与 World 内 Logs 各占用多少空间，是否触发清理提示。
+- Provider 错误、schema 校验失败、SQLite 错误、清理任务等异常事件发生在哪个上下文。
+
+页面不作为业务控制台：不能重放请求、不能把日志响应写回聊天、不能从 Trace 直接修复状态、不能绕过 ST request assembly 或 Agent runtime。
+
+### 8.2 信息架构
+
+页面采用三栏工作区：
+
+1. 左侧筛选栏：日志来源、类型、级别、状态、时间范围、Provider、模型、World、Session、Turn、Trace 与 request 搜索。
+2. 中央结果列表：按时间倒序展示日志项、LLM 调用项、Trace 项和清理提示项。
+3. 右侧详情面板：展示当前选中项的脱敏详情、关联跳转、JSON / stream chunk 查看器和安全操作。
+
+顶部动作栏固定展示：
+
+- 当前范围：`全局 Logs` / `World Logs` / `Agent Trace` / `全部索引`
+- 搜索框：支持 `request_id`、`event_id`、`trace_id`、`scene_turn_id`、`world_id` 精确搜索
+- 时间范围选择：最近 1 小时、24 小时、7 天、自定义
+- 刷新按钮
+- 导出按钮
+- 清理管理入口
+
+日志来源必须明确标记：
+
+- `global`：`./data/logs/app_logs.sqlite`
+- `world`：`./data/worlds/<world_id>/world.sqlite` 中的运行 Logs
+- `trace`：`world.sqlite` 中的 `turn_traces` / `agent_step_traces`
+
+### 8.3 筛选与列表
+
+筛选条件分为基础筛选和上下文筛选。
+
+基础筛选：
+
+- `record_kind`：LLM 调用、stream chunk、应用事件、Agent Trace、清理任务、配置快照
+- `level`：debug / info / warn / error / fatal
+- `status`：started / succeeded / failed / cancelled / skipped / fallback_used
+- `mode`：ST / Agent / app
+- `provider`、`model`、`api_config_id`
+- 时间范围与关键词
+
+上下文筛选：
+
+- `world_id`
+- `session_id`
+- `scene_turn_id`
+- `trace_id`
+- `request_id`
+- `character_id`
+- `llm_node`
+
+列表项最少展示：
+
+- 创建时间
+- 类型图标与来源标签
+- 主标识：`request_id` / `event_id` / `trace_id`
+- 摘要：Provider、模型、节点、事件类型或 step name
+- 状态 / 级别徽标
+- 耗时、token usage、chunk 数量或 step 数量
+- 关联上下文：World、Turn、Trace、Character
+
+列表滚动必须虚拟化或分页，避免一次性读取大量 JSON 正文。默认只取元数据和摘要；request / response / chunk 正文按需加载。
+
+### 8.4 详情面板
+
+详情面板按记录类型切换 tabs：
+
+- `摘要`：状态、上下文、耗时、token、错误摘要、配置快照 ID。
+- `Request`：脱敏后的 `request_json`，支持 JSON tree 与 raw text。
+- `Response`：脱敏后的 `response_json`、`assembled_text`、`readable_text`。
+- `Stream`：按序展示 `llm_stream_chunks`，支持 chunk index、created_at、raw JSON 与 delta 摘要。
+- `Schema`：`chat_structured` 的 `schema_json` 与解析状态。
+- `Trace`：关联 `agent_step_traces` 的 step 列表、输入输出摘要、decision_json 与跳转。
+- `事件`：关联 `app_event_logs`，展示异常事件、清理事件或 retention 提示。
+
+敏感内容展示规则：
+
+- 日志写入层已经完成凭证脱敏；UI 仍必须把 Request / Response / Stream 视为本地敏感调试资料。
+- 首次展开原始 JSON 时显示轻量提示，说明其中可能包含用户 prompt、角色卡、世界书和 Agent 私有上下文。
+- 复制按钮只复制当前已显示的脱敏内容。
+- 不提供“显示未脱敏内容”的入口。
+
+### 8.5 Trace 跳转
+
+Trace 与 Logs 的双向跳转规则：
+
+- 从 `agent_step_traces.linked_request_id` 跳到对应 `llm_call_logs.request_id`。
+- 从 LLM 调用详情跳回 `trace_id` / `scene_turn_id` 所在 Trace step。
+- 从 `error_event_id` 跳到对应异常事件。
+- 从 World / Turn 上下文跳到 Agent 工作区或 Agent 聊天页时，只改变查看位置，不触发回放、回滚或重新生成。
+
+Trace 详情按运行顺序展示 step：
+
+1. SceneInitializer
+2. SceneStateExtractor
+3. UserInputDelta
+4. Simulation / Layer 2 派生
+5. Active Set / Dirty Flags
+6. CharacterCognitivePass
+7. ReactionWindow
+8. Validation
+9. OutcomePlanner
+10. SurfaceRealizer
+11. StateCommitter
+
+每个 step 展示 `step_status`、`input_summary`、`output_summary`、`decision_json`、`linked_request_id` 和 `error_event_id`。大 JSON 默认折叠。
+
+### 8.6 容量、清理与导出
+
+日志页面的容量管理分三层：
+
+- 全局容量概览：`app_logs.sqlite` 当前估算大小、默认 1GB 上限、下一次 retention 检查时间、最近清理结果。
+- World 容量概览：每个 World 的 `world.sqlite` 日志 / Trace 估算大小、最后更新时间、是否满足 30 天未更新提示条件。
+- 选中范围详情：当前筛选结果的记录数、估算大小、可导出范围。
+
+自动清理只作用于全局运行 Logs，并遵守第 6 节顺序。页面可提供手动入口：
+
+- 立即运行全局 retention 检查。
+- 导出当前筛选结果。
+- 对长期未更新 World 发起“导出”或“清理非关键运行 Logs”确认流程。
+
+手动清理必须显示影响摘要：
+
+- 将删除的记录类别与数量。
+- 是否会删除 stream chunks。
+- 是否会删除原始 request / response，只保留元数据。
+- 是否涉及 World 内日志。
+- 明确说明 Agent Trace、被 `state_commit_records.trace_ids` 引用的记录、关键回合 LLM Logs 不会自动删除。
+
+### 8.7 后端命令边界
+
+日志页面建议使用独立 Tauri 命令，避免前端直接理解 SQLite 文件路径：
+
+- `query_log_records(filter, page)`：查询全局 / World / Trace 元数据列表。
+- `get_log_record_detail(record_ref)`：按需读取 request / response / schema / readable text。
+- `get_stream_chunks(request_id, source_ref, page)`：分页读取 stream chunks。
+- `get_trace_detail(trace_id, world_id)`：读取 turn trace 与 step traces。
+- `get_log_storage_summary()`：读取全局与 World 日志容量摘要。
+- `export_logs(filter, format)`：导出当前筛选范围。
+- `run_log_retention_now(scope)`：触发允许范围内的 retention 检查。
+- `preview_log_cleanup(scope, policy)` 与 `confirm_log_cleanup(plan_id)`：先预览、后确认清理。
+
+命令必须通过 `storage::paths` 定位日志库，不接收前端传入的任意文件路径。`world_id`、`trace_id`、`request_id` 等只作为查询参数，不能参与未校验路径拼接。
+
+### 8.8 首版实现切片
+
+第一版按以下顺序落地：
+
+1. 元数据列表：全局 Logs、World Logs、Agent Trace 统一查询与筛选。
+2. LLM 调用详情：request / response / schema / readable_text 查看。
+3. stream chunks 分页查看。
+4. Trace step 查看与 request 双向跳转。
+5. 容量摘要与 30 天未更新 World 提示。
+6. 当前筛选结果导出。
+7. 手动清理预览与确认。
+
+前四项构成日志页面 MVP；后三项构成日志管理增强。
+
+### 8.9 验收要求
+
+- `/logs` 能区分全局运行 Logs、World 内 Logs 与 Agent Trace。
+- 默认列表不加载大 JSON 正文，详情按需加载。
+- 能按 `request_id` 精确找到 LLM 调用，并查看脱敏 request / response。
+- 流式请求能查看原始 chunk 顺序、`assembled_text` 和 `readable_text`。
+- Agent Trace 能跳转到对应 LLM request，LLM request 能跳回对应 Trace step。
+- ST 模式记录只出现在全局运行 Logs；Agent 回合相关记录能在对应 World 范围查到。
+- 容量摘要不会扫描或暴露任意外部路径。
+- 手动清理必须先生成预览，不允许一键直接删除 World Trace。
+- 导出内容不包含未脱敏凭证。
+
+---
+
+## 9. 验证要求
 
 - ST 模式 LLM 调用只写全局运行 Logs。
 - Agent 模式任意 `scene_turn_id` 能查到完整 Agent Trace。

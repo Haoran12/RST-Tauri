@@ -46,11 +46,13 @@ function handleThemeChange(value: 'system' | 'light' | 'dark') {
   height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .page-header {
   padding: 16px 24px;
   border-bottom: 1px solid var(--color-border-subtle, #e0e0e6);
+  flex-shrink: 0;
 }
 
 .page-title {
@@ -61,7 +63,26 @@ function handleThemeChange(value: 'system' | 'light' | 'dark') {
 
 .page-content {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 24px;
+  scrollbar-width: thin;
+}
+
+.page-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.page-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.page-content::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 3px;
+}
+
+.page-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
 }
 </style>

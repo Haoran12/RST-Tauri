@@ -2,6 +2,8 @@
 
 本文档定义 RST 通用 Structured Text Editor：在 ST 模式和 Agent 模式中编辑 `content`、模板正文、扩展字段和配置片段时共享的文本编辑能力。首版基于 CodeMirror 6 实现，RST 只封装业务绑定、模式切换、diagnostics 映射和少量输入辅助扩展，不自研编辑器核心。它只负责文本形态、格式化、括号 / 引号诊断和前端交互，不替代各业务模块的 schema 校验、权限校验、注入逻辑或 Agent World Editor 提交门禁。
 
+> 当前实现状态（2026-05-04）：本文件描述的是目标设计。仓库当前尚未存在独立的 `StructuredTextEditor`、`cm6Setup`、`languageRegistry` 或后端 `text_format/` 模块；现有 ST / Agent 前端页面仍主要使用普通表单组件和原型 UI。
+
 相关基础文档：
 
 - 总体架构、数据形态铁律与关键边界见 [01_architecture.md](01_architecture.md)。
@@ -317,7 +319,7 @@ interface StructuredTextLanguagePack {
 - 普通用户配置只能选择“已安装 / 已信任”的 `languageId`、默认模式和字段绑定，不能提供任意 JS loader。
 - `storageKind = json_value` 默认只允许 `json` / `yaml` 这类可稳定转换到 JSON-compatible value 的语言包；其他语言包只能用于 `storageKind = string`，除非其 pack 明确声明 `canParseToJsonValue = true` 并通过后端复检。
 
-建议前端模块：
+目标前端模块：
 
 ```text
 src/components/shared/structured-text-editor/
@@ -337,7 +339,7 @@ src/types/
 
 ### 7.3 后端复检
 
-建议后端模块：
+目标后端模块：
 
 ```text
 src-tauri/src/text_format/
@@ -348,11 +350,17 @@ src-tauri/src/text_format/
 
 前端负责即时体验，后端负责保存前最终解析与格式化一致性。任何后端解析失败都必须返回结构化 diagnostics，不能只返回字符串错误。后端不参与光标级编辑体验，不复刻 CM6 parser；只做保存前 parse、schema shape 检查、YAML 到 JSON-compatible value 转换和最终格式化。
 
+当前仓库说明：
+
+- 前端尚未引入 CodeMirror 6 相关模块或共享编辑器组件。
+- 后端当前也尚未落地 `text_format/json.rs`、`text_format/yaml.rs` 这类保存前复检模块。
+- 因此本文中的依赖、模块结构、诊断模型和验收项都应视为后续实现 spec，而非当前完成项。
+
 ---
 
 ## 8. 测试与验收
 
-首版必须覆盖：
+目标首版必须覆盖：
 
 - Structured Text Editor 使用 CodeMirror 6 `EditorView` 封装，切换资源 / 销毁组件时释放 view，不泄漏 listener。
 - Plain / JSON / YAML 模式切换通过 CM6 `Compartment` 完成，不重建父级 draft，不丢失 undo 之外的业务状态。

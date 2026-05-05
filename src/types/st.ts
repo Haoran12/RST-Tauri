@@ -127,6 +127,9 @@ export interface WorldInfoFile {
 
   name?: string
   description?: string
+  scan_depth?: number | null
+  token_budget?: number | null
+  recursive_scanning?: boolean
   extensions?: Record<string, unknown>
 
   // 未知字段保留
@@ -327,7 +330,51 @@ export interface ChatSession {
   character_id?: string
   created_at: string
   updated_at: string
+  chat_metadata?: ChatSessionMetadata
   messages: ChatMessage[]
+}
+
+export interface ChatSessionMetadata {
+  world_info?: string | null
+  disabled_world_info?: string[]
+  [key: string]: unknown
+}
+
+export type ChatAttachmentKind = 'image' | 'pdf'
+
+export interface ChatAttachmentRef {
+  attachment_id: string
+  kind: ChatAttachmentKind
+  mime_type: string
+  filename: string
+  size_bytes?: number
+}
+
+export interface ChatAttachmentRecord extends ChatAttachmentRef {
+  blob_filename: string
+  created_at: string
+}
+
+export interface AttachmentUploadCacheEntry {
+  attachment_id: string
+  api_config_id: string
+  provider_kind: string
+  base_url: string
+  account_fingerprint: string
+  remote_kind: string
+  remote_handle: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AttachmentUploadCacheDiagnostics {
+  attachment_id: string
+  entries: AttachmentUploadCacheEntry[]
+}
+
+export interface ClearAttachmentUploadCacheResult {
+  attachment_id: string
+  removed_entries: number
 }
 
 export interface ChatMessage {
@@ -335,6 +382,7 @@ export interface ChatMessage {
   role: string
   content: string
   created_at: string
+  attachments?: ChatAttachmentRef[]
 }
 
 // ============================================================================

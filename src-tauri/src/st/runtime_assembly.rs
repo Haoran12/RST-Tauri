@@ -6,13 +6,15 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::st::keyword_matcher::GlobalScanData;
 use crate::st::preset::{
-    SamplerPreset, InstructTemplate, ContextTemplate, SystemPrompt,
-    ReasoningTemplate, PromptPreset,
+    ContextTemplate, InstructTemplate, PromptItem, PromptPreset, ReasoningTemplate, SamplerPreset,
+    SystemPrompt,
 };
 use crate::st::regex_engine::RegexExtensionSettings;
-use crate::st::keyword_matcher::GlobalScanData;
-use crate::storage::st_resources::{ApiConfig, TavernCardV3};
+use crate::storage::st_resources::{
+    ApiConfig, ChatAttachmentKind, ChatAttachmentRef, TavernCardV3,
+};
 
 // ============================================================================
 // 全局应用状态
@@ -26,13 +28,9 @@ pub struct GlobalAppState {
     /// 当前激活的 API 配置 ID
     pub active_api_config_id: Option<String>,
 
-    /// 当前激活的各类预设名称
-    pub active_sampler_preset: String,
-    pub active_instruct_preset: String,
-    pub active_context_preset: String,
-    pub active_sysprompt_preset: String,
-    pub active_reasoning_preset: String,
-    pub active_prompt_preset: String,
+    /// 当前激活的完整预设文件名称
+    #[serde(default = "default_active_preset")]
+    pub active_preset: String,
 
     /// 是否启用自动预设选择
     pub auto_select_preset: bool,
@@ -48,17 +46,16 @@ impl Default for GlobalAppState {
     fn default() -> Self {
         Self {
             active_api_config_id: None,
-            active_sampler_preset: String::new(),
-            active_instruct_preset: String::new(),
-            active_context_preset: String::new(),
-            active_sysprompt_preset: String::new(),
-            active_reasoning_preset: String::new(),
-            active_prompt_preset: String::new(),
+            active_preset: default_active_preset(),
             auto_select_preset: false,
             world_info_settings: STWorldInfoSettings::default(),
             regex_settings: RegexExtensionSettings::default(),
         }
     }
+}
+
+fn default_active_preset() -> String {
+    "Default".to_string()
 }
 
 /// ST 世界书全局设置
@@ -166,7 +163,13 @@ pub struct STSessionData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct STChatMetadata {
     /// Chat lore：当前聊天绑定的单本世界书（RST 内部使用 lore_id）
+    #[serde(default)]
     pub world_info: Option<String>,
+
+    /// 当前会话显式关闭的世界书列表。
+    /// 默认绑定在未被列入此清单前应视为启用。
+    #[serde(default)]
+    pub disabled_world_info: Vec<String>,
 
     /// 其他扩展字段（Author's Note、变量、脚本注入、书签等）
     #[serde(flatten)]
@@ -177,6 +180,7 @@ impl Default for STChatMetadata {
     fn default() -> Self {
         Self {
             world_info: None,
+            disabled_world_info: Vec::new(),
             extra: serde_json::Map::new(),
         }
     }
@@ -190,6 +194,8 @@ pub struct STChatMessage {
     pub content: String,
     pub created_at: String,
     pub name: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<ChatAttachmentRef>,
 }
 
 // ============================================================================
@@ -279,7 +285,11 @@ impl RequestAssembler {
         if let Some(sampler) = &context.sampler_preset {
             request.sampling.temperature = Some(sampler.temperature);
             request.sampling.top_p = Some(sampler.top_p);
-            request.sampling.top_k = if sampler.top_k > 0 { Some(sampler.top_k) } else { None };
+            request.sampling.top_k = if sampler.top_k > 0 {
+                Some(sampler.top_k)
+            } else {
+                None
+            };
             request.sampling.frequency_penalty = Some(sampler.frequency_penalty);
             request.sampling.presence_penalty = Some(sampler.presence_penalty);
             request.sampling.repetition_penalty = Some(sampler.repetition_penalty);
@@ -295,7 +305,9 @@ impl RequestAssembler {
                     request.stop_sequences.push(instruct.input_sequence.clone());
                 }
                 if !instruct.output_sequence.is_empty() {
-                    request.stop_sequences.push(instruct.output_sequence.clone());
+                    request
+                        .stop_sequences
+                        .push(instruct.output_sequence.clone());
                 }
             }
         }
@@ -303,12 +315,17 @@ impl RequestAssembler {
         // 5. 设置 max_tokens
         request.max_tokens = Some(4096);
 
+        // 6. 推理参数
+        request.reasoning = Self::build_reasoning(context);
+
         request
     }
 
     /// 构建系统提示词
     fn build_system_prompt(context: &RuntimeContext) -> String {
         let mut parts: Vec<String> = Vec::new();
+
+        Self::push_prompt_preset_system_parts(context, &mut parts);
 
         // 系统提示词预设
         if let Some(sp) = &context.system_prompt {
@@ -327,7 +344,7 @@ impl RequestAssembler {
         // 世界书注入结果 - BEFORE_CHAR
         if let Some(wi) = &context.world_info_result {
             if !wi.world_info_before.is_empty() {
-                parts.push(wi.world_info_before.clone());
+                parts.push(Self::format_world_info(context, &wi.world_info_before));
             }
         }
 
@@ -336,18 +353,37 @@ impl RequestAssembler {
             if !char.data.description.is_empty() {
                 parts.push(format!("Description: {}", char.data.description));
             }
-            if !char.data.personality.is_empty() {
-                parts.push(format!("Personality: {}", char.data.personality));
+            if let Some(formatted) =
+                Self::format_character_personality(context, char.data.personality.as_str())
+            {
+                parts.push(formatted);
             }
-            if !char.data.scenario.is_empty() {
-                parts.push(format!("Scenario: {}", char.data.scenario));
+            if let Some(formatted) =
+                Self::format_character_scenario(context, char.data.scenario.as_str())
+            {
+                parts.push(formatted);
             }
         }
 
         // 世界书注入结果 - AFTER_CHAR
         if let Some(wi) = &context.world_info_result {
             if !wi.world_info_after.is_empty() {
-                parts.push(wi.world_info_after.clone());
+                parts.push(Self::format_world_info(context, &wi.world_info_after));
+            }
+        }
+
+        if let Some(context_template) = &context.context_template {
+            if !context_template.story_string.is_empty() {
+                let mut story = context_template.story_string.clone();
+                if let Some(instruct) = &context.instruct_template {
+                    if !instruct.story_string_prefix.is_empty() {
+                        story = format!("{}{}", instruct.story_string_prefix, story);
+                    }
+                    if !instruct.story_string_suffix.is_empty() {
+                        story = format!("{}{}", story, instruct.story_string_suffix);
+                    }
+                }
+                parts.push(story);
             }
         }
 
@@ -357,6 +393,10 @@ impl RequestAssembler {
     /// 构建消息列表
     fn build_messages(context: &RuntimeContext) -> Vec<AssembledMessage> {
         let mut messages: Vec<AssembledMessage> = Vec::new();
+
+        if let Some(prompt) = Self::new_chat_prompt_message(context) {
+            messages.push(prompt);
+        }
 
         // 转换聊天历史
         for msg in &context.session.messages {
@@ -372,10 +412,108 @@ impl RequestAssembler {
             messages.push(AssembledMessage {
                 role: role.to_string(),
                 content: msg.content.clone(),
+                attachments: msg
+                    .attachments
+                    .iter()
+                    .map(to_assembled_attachment)
+                    .collect(),
             });
         }
 
         messages
+    }
+
+    fn push_prompt_preset_system_parts(context: &RuntimeContext, parts: &mut Vec<String>) {
+        let Some(prompt_preset) = &context.prompt_preset else {
+            return;
+        };
+
+        for prompt in ordered_prompt_items(prompt_preset) {
+            if !prompt.system_prompt || prompt.content.is_empty() {
+                continue;
+            }
+            parts.push(prompt.content.clone());
+        }
+    }
+
+    fn format_world_info(context: &RuntimeContext, content: &str) -> String {
+        apply_prompt_format(
+            context
+                .prompt_preset
+                .as_ref()
+                .map(|preset| preset.wi_format.as_str())
+                .unwrap_or(""),
+            content,
+        )
+    }
+
+    fn format_character_scenario(context: &RuntimeContext, content: &str) -> Option<String> {
+        if content.is_empty() {
+            return None;
+        }
+        Some(apply_prompt_format(
+            context
+                .prompt_preset
+                .as_ref()
+                .map(|preset| preset.scenario_format.as_str())
+                .unwrap_or("Scenario: {{scenario}}"),
+            content,
+        ))
+    }
+
+    fn format_character_personality(context: &RuntimeContext, content: &str) -> Option<String> {
+        if content.is_empty() {
+            return None;
+        }
+        Some(apply_prompt_format(
+            context
+                .prompt_preset
+                .as_ref()
+                .map(|preset| preset.personality_format.as_str())
+                .unwrap_or("Personality: {{personality}}"),
+            content,
+        ))
+    }
+
+    fn new_chat_prompt_message(context: &RuntimeContext) -> Option<AssembledMessage> {
+        let preset = context.prompt_preset.as_ref()?;
+        if !context.session.messages.is_empty() || preset.new_chat_prompt.is_empty() {
+            return None;
+        }
+
+        Some(AssembledMessage {
+            role: "system".to_string(),
+            content: preset.new_chat_prompt.clone(),
+            attachments: Vec::new(),
+        })
+    }
+
+    fn build_reasoning(context: &RuntimeContext) -> Option<AssembledReasoningParams> {
+        let template = context.reasoning_template.as_ref()?;
+        let enabled = !template.prefix.is_empty()
+            || !template.suffix.is_empty()
+            || !template.separator.is_empty()
+            || !template.extensions.is_empty();
+        if !enabled {
+            return None;
+        }
+
+        let effort = template
+            .extensions
+            .get("effort")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string());
+        let budget_tokens = template
+            .extensions
+            .get("budget_tokens")
+            .and_then(|value| value.as_i64())
+            .and_then(|value| i32::try_from(value).ok());
+
+        Some(AssembledReasoningParams {
+            enabled: true,
+            effort,
+            budget_tokens,
+        })
     }
 }
 
@@ -412,6 +550,18 @@ pub struct AssembledRequest {
 pub struct AssembledMessage {
     pub role: String,
     pub content: String,
+    #[serde(default)]
+    pub attachments: Vec<AssembledAttachmentRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssembledAttachmentRef {
+    pub attachment_id: String,
+    pub kind: String,
+    pub mime_type: String,
+    pub filename: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
 }
 
 /// 组装后的采样参数
@@ -442,6 +592,36 @@ pub struct AssembledReasoningParams {
 /// 负责把中立请求映射到具体 Provider 参数，并处理不支持字段。
 pub struct ProviderRequestMapper;
 
+fn detect_message_attachments(request: &AssembledRequest) -> (bool, bool) {
+    let mut has_image = false;
+    let mut has_pdf = false;
+
+    for message in &request.messages {
+        for attachment in &message.attachments {
+            match attachment.kind.as_str() {
+                "image" => has_image = true,
+                "pdf" => has_pdf = true,
+                _ => {}
+            }
+        }
+    }
+
+    (has_image, has_pdf)
+}
+
+fn to_assembled_attachment(attachment: &ChatAttachmentRef) -> AssembledAttachmentRef {
+    AssembledAttachmentRef {
+        attachment_id: attachment.attachment_id.clone(),
+        kind: match attachment.kind {
+            ChatAttachmentKind::Image => "image".to_string(),
+            ChatAttachmentKind::Pdf => "pdf".to_string(),
+        },
+        mime_type: attachment.mime_type.clone(),
+        filename: attachment.filename.clone(),
+        size_bytes: attachment.size_bytes,
+    }
+}
+
 impl ProviderRequestMapper {
     /// 映射到 OpenAI Responses API 格式
     pub fn map_to_openai_responses(request: &AssembledRequest, model: &str) -> serde_json::Value {
@@ -450,14 +630,14 @@ impl ProviderRequestMapper {
         if !request.system_prompt.is_empty() {
             messages.push(serde_json::json!({
                 "role": "system",
-                "content": request.system_prompt
+                "content": [{ "type": "input_text", "text": request.system_prompt }]
             }));
         }
 
         for msg in &request.messages {
             messages.push(serde_json::json!({
                 "role": msg.role,
-                "content": msg.content
+                "content": assemble_openai_responses_content(msg)
             }));
         }
 
@@ -477,14 +657,14 @@ impl ProviderRequestMapper {
         if !request.system_prompt.is_empty() {
             messages.push(serde_json::json!({
                 "role": "system",
-                "content": request.system_prompt
+                "content": [{ "type": "text", "text": request.system_prompt }]
             }));
         }
 
         for msg in &request.messages {
             messages.push(serde_json::json!({
                 "role": msg.role,
-                "content": msg.content
+                "content": assemble_openai_chat_content(msg)
             }));
         }
 
@@ -503,32 +683,7 @@ impl ProviderRequestMapper {
 
     /// 映射到 DeepSeek API 格式
     pub fn map_to_deepseek(request: &AssembledRequest, model: &str) -> serde_json::Value {
-        let mut messages: Vec<serde_json::Value> = Vec::new();
-
-        if !request.system_prompt.is_empty() {
-            messages.push(serde_json::json!({
-                "role": "system",
-                "content": request.system_prompt
-            }));
-        }
-
-        for msg in &request.messages {
-            messages.push(serde_json::json!({
-                "role": msg.role,
-                "content": msg.content
-            }));
-        }
-
-        let mut body = serde_json::json!({
-            "model": model,
-            "messages": messages,
-            "temperature": request.sampling.temperature,
-            "top_p": request.sampling.top_p,
-            "frequency_penalty": request.sampling.frequency_penalty,
-            "presence_penalty": request.sampling.presence_penalty,
-            "stop": request.stop_sequences,
-            "stream": true
-        });
+        let mut body = Self::map_to_openai_chat(request, model);
 
         // 推理参数
         if let Some(reasoning) = &request.reasoning {
@@ -598,7 +753,7 @@ impl ProviderRequestMapper {
             };
             contents.push(serde_json::json!({
                 "role": role,
-                "parts": [{ "text": msg.content }]
+                "parts": assemble_gemini_parts(msg)
             }));
         }
 
@@ -634,4 +789,136 @@ impl ProviderRequestMapper {
             "stream": true
         })
     }
+
+    pub fn request_contains_attachments(request: &AssembledRequest) -> (bool, bool) {
+        detect_message_attachments(request)
+    }
+}
+
+fn assemble_openai_responses_content(message: &AssembledMessage) -> Vec<serde_json::Value> {
+    let mut content = vec![serde_json::json!({
+        "type": "input_text",
+        "text": message.content
+    })];
+    for attachment in &message.attachments {
+        match attachment.kind.as_str() {
+            "image" => content.push(serde_json::json!({
+                "type": "input_image",
+                "image_url": format!("attachment://{}", attachment.attachment_id),
+                "detail": "auto"
+            })),
+            "pdf" => content.push(serde_json::json!({
+                "type": "input_file",
+                "file_data": "<base64 omitted>",
+                "filename": attachment.filename
+            })),
+            _ => {}
+        }
+    }
+    content
+}
+
+fn assemble_openai_chat_content(message: &AssembledMessage) -> Vec<serde_json::Value> {
+    let mut content = vec![serde_json::json!({
+        "type": "text",
+        "text": message.content
+    })];
+    for attachment in &message.attachments {
+        match attachment.kind.as_str() {
+            "image" => content.push(serde_json::json!({
+                "type": "image_url",
+                "image_url": { "url": format!("attachment://{}", attachment.attachment_id) }
+            })),
+            "pdf" => content.push(serde_json::json!({
+                "type": "file",
+                "file": {
+                    "file_data": "<base64 omitted>",
+                    "filename": attachment.filename
+                }
+            })),
+            _ => {}
+        }
+    }
+    content
+}
+
+fn assemble_anthropic_content(message: &AssembledMessage) -> Vec<serde_json::Value> {
+    let mut content = vec![serde_json::json!({
+        "type": "text",
+        "text": message.content
+    })];
+    for attachment in &message.attachments {
+        match attachment.kind.as_str() {
+            "image" => content.push(serde_json::json!({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": attachment.mime_type,
+                    "data": "<base64 omitted>"
+                }
+            })),
+            "pdf" => content.push(serde_json::json!({
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": attachment.mime_type,
+                    "data": "<base64 omitted>"
+                }
+            })),
+            _ => {}
+        }
+    }
+    content
+}
+
+fn assemble_gemini_parts(message: &AssembledMessage) -> Vec<serde_json::Value> {
+    let mut parts = vec![serde_json::json!({ "text": message.content })];
+    for attachment in &message.attachments {
+        parts.push(serde_json::json!({
+            "inline_data": {
+                "mime_type": attachment.mime_type,
+                "data": "<base64 omitted>"
+            }
+        }));
+    }
+    parts
+}
+
+fn ordered_prompt_items(prompt_preset: &PromptPreset) -> Vec<&PromptItem> {
+    let mut prompts_by_id: HashMap<&str, &PromptItem> = HashMap::new();
+    for prompt in &prompt_preset.prompts {
+        prompts_by_id.insert(prompt.identifier.as_str(), prompt);
+    }
+
+    let mut ordered = Vec::new();
+    if let Some(default_order) = prompt_preset
+        .prompt_order
+        .iter()
+        .find(|order| order.character_id == 100000)
+        .or_else(|| prompt_preset.prompt_order.first())
+    {
+        for item in &default_order.order {
+            if !item.enabled {
+                continue;
+            }
+            if let Some(prompt) = prompts_by_id.remove(item.identifier.as_str()) {
+                ordered.push(prompt);
+            }
+        }
+    }
+
+    ordered.extend(prompts_by_id.into_values());
+    ordered
+}
+
+fn apply_prompt_format(template: &str, content: &str) -> String {
+    if template.is_empty() {
+        return content.to_string();
+    }
+
+    template
+        .replace("{{wi}}", content)
+        .replace("{{world_info}}", content)
+        .replace("{{scenario}}", content)
+        .replace("{{personality}}", content)
 }

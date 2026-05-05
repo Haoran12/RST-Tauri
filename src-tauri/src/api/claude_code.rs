@@ -24,6 +24,21 @@ impl ClaudeCodeProvider {
     }
 }
 
+pub fn build_request_body_preview(
+    config: &crate::storage::st_resources::ApiConfig,
+    request: &ChatRequest,
+    schema: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let provider = ClaudeCodeProvider::new(
+        config
+            .base_url
+            .clone()
+            .unwrap_or_else(|| "http://localhost:8080".to_string()),
+        config.model.clone(),
+    );
+    provider.build_request_body(request, schema)
+}
+
 #[async_trait]
 impl AIProvider for ClaudeCodeProvider {
     fn name(&self) -> &str {
@@ -36,6 +51,21 @@ impl AIProvider for ClaudeCodeProvider {
             "claude-sonnet-4-20250514".to_string(),
             "claude-3-5-sonnet-20241022".to_string(),
         ]
+    }
+
+    async fn list_models(&self) -> Result<Vec<ModelInfo>, String> {
+        Ok(self
+            .models()
+            .into_iter()
+            .map(|id| ModelInfo {
+                id: id.clone(),
+                display_name: Some(id),
+                owned_by: Some("claude_code".to_string()),
+                max_input_tokens: None,
+                max_output_tokens: None,
+                capabilities: None,
+            })
+            .collect())
     }
 
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, String> {
@@ -112,28 +142,26 @@ impl AIProvider for ClaudeCodeProvider {
             .await
             .map_err(|e| format!("Request failed: {}", e))?;
 
-        let stream = response.bytes_stream().map(move |result| {
-            match result {
-                Ok(bytes) => {
-                    let text = String::from_utf8_lossy(&bytes);
-                    for line in text.lines() {
-                        if line.starts_with("data: ") {
-                            let data = &line[6..];
-                            if let Ok(chunk) = serde_json::from_str::<ClaudeCodeStreamChunk>(data) {
-                                return Ok(StreamChunk {
-                                    delta: chunk.delta,
-                                    finish_reason: chunk.finish_reason,
-                                });
-                            }
+        let stream = response.bytes_stream().map(move |result| match result {
+            Ok(bytes) => {
+                let text = String::from_utf8_lossy(&bytes);
+                for line in text.lines() {
+                    if line.starts_with("data: ") {
+                        let data = &line[6..];
+                        if let Ok(chunk) = serde_json::from_str::<ClaudeCodeStreamChunk>(data) {
+                            return Ok(StreamChunk {
+                                delta: chunk.delta,
+                                finish_reason: chunk.finish_reason,
+                            });
                         }
                     }
-                    Ok(StreamChunk {
-                        delta: String::new(),
-                        finish_reason: None,
-                    })
                 }
-                Err(e) => Err(format!("Stream error: {}", e)),
+                Ok(StreamChunk {
+                    delta: String::new(),
+                    finish_reason: None,
+                })
             }
+            Err(e) => Err(format!("Stream error: {}", e)),
         });
 
         Ok(Box::pin(stream))

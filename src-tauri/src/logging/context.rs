@@ -25,6 +25,7 @@ pub enum LlmNode {
 pub struct LogContext {
     pub mode: LogMode,
     pub world_id: Option<String>,
+    pub session_id: Option<String>,
     pub scene_turn_id: Option<String>,
     pub character_id: Option<String>,
     pub trace_id: Option<String>,

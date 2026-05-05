@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 
 use crate::storage::st_resources::{
-    CharacterBook, CharacterBookEntry, WorldInfoEntry, WorldInfoFile,
-    WorldInfoLogic, WorldInfoPosition, ExtensionPromptRole,
+    CharacterBook, CharacterBookEntry, ExtensionPromptRole, WorldInfoEntry, WorldInfoFile,
+    WorldInfoLogic, WorldInfoPosition,
 };
 
 /// 将 CharacterBook 转换为外部世界书
@@ -86,7 +86,9 @@ fn convert_character_book_entry(entry: &CharacterBookEntry, index: usize) -> Wor
 
         // 扫描
         scan_depth: get_ext_opt_i32(ext, "scan_depth"),
-        case_sensitive: entry.case_sensitive.or(get_ext_opt_bool(ext, "case_sensitive")),
+        case_sensitive: entry
+            .case_sensitive
+            .or(get_ext_opt_bool(ext, "case_sensitive")),
         match_whole_words: get_ext_opt_bool(ext, "match_whole_words"),
 
         // 时间控制
@@ -117,7 +119,10 @@ fn convert_character_book_entry(entry: &CharacterBookEntry, index: usize) -> Wor
 }
 
 /// 转换 position 字段
-fn convert_position(position: Option<&str>, ext: &serde_json::Map<String, serde_json::Value>) -> i32 {
+fn convert_position(
+    position: Option<&str>,
+    ext: &serde_json::Map<String, serde_json::Value>,
+) -> i32 {
     // 优先使用 extensions.position
     if let Some(pos) = ext.get("position").and_then(|v| v.as_i64()) {
         return pos as i32;
@@ -135,10 +140,12 @@ fn convert_position(position: Option<&str>, ext: &serde_json::Map<String, serde_
 // 辅助函数：从 extensions 中提取值
 // ============================================================================
 
-fn get_ext_bool(ext: &serde_json::Map<String, serde_json::Value>, key: &str, default: bool) -> bool {
-    ext.get(key)
-        .and_then(|v| v.as_bool())
-        .unwrap_or(default)
+fn get_ext_bool(
+    ext: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    default: bool,
+) -> bool {
+    ext.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
 }
 
 fn get_ext_opt_bool(ext: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<bool> {
@@ -156,7 +163,11 @@ fn get_ext_opt_i32(ext: &serde_json::Map<String, serde_json::Value>, key: &str) 
     ext.get(key).and_then(|v| v.as_i64()).map(|v| v as i32)
 }
 
-fn get_ext_string(ext: &serde_json::Map<String, serde_json::Value>, key: &str, default: &str) -> String {
+fn get_ext_string(
+    ext: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    default: &str,
+) -> String {
     ext.get(key)
         .and_then(|v| v.as_str())
         .map(|v| v.to_string())
@@ -174,7 +185,9 @@ fn get_ext_vec_string(ext: &serde_json::Map<String, serde_json::Value>, key: &st
         .unwrap_or_default()
 }
 
-fn get_ext_delay_until_recursion(ext: &serde_json::Map<String, serde_json::Value>) -> serde_json::Value {
+fn get_ext_delay_until_recursion(
+    ext: &serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Value {
     ext.get("delay_until_recursion")
         .cloned()
         .unwrap_or(serde_json::json!(false))
@@ -192,22 +205,61 @@ pub fn convert_world_info_entry_to_character_book(entry: &WorldInfoEntry) -> Cha
 
     // 写入 ST 扩展字段
     extensions.insert("position".to_string(), serde_json::json!(entry.position));
-    extensions.insert("exclude_recursion".to_string(), serde_json::json!(entry.exclude_recursion));
-    extensions.insert("prevent_recursion".to_string(), serde_json::json!(entry.prevent_recursion));
-    extensions.insert("delay_until_recursion".to_string(), entry.delay_until_recursion.clone());
-    extensions.insert("display_index".to_string(), serde_json::json!(entry.display_index));
-    extensions.insert("probability".to_string(), serde_json::json!(entry.probability));
-    extensions.insert("useProbability".to_string(), serde_json::json!(entry.use_probability));
+    extensions.insert(
+        "exclude_recursion".to_string(),
+        serde_json::json!(entry.exclude_recursion),
+    );
+    extensions.insert(
+        "prevent_recursion".to_string(),
+        serde_json::json!(entry.prevent_recursion),
+    );
+    extensions.insert(
+        "delay_until_recursion".to_string(),
+        entry.delay_until_recursion.clone(),
+    );
+    extensions.insert(
+        "display_index".to_string(),
+        serde_json::json!(entry.display_index),
+    );
+    extensions.insert(
+        "probability".to_string(),
+        serde_json::json!(entry.probability),
+    );
+    extensions.insert(
+        "useProbability".to_string(),
+        serde_json::json!(entry.use_probability),
+    );
     extensions.insert("depth".to_string(), serde_json::json!(entry.depth));
-    extensions.insert("selectiveLogic".to_string(), serde_json::json!(entry.selective_logic));
-    extensions.insert("outlet_name".to_string(), serde_json::json!(entry.outlet_name));
+    extensions.insert(
+        "selectiveLogic".to_string(),
+        serde_json::json!(entry.selective_logic),
+    );
+    extensions.insert(
+        "outlet_name".to_string(),
+        serde_json::json!(entry.outlet_name),
+    );
     extensions.insert("group".to_string(), serde_json::json!(entry.group));
-    extensions.insert("group_override".to_string(), serde_json::json!(entry.group_override));
-    extensions.insert("group_weight".to_string(), serde_json::json!(entry.group_weight));
-    extensions.insert("automation_id".to_string(), serde_json::json!(entry.automation_id));
+    extensions.insert(
+        "group_override".to_string(),
+        serde_json::json!(entry.group_override),
+    );
+    extensions.insert(
+        "group_weight".to_string(),
+        serde_json::json!(entry.group_weight),
+    );
+    extensions.insert(
+        "automation_id".to_string(),
+        serde_json::json!(entry.automation_id),
+    );
     extensions.insert("role".to_string(), serde_json::json!(entry.role));
-    extensions.insert("vectorized".to_string(), serde_json::json!(entry.vectorized));
-    extensions.insert("ignore_budget".to_string(), serde_json::json!(entry.ignore_budget));
+    extensions.insert(
+        "vectorized".to_string(),
+        serde_json::json!(entry.vectorized),
+    );
+    extensions.insert(
+        "ignore_budget".to_string(),
+        serde_json::json!(entry.ignore_budget),
+    );
 
     if let Some(v) = entry.scan_depth {
         extensions.insert("scan_depth".to_string(), serde_json::json!(v));
@@ -231,12 +283,30 @@ pub fn convert_world_info_entry_to_character_book(entry: &WorldInfoEntry) -> Cha
         extensions.insert("delay".to_string(), serde_json::json!(v));
     }
 
-    extensions.insert("match_persona_description".to_string(), serde_json::json!(entry.match_persona_description));
-    extensions.insert("match_character_description".to_string(), serde_json::json!(entry.match_character_description));
-    extensions.insert("match_character_personality".to_string(), serde_json::json!(entry.match_character_personality));
-    extensions.insert("match_character_depth_prompt".to_string(), serde_json::json!(entry.match_character_depth_prompt));
-    extensions.insert("match_scenario".to_string(), serde_json::json!(entry.match_scenario));
-    extensions.insert("match_creator_notes".to_string(), serde_json::json!(entry.match_creator_notes));
+    extensions.insert(
+        "match_persona_description".to_string(),
+        serde_json::json!(entry.match_persona_description),
+    );
+    extensions.insert(
+        "match_character_description".to_string(),
+        serde_json::json!(entry.match_character_description),
+    );
+    extensions.insert(
+        "match_character_personality".to_string(),
+        serde_json::json!(entry.match_character_personality),
+    );
+    extensions.insert(
+        "match_character_depth_prompt".to_string(),
+        serde_json::json!(entry.match_character_depth_prompt),
+    );
+    extensions.insert(
+        "match_scenario".to_string(),
+        serde_json::json!(entry.match_scenario),
+    );
+    extensions.insert(
+        "match_creator_notes".to_string(),
+        serde_json::json!(entry.match_creator_notes),
+    );
     extensions.insert("triggers".to_string(), serde_json::json!(entry.triggers));
 
     CharacterBookEntry {

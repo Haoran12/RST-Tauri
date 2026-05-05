@@ -5,12 +5,13 @@
 //! 实现依据: SillyTavern public/scripts/world-info.js
 
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::st::keyword_matcher::{KeywordMatcher, MatchContext, GlobalScanData};
-use crate::st::runtime_assembly::{STWorldInfoSettings, WorldInfoInjectionResult, STChatMessage};
-use crate::storage::st_resources::{WorldInfoFile, WorldInfoEntry, WorldInfoPosition};
+use crate::st::keyword_matcher::{GlobalScanData, KeywordMatcher, MatchContext};
+use crate::st::runtime_assembly::{STChatMessage, STWorldInfoSettings, WorldInfoInjectionResult};
+use crate::storage::st_resources::{WorldInfoEntry, WorldInfoFile, WorldInfoPosition};
 
 // ============================================================================
 // 世界书来源类型
@@ -109,13 +110,15 @@ impl WorldInfoInjector {
         let scan_text = self.build_scan_text(chat_for_wi, settings);
 
         // 4. 执行扫描
-        let scan_result = self.scan_entries(
-            &sorted_entries,
-            &scan_text,
-            budget,
-            settings,
-            global_scan_data,
-        ).await;
+        let scan_result = self
+            .scan_entries(
+                &sorted_entries,
+                &scan_text,
+                budget,
+                settings,
+                global_scan_data,
+            )
+            .await;
 
         // 5. 按 position 分流落槽
         let mut result = self.distribute_to_positions(&scan_result.activated_entries);
@@ -147,7 +150,11 @@ impl WorldInfoInjector {
 
             // 提取词条并添加来源标记
             for (_, entry) in &source.file().entries {
-                all_entries.push((entry.clone(), source.source_name().to_string(), source.priority()));
+                all_entries.push((
+                    entry.clone(),
+                    source.source_name().to_string(),
+                    source.priority(),
+                ));
             }
         }
 
@@ -162,20 +169,16 @@ impl WorldInfoInjector {
             }
             1 => {
                 // character_first: Character 优先，然后 Global
-                all_entries.sort_by(|a, b| {
-                    match a.2.cmp(&b.2) {
-                        std::cmp::Ordering::Equal => b.0.order.cmp(&a.0.order),
-                        other => other,
-                    }
+                all_entries.sort_by(|a, b| match a.2.cmp(&b.2) {
+                    std::cmp::Ordering::Equal => b.0.order.cmp(&a.0.order),
+                    other => other,
                 });
             }
             2 => {
                 // global_first: Global 优先，然后 Character
-                all_entries.sort_by(|a, b| {
-                    match a.2.cmp(&b.2).reverse() {
-                        std::cmp::Ordering::Equal => b.0.order.cmp(&a.0.order),
-                        other => other,
-                    }
+                all_entries.sort_by(|a, b| match a.2.cmp(&b.2).reverse() {
+                    std::cmp::Ordering::Equal => b.0.order.cmp(&a.0.order),
+                    other => other,
                 });
             }
             _ => {}
@@ -196,7 +199,11 @@ impl WorldInfoInjector {
     }
 
     /// 构造扫描文本
-    fn build_scan_text(&self, chat: &[STChatMessage], settings: &STWorldInfoSettings) -> Vec<String> {
+    fn build_scan_text(
+        &self,
+        chat: &[STChatMessage],
+        settings: &STWorldInfoSettings,
+    ) -> Vec<String> {
         // 反转聊天顺序（最近消息在前）
         let mut scan_text: Vec<String> = Vec::new();
 
@@ -228,73 +235,200 @@ impl WorldInfoInjector {
     ) -> ScanResult {
         let mut result = ScanResult::default();
         let mut used_budget = 0i32;
-        let mut recursion_buffer: Vec<WorldInfoEntry> = Vec::new();
-        let recursion_depth = 0;
-
-        // 构造匹配上下文
-        let combined_scan_text = scan_text.join("\n");
-        let context = MatchContext {
-            scan_text: &combined_scan_text,
-            global_scan_data: global_scan_data,
-            global_case_sensitive: settings.world_info_case_sensitive,
-            global_match_whole_words: settings.world_info_match_whole_words,
-            global_scan_depth: settings.world_info_depth,
+        let mut activated_uids: HashSet<i32> = HashSet::new();
+        let mut current_scan_text = scan_text.to_vec();
+        let max_steps = if settings.world_info_recursive {
+            settings.world_info_max_recursion_steps.max(0)
+        } else {
+            0
         };
 
-        for (entry, _source) in entries {
-            // 跳过禁用的词条
-            if entry.disable {
-                continue;
-            }
+        for recursion_depth in 0..=max_steps {
+            let candidates = self.scan_pass(
+                entries,
+                &current_scan_text,
+                recursion_depth,
+                settings,
+                global_scan_data,
+                &activated_uids,
+            );
+            let candidates = self.apply_group_pruning(candidates);
 
-            // 检查 constant 或 sticky
-            if entry.constant {
-                result.activated_entries.push(entry.clone());
-                continue;
-            }
+            let mut recursion_additions = Vec::new();
+            let mut added_this_pass = 0usize;
+            for entry in candidates {
+                if activated_uids.contains(&entry.uid) {
+                    continue;
+                }
+                if !self.passes_probability(&entry, &current_scan_text, recursion_depth) {
+                    continue;
+                }
 
-            // 概率检查
-            if entry.use_probability && entry.probability < 100 {
-                // 简化的概率检查（实际应使用随机数）
-                // 这里暂时跳过概率逻辑
-            }
-
-            // 检查延迟/冷却/sticky
-            // 简化实现，跳过时间控制逻辑
-
-            // 检查递归门控
-            if entry.exclude_recursion && recursion_depth > 0 {
-                continue;
-            }
-
-            // 执行关键词匹配
-            let match_result = self.matcher.match_entry(entry, &context);
-
-            if match_result.is_some() {
-                // 预算检查
                 let entry_tokens = self.estimate_tokens(&entry.content);
                 if !entry.ignore_budget && used_budget + entry_tokens > budget {
                     continue;
                 }
 
-                result.activated_entries.push(entry.clone());
                 used_budget += entry_tokens;
+                activated_uids.insert(entry.uid);
+                if settings.world_info_recursive
+                    && !entry.prevent_recursion
+                    && !entry.content.is_empty()
+                {
+                    recursion_additions.push(entry.content.clone());
+                }
+                result.activated_entries.push(entry);
+                added_this_pass += 1;
+            }
 
-                // 递归处理
-                if settings.world_info_recursive && !entry.prevent_recursion {
-                    recursion_buffer.push(entry.clone());
+            if !settings.world_info_recursive
+                || recursion_depth >= max_steps
+                || recursion_additions.is_empty()
+            {
+                if result.activated_entries.len() as i32 >= settings.world_info_min_activations
+                    || added_this_pass == 0
+                {
+                    break;
                 }
             }
-        }
 
-        // 处理递归扫描
-        if !recursion_buffer.is_empty() && recursion_depth < settings.world_info_max_recursion_steps {
-            // 简化的递归实现
-            // 实际实现需要用递归缓冲区的内容继续扫描
+            // ST uses newly activated content to extend the next recursive scan.
+            for content in recursion_additions.into_iter().rev() {
+                current_scan_text.insert(0, content);
+            }
         }
 
         result.used_budget = used_budget;
         result
+    }
+
+    fn scan_pass(
+        &mut self,
+        entries: &[(WorldInfoEntry, String)],
+        scan_text: &[String],
+        recursion_depth: i32,
+        settings: &STWorldInfoSettings,
+        global_scan_data: &GlobalScanData,
+        activated_uids: &HashSet<i32>,
+    ) -> Vec<WorldInfoEntry> {
+        let mut candidates = Vec::new();
+
+        for (entry, _source) in entries {
+            if entry.disable || activated_uids.contains(&entry.uid) {
+                continue;
+            }
+            if !Self::passes_recursion_gate(entry, recursion_depth) {
+                continue;
+            }
+            if recursion_depth == 0 && !Self::passes_initial_delay(entry, scan_text.len()) {
+                continue;
+            }
+
+            if entry.constant {
+                candidates.push(entry.clone());
+                continue;
+            }
+
+            let entry_scan_depth =
+                entry.scan_depth.unwrap_or(settings.world_info_depth).max(0) as usize;
+            let entry_scan_text = scan_text
+                .iter()
+                .take(entry_scan_depth)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n");
+            let context = MatchContext {
+                scan_text: &entry_scan_text,
+                global_scan_data,
+                global_case_sensitive: settings.world_info_case_sensitive,
+                global_match_whole_words: settings.world_info_match_whole_words,
+                global_scan_depth: entry_scan_depth as i32,
+            };
+
+            if self.matcher.match_entry(entry, &context).is_some() {
+                candidates.push(entry.clone());
+            }
+        }
+
+        candidates
+    }
+
+    fn passes_recursion_gate(entry: &WorldInfoEntry, recursion_depth: i32) -> bool {
+        if recursion_depth > 0 && entry.exclude_recursion {
+            return false;
+        }
+
+        match &entry.delay_until_recursion {
+            serde_json::Value::Bool(true) => recursion_depth > 0,
+            serde_json::Value::Number(n) => {
+                let required_depth = n.as_i64().unwrap_or(0).max(0) as i32;
+                recursion_depth >= required_depth
+            }
+            _ => true,
+        }
+    }
+
+    fn passes_initial_delay(entry: &WorldInfoEntry, available_messages: usize) -> bool {
+        match entry.delay {
+            Some(delay) if delay > 0 => available_messages > delay as usize,
+            _ => true,
+        }
+    }
+
+    fn apply_group_pruning(&self, entries: Vec<WorldInfoEntry>) -> Vec<WorldInfoEntry> {
+        let mut passthrough = Vec::new();
+        let mut grouped: HashMap<String, WorldInfoEntry> = HashMap::new();
+
+        for entry in entries {
+            if entry.group.is_empty() || entry.group_override {
+                passthrough.push(entry);
+                continue;
+            }
+
+            grouped
+                .entry(entry.group.clone())
+                .and_modify(|existing| {
+                    if Self::group_rank(&entry) > Self::group_rank(existing) {
+                        *existing = entry.clone();
+                    }
+                })
+                .or_insert(entry);
+        }
+
+        passthrough.extend(grouped.into_values());
+        passthrough.sort_by(|a, b| b.order.cmp(&a.order).then_with(|| a.uid.cmp(&b.uid)));
+        passthrough
+    }
+
+    fn group_rank(entry: &WorldInfoEntry) -> (i32, i32, i32) {
+        (entry.group_weight, entry.order, -entry.uid)
+    }
+
+    fn passes_probability(
+        &self,
+        entry: &WorldInfoEntry,
+        scan_text: &[String],
+        recursion_depth: i32,
+    ) -> bool {
+        if !entry.use_probability {
+            return true;
+        }
+        let probability = entry.probability.clamp(0, 100);
+        if probability >= 100 {
+            return true;
+        }
+        if probability <= 0 {
+            return false;
+        }
+
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        entry.uid.hash(&mut hasher);
+        entry.content.hash(&mut hasher);
+        recursion_depth.hash(&mut hasher);
+        for text in scan_text {
+            text.hash(&mut hasher);
+        }
+        (hasher.finish() % 100) < probability as u64
     }
 
     /// 按 position 分流落槽
@@ -320,7 +454,8 @@ impl WorldInfoInjector {
                 p if p == WorldInfoPosition::AT_DEPTH => {
                     let depth = entry.depth;
                     let role = entry.role;
-                    result.world_info_depth
+                    result
+                        .world_info_depth
                         .entry(depth)
                         .or_insert_with(HashMap::new)
                         .entry(role)
@@ -345,7 +480,8 @@ impl WorldInfoInjector {
                 }
                 p if p == WorldInfoPosition::OUTLET => {
                     if !entry.outlet_name.is_empty() {
-                        result.outlets
+                        result
+                            .outlets
                             .entry(entry.outlet_name.clone())
                             .or_insert_with(String::new)
                             .push_str(&content);
@@ -392,12 +528,18 @@ struct ScanResult {
 /// 负责加载和管理世界书文件。
 pub struct WorldInfoManager {
     cache: Arc<RwLock<HashMap<String, WorldInfoFile>>>,
+    max_cached_worldbooks: usize,
 }
 
 impl WorldInfoManager {
     pub fn new() -> Self {
+        Self::with_capacity(64)
+    }
+
+    pub fn with_capacity(max_cached_worldbooks: usize) -> Self {
         Self {
             cache: Arc::new(RwLock::new(HashMap::new())),
+            max_cached_worldbooks: max_cached_worldbooks.max(1),
         }
     }
 
@@ -410,7 +552,21 @@ impl WorldInfoManager {
     /// 缓存世界书
     pub async fn cache_worldbook(&self, id: String, worldbook: WorldInfoFile) {
         let mut cache = self.cache.write().await;
+        if cache.len() >= self.max_cached_worldbooks && !cache.contains_key(&id) {
+            if let Some(evict_id) = cache.keys().next().cloned() {
+                cache.remove(&evict_id);
+            }
+        }
         cache.insert(id, worldbook);
+    }
+
+    pub async fn invalidate_worldbook(&self, id: &str) {
+        let mut cache = self.cache.write().await;
+        cache.remove(id);
+    }
+
+    pub async fn cache_len(&self) -> usize {
+        self.cache.read().await.len()
     }
 
     /// 清除缓存
@@ -423,5 +579,49 @@ impl WorldInfoManager {
 impl Default for WorldInfoManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_worldbook(name: &str) -> WorldInfoFile {
+        WorldInfoFile {
+            entries: HashMap::new(),
+            original_data: None,
+            rst_lore_id: Some(name.to_string()),
+            name: name.to_string(),
+            description: String::new(),
+            extensions: serde_json::Map::new(),
+            extra: serde_json::Map::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn world_info_manager_bounds_worldbook_pool_cache() {
+        let manager = WorldInfoManager::with_capacity(1);
+
+        manager
+            .cache_worldbook("lore-a".to_string(), empty_worldbook("lore-a"))
+            .await;
+        manager
+            .cache_worldbook("lore-b".to_string(), empty_worldbook("lore-b"))
+            .await;
+
+        assert_eq!(manager.cache_len().await, 1);
+        assert!(manager.load_worldbook("lore-b").await.is_some());
+    }
+
+    #[tokio::test]
+    async fn world_info_manager_invalidates_changed_worldbook() {
+        let manager = WorldInfoManager::new();
+        manager
+            .cache_worldbook("lore-a".to_string(), empty_worldbook("lore-a"))
+            .await;
+
+        manager.invalidate_worldbook("lore-a").await;
+
+        assert!(manager.load_worldbook("lore-a").await.is_none());
     }
 }

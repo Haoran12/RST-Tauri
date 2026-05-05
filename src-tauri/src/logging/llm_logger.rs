@@ -1,9 +1,12 @@
 //! LLM call logger
 
 use crate::logging::context::LogContext;
+use base64::Engine;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
+use uuid::Uuid;
 
 /// LLM call log entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,11 +40,22 @@ pub struct LlmCallLog {
     pub completed_at: Option<String>,
 }
 
+/// LLM stream chunk log entry
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmStreamChunk {
+    pub chunk_id: String,
+    pub request_id: String,
+    pub chunk_index: u32,
+    pub raw_chunk: String,
+    pub received_at: String,
+}
+
 /// In-progress call tracking
 #[derive(Debug, Clone)]
 struct InProgressCall {
     mode: String,
     world_id: Option<String>,
+    session_id: Option<String>,
     scene_turn_id: Option<String>,
     trace_id: Option<String>,
     character_id: Option<String>,
@@ -54,19 +68,23 @@ struct InProgressCall {
     schema_json: Option<serde_json::Value>,
     redaction_applied: bool,
     started_at: chrono::DateTime<Utc>,
+    chunk_count: std::sync::Arc<std::sync::atomic::AtomicU32>,
 }
 
 /// LLM call logger
 pub struct LlmCallLogger {
     pool: SqlitePool,
-    in_progress: std::sync::Arc<tokio::sync::RwLock<std::collections::HashMap<String, InProgressCall>>>,
+    in_progress:
+        std::sync::Arc<tokio::sync::RwLock<std::collections::HashMap<String, InProgressCall>>>,
 }
 
 impl LlmCallLogger {
     pub fn new(pool: SqlitePool) -> Self {
         Self {
             pool,
-            in_progress: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            in_progress: std::sync::Arc::new(tokio::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
         }
     }
 
@@ -108,6 +126,16 @@ impl LlmCallLogger {
             CREATE INDEX IF NOT EXISTS idx_llm_logs_world_id ON llm_call_logs(world_id);
             CREATE INDEX IF NOT EXISTS idx_llm_logs_trace_id ON llm_call_logs(trace_id);
             CREATE INDEX IF NOT EXISTS idx_llm_logs_created_at ON llm_call_logs(created_at);
+
+            CREATE TABLE IF NOT EXISTS llm_stream_chunks (
+                chunk_id TEXT PRIMARY KEY,
+                request_id TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                raw_chunk TEXT NOT NULL,
+                received_at TEXT NOT NULL,
+                FOREIGN KEY (request_id) REFERENCES llm_call_logs(request_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_stream_chunks_request ON llm_stream_chunks(request_id, chunk_index);
             "#,
         )
         .execute(&self.pool)
@@ -147,6 +175,7 @@ impl LlmCallLogger {
         let call = InProgressCall {
             mode: mode.to_string(),
             world_id: context.world_id.clone(),
+            session_id: context.session_id.clone(),
             scene_turn_id: context.scene_turn_id.clone(),
             trace_id: context.trace_id.clone(),
             character_id: context.character_id.clone(),
@@ -159,9 +188,67 @@ impl LlmCallLogger {
             schema_json,
             redaction_applied: request_redacted,
             started_at: Utc::now(),
+            chunk_count: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
         };
 
         self.in_progress.write().await.insert(request_id, call);
+    }
+
+    /// Log a stream chunk for an in-progress call
+    pub async fn log_stream_chunk(&self, request_id: &str, chunk: &str) {
+        // Get chunk index atomically
+        let chunk_count_arc = {
+            let in_progress = self.in_progress.read().await;
+            match in_progress.get(request_id) {
+                Some(call) => call.chunk_count.clone(),
+                None => return,
+            }
+        };
+
+        let chunk_index = chunk_count_arc.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let chunk_id = Uuid::new_v4().to_string();
+        let received_at = Utc::now().to_rfc3339();
+
+        // Redact sensitive data in chunk
+        let raw_chunk = redact_sensitive_text(chunk);
+
+        // Insert chunk
+        sqlx::query(
+            "INSERT INTO llm_stream_chunks (chunk_id, request_id, chunk_index, raw_chunk, received_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(&chunk_id)
+        .bind(request_id)
+        .bind(chunk_index as i64)
+        .bind(&raw_chunk)
+        .bind(&received_at)
+        .execute(&self.pool)
+        .await
+        .ok();
+    }
+
+    /// Get stream chunks for a request
+    pub async fn get_stream_chunks(&self, request_id: &str) -> Result<Vec<LlmStreamChunk>, String> {
+        let rows = sqlx::query(
+            "SELECT chunk_id, request_id, chunk_index, raw_chunk, received_at FROM llm_stream_chunks WHERE request_id = ? ORDER BY chunk_index",
+        )
+        .bind(request_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to get stream chunks: {}", e))?;
+
+        Ok(rows
+            .iter()
+            .map(|r| {
+                use sqlx::Row;
+                LlmStreamChunk {
+                    chunk_id: r.get("chunk_id"),
+                    request_id: r.get("request_id"),
+                    chunk_index: r.get::<i64, _>("chunk_index") as u32,
+                    raw_chunk: r.get("raw_chunk"),
+                    received_at: r.get("received_at"),
+                }
+            })
+            .collect())
     }
 
     /// Log LLM call success
@@ -197,7 +284,7 @@ impl LlmCallLogger {
             .bind(request_id)
             .bind(&call.mode)
             .bind(&call.world_id)
-            .bind(None::<String>) // session_id
+            .bind(&call.session_id)
             .bind(&call.scene_turn_id)
             .bind(&call.trace_id)
             .bind(&call.character_id)
@@ -250,7 +337,7 @@ impl LlmCallLogger {
             .bind(request_id)
             .bind(&call.mode)
             .bind(&call.world_id)
-            .bind(None::<String>) // session_id
+            .bind(&call.session_id)
             .bind(&call.scene_turn_id)
             .bind(&call.trace_id)
             .bind(&call.character_id)
@@ -262,7 +349,11 @@ impl LlmCallLogger {
             .bind(&call.model)
             .bind(&call.call_type)
             .bind(serde_json::to_string(&call.request_json).unwrap_or_default())
-            .bind(call.schema_json.as_ref().map(|s| serde_json::to_string(s).unwrap_or_default()))
+            .bind(
+                call.schema_json
+                    .as_ref()
+                    .map(|s| serde_json::to_string(s).unwrap_or_default()),
+            )
             .bind("failure")
             .bind(latency_ms as i64)
             .bind(&error_summary)
@@ -277,39 +368,34 @@ impl LlmCallLogger {
 
     /// Get logs by request ID
     pub async fn get_by_request_id(&self, request_id: &str) -> Result<Option<LlmCallLog>, String> {
-        let row = sqlx::query(
-            "SELECT * FROM llm_call_logs WHERE request_id = ?",
-        )
-        .bind(request_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| format!("Failed to get log: {}", e))?;
+        let row = sqlx::query("SELECT * FROM llm_call_logs WHERE request_id = ?")
+            .bind(request_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to get log: {}", e))?;
 
         Ok(row.map(|r| self::row_to_log(&r)))
     }
 
     /// Get logs by trace ID
     pub async fn get_by_trace_id(&self, trace_id: &str) -> Result<Vec<LlmCallLog>, String> {
-        let rows = sqlx::query(
-            "SELECT * FROM llm_call_logs WHERE trace_id = ? ORDER BY created_at",
-        )
-        .bind(trace_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| format!("Failed to get logs: {}", e))?;
+        let rows =
+            sqlx::query("SELECT * FROM llm_call_logs WHERE trace_id = ? ORDER BY created_at")
+                .bind(trace_id)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| format!("Failed to get logs: {}", e))?;
 
         Ok(rows.iter().map(|r| self::row_to_log(r)).collect())
     }
 
     /// Get recent logs
     pub async fn get_recent(&self, limit: i64) -> Result<Vec<LlmCallLog>, String> {
-        let rows = sqlx::query(
-            "SELECT * FROM llm_call_logs ORDER BY created_at DESC LIMIT ?",
-        )
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| format!("Failed to get logs: {}", e))?;
+        let rows = sqlx::query("SELECT * FROM llm_call_logs ORDER BY created_at DESC LIMIT ?")
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to get logs: {}", e))?;
 
         Ok(rows.iter().map(|r| self::row_to_log(r)).collect())
     }
@@ -317,13 +403,11 @@ impl LlmCallLogger {
     /// Delete logs older than specified days
     pub async fn delete_old_logs(&self, days: i64) -> Result<u64, String> {
         let cutoff = Utc::now() - chrono::Duration::days(days);
-        let result = sqlx::query(
-            "DELETE FROM llm_call_logs WHERE created_at < ?",
-        )
-        .bind(cutoff.to_rfc3339())
-        .execute(&self.pool)
-        .await
-        .map_err(|e| format!("Failed to delete old logs: {}", e))?;
+        let result = sqlx::query("DELETE FROM llm_call_logs WHERE created_at < ?")
+            .bind(cutoff.to_rfc3339())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to delete old logs: {}", e))?;
 
         Ok(result.rows_affected())
     }
@@ -346,14 +430,21 @@ fn row_to_log(row: &sqlx::sqlite::SqliteRow) -> LlmCallLog {
         provider: row.get("provider"),
         model: row.get("model"),
         call_type: row.get("call_type"),
-        request_json: serde_json::from_str(row.get::<&str, _>("request_json")).unwrap_or(serde_json::Value::Null),
-        schema_json: row.get::<Option<&str>, _>("schema_json").and_then(|s| serde_json::from_str(s).ok()),
-        response_json: row.get::<Option<&str>, _>("response_json").and_then(|s| serde_json::from_str(s).ok()),
+        request_json: serde_json::from_str(row.get::<&str, _>("request_json"))
+            .unwrap_or(serde_json::Value::Null),
+        schema_json: row
+            .get::<Option<&str>, _>("schema_json")
+            .and_then(|s| serde_json::from_str(s).ok()),
+        response_json: row
+            .get::<Option<&str>, _>("response_json")
+            .and_then(|s| serde_json::from_str(s).ok()),
         assembled_text: row.get("assembled_text"),
         readable_text: row.get("readable_text"),
         status: row.get("status"),
         latency_ms: row.get::<Option<i64>, _>("latency_ms").map(|v| v as u64),
-        token_usage: row.get::<Option<&str>, _>("token_usage").and_then(|s| serde_json::from_str(s).ok()),
+        token_usage: row
+            .get::<Option<&str>, _>("token_usage")
+            .and_then(|s| serde_json::from_str(s).ok()),
         retry_count: row.get::<i32, _>("retry_count") as u32,
         error_summary: row.get("error_summary"),
         redaction_applied: row.get::<i32, _>("redaction_applied") != 0,
@@ -381,7 +472,11 @@ fn extract_text_from_response(response: &serde_json::Value) -> Option<String> {
         if let Some(arr) = choices.as_array() {
             let texts: Vec<&str> = arr
                 .iter()
-                .filter_map(|c| c.get("message").and_then(|m| m.get("content")).and_then(|t| t.as_str()))
+                .filter_map(|c| {
+                    c.get("message")
+                        .and_then(|m| m.get("content"))
+                        .and_then(|t| t.as_str())
+                })
                 .collect();
             if !texts.is_empty() {
                 return Some(texts.join(""));
@@ -391,12 +486,17 @@ fn extract_text_from_response(response: &serde_json::Value) -> Option<String> {
     None
 }
 
-fn assemble_readable_text(request: &serde_json::Value, response: &serde_json::Value) -> Option<String> {
+fn assemble_readable_text(
+    request: &serde_json::Value,
+    response: &serde_json::Value,
+) -> Option<String> {
     let mut parts = Vec::new();
 
     if let Some(messages) = request.get("messages").and_then(|m| m.as_array()) {
         for msg in messages {
-            if let (Some(role), Some(content)) = (msg.get("role").and_then(|r| r.as_str()), msg.get("content")) {
+            if let (Some(role), Some(content)) =
+                (msg.get("role").and_then(|r| r.as_str()), msg.get("content"))
+            {
                 let content_text = if let Some(s) = content.as_str() {
                     s.to_string()
                 } else if let Some(arr) = content.as_array() {
@@ -432,6 +532,10 @@ fn redact_sensitive_value(value: &serde_json::Value) -> (serde_json::Value, bool
                 if is_sensitive_key(key) {
                     redacted.insert(key.clone(), redacted_placeholder(child));
                     changed = true;
+                } else if is_binary_payload_key(key) {
+                    let (summary, child_changed) = summarize_binary_payload(key, child);
+                    changed |= child_changed;
+                    redacted.insert(key.clone(), summary);
                 } else {
                     let (child_value, child_changed) = redact_sensitive_value(child);
                     changed |= child_changed;
@@ -477,6 +581,61 @@ fn is_sensitive_key(key: &str) -> bool {
     )
 }
 
+fn is_binary_payload_key(key: &str) -> bool {
+    matches!(
+        key.to_ascii_lowercase().as_str(),
+        "image_url" | "file_data" | "data"
+    )
+}
+
+fn summarize_binary_payload(key: &str, value: &serde_json::Value) -> (serde_json::Value, bool) {
+    let Some(raw) = value.as_str() else {
+        return (value.clone(), false);
+    };
+
+    let (mime_type, encoded) = if key.eq_ignore_ascii_case("image_url") {
+        match parse_data_url(raw) {
+            Some(parts) => parts,
+            None => return (value.clone(), false),
+        }
+    } else {
+        let mime_type = infer_mime_type_from_sibling_context(value)
+            .unwrap_or_else(|| "application/octet-stream".to_string());
+        (mime_type, raw.to_string())
+    };
+
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded.as_bytes()) else {
+        return (value.clone(), false);
+    };
+
+    (
+        serde_json::json!({
+            "redacted": true,
+            "transport": if key.eq_ignore_ascii_case("image_url") { "inline_data_url" } else { "inline_base64" },
+            "mime_type": mime_type,
+            "size_bytes": bytes.len(),
+            "sha256": sha256_hex(&bytes),
+        }),
+        true,
+    )
+}
+
+fn infer_mime_type_from_sibling_context(_value: &serde_json::Value) -> Option<String> {
+    None
+}
+
+fn parse_data_url(raw: &str) -> Option<(String, String)> {
+    let rest = raw.strip_prefix("data:")?;
+    let (mime_type, encoded) = rest.split_once(";base64,")?;
+    Some((mime_type.to_string(), encoded.to_string()))
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
+}
+
 fn redacted_placeholder(value: &serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::String(_) => serde_json::Value::String("[REDACTED]".to_string()),
@@ -490,7 +649,14 @@ fn redacted_placeholder(value: &serde_json::Value) -> serde_json::Value {
 
 fn redact_sensitive_text(text: &str) -> String {
     let mut result = text.to_string();
-    for marker in ["key=", "api_key=", "api-key=", "token=", "access_token=", "password="] {
+    for marker in [
+        "key=",
+        "api_key=",
+        "api-key=",
+        "token=",
+        "access_token=",
+        "password=",
+    ] {
         result = redact_query_value(&result, marker);
     }
     result
@@ -547,5 +713,39 @@ mod tests {
             redact_sensitive_text(text),
             "request failed for https://example.test/v1?key=[REDACTED]&model=test"
         );
+    }
+
+    #[test]
+    fn summarizes_inline_attachment_payloads_without_persisting_base64() {
+        let input = serde_json::json!({
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": "data:image/png;base64,aGVsbG8="
+                },
+                {
+                    "type": "file",
+                    "file": {
+                        "file_data": "cGRmLWJ5dGVz"
+                    }
+                }
+            ]
+        });
+
+        let (redacted, changed) = redact_sensitive_value(&input);
+
+        assert!(changed);
+        assert_eq!(redacted["content"][0]["image_url"]["redacted"], true);
+        assert_eq!(redacted["content"][0]["image_url"]["size_bytes"], 5);
+        assert_eq!(
+            redacted["content"][1]["file"]["file_data"]["redacted"],
+            true
+        );
+        assert_eq!(
+            redacted["content"][1]["file"]["file_data"]["transport"],
+            "inline_base64"
+        );
+        assert!(!redacted.to_string().contains("aGVsbG8="));
+        assert!(!redacted.to_string().contains("cGRmLWJ5dGVz"));
     }
 }

@@ -1,10 +1,14 @@
 //! OpenAI Responses API provider (new generation)
 
+use crate::api::openai_files::{
+    invalidate_openai_file_cache, prepare_request_messages_with_file_cache,
+};
 use crate::api::provider::*;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use reqwest::Client;
 use serde::Deserialize;
+use std::path::PathBuf;
 use std::pin::Pin;
 
 pub struct OpenAIResponsesProvider {
@@ -12,17 +16,39 @@ pub struct OpenAIResponsesProvider {
     base_url: String,
     api_key: String,
     default_model: String,
+    data_dir: Option<PathBuf>,
 }
 
 impl OpenAIResponsesProvider {
-    pub fn new(api_key: String, base_url: Option<String>, default_model: String) -> Self {
+    pub fn new(
+        api_key: String,
+        base_url: Option<String>,
+        default_model: String,
+        data_dir: Option<PathBuf>,
+    ) -> Self {
         Self {
             client: Client::new(),
             base_url: base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
             api_key,
             default_model,
+            data_dir,
         }
     }
+}
+
+pub async fn build_request_body_preview(
+    config: &crate::storage::st_resources::ApiConfig,
+    data_dir: &std::path::Path,
+    request: &ChatRequest,
+    schema: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let provider = OpenAIResponsesProvider::new(
+        config.api_key.clone().unwrap_or_default(),
+        config.base_url.clone(),
+        config.model.clone(),
+        Some(data_dir.to_path_buf()),
+    );
+    provider.build_request_body(request, schema).await
 }
 
 #[async_trait]
@@ -41,13 +67,80 @@ impl AIProvider for OpenAIResponsesProvider {
         ]
     }
 
+    async fn list_models(&self) -> Result<Vec<ModelInfo>, String> {
+        let response = self
+            .client
+            .get(format!("{}/models", self.base_url))
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .send()
+            .await
+            .map_err(|e| format!("Request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(format!("API error: {}", error_text));
+        }
+
+        let body: OpenAIModelsResponse = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        Ok(body
+            .data
+            .into_iter()
+            .map(|m| ModelInfo {
+                id: m.id,
+                display_name: None,
+                owned_by: Some(m.owned_by),
+                max_input_tokens: None,
+                max_output_tokens: None,
+                capabilities: None,
+            })
+            .collect())
+    }
+
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, String> {
+        self.chat_once_with_retry(request).await
+    }
+
+    async fn chat_structured(
+        &self,
+        request: ChatRequest,
+        schema: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        self.chat_structured_once_with_retry(request, schema).await
+    }
+
+    async fn chat_stream(
+        &self,
+        request: ChatRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, String>> + Send>>, String> {
+        self.chat_stream_once_with_retry(request).await
+    }
+}
+
+impl OpenAIResponsesProvider {
+    async fn chat_once_with_retry(&self, request: ChatRequest) -> Result<ChatResponse, String> {
+        match self.send_chat_once(&request).await {
+            Ok(response) => Ok(response),
+            Err(error) if Self::should_retry_missing_file(&error) => {
+                self.invalidate_file_caches(&request).await?;
+                self.send_chat_once(&request).await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn send_chat_once(&self, request: &ChatRequest) -> Result<ChatResponse, String> {
+        let request_body = self.build_request_body(request, None).await?;
         let response = self
             .client
             .post(format!("{}/responses", self.base_url))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
-            .json(&self.build_request_body(&request, None)?)
+            .json(&request_body)
             .send()
             .await
             .map_err(|e| format!("Request failed: {}", e))?;
@@ -76,7 +169,7 @@ impl AIProvider for OpenAIResponsesProvider {
             .join("");
 
         Ok(ChatResponse {
-            request_id: request.request_id,
+            request_id: request.request_id.clone(),
             content,
             reasoning: None,
             token_usage: body.usage.map(|u| TokenUsage {
@@ -88,17 +181,35 @@ impl AIProvider for OpenAIResponsesProvider {
         })
     }
 
-    async fn chat_structured(
+    async fn chat_structured_once_with_retry(
         &self,
         request: ChatRequest,
         schema: serde_json::Value,
     ) -> Result<serde_json::Value, String> {
+        match self.send_chat_structured_once(&request, &schema).await {
+            Ok(response) => Ok(response),
+            Err(error) if Self::should_retry_missing_file(&error) => {
+                self.invalidate_file_caches(&request).await?;
+                self.send_chat_structured_once(&request, &schema).await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn send_chat_structured_once(
+        &self,
+        request: &ChatRequest,
+        schema: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let request_body = self
+            .build_request_body(request, Some(schema.clone()))
+            .await?;
         let response = self
             .client
             .post(format!("{}/responses", self.base_url))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
-            .json(&self.build_request_body(&request, Some(schema))?)
+            .json(&request_body)
             .send()
             .await
             .map_err(|e| format!("Request failed: {}", e))?;
@@ -129,70 +240,123 @@ impl AIProvider for OpenAIResponsesProvider {
         serde_json::from_str(&content).map_err(|e| format!("Failed to parse JSON: {}", e))
     }
 
-    async fn chat_stream(
+    async fn chat_stream_once_with_retry(
         &self,
         request: ChatRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, String>> + Send>>, String> {
-        // Responses API uses SSE streaming
+        match self.send_chat_stream_once(&request).await {
+            Ok(stream) => Ok(stream),
+            Err(error) if Self::should_retry_missing_file(&error) => {
+                self.invalidate_file_caches(&request).await?;
+                self.send_chat_stream_once(&request).await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn send_chat_stream_once(
+        &self,
+        request: &ChatRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, String>> + Send>>, String> {
         let mut stream_request = request.clone();
         stream_request.stream = true;
+        let request_body = self.build_request_body(&stream_request, None).await?;
 
         let response = self
             .client
             .post(format!("{}/responses", self.base_url))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
-            .json(&self.build_request_body(&stream_request, None)?)
+            .json(&request_body)
             .send()
             .await
             .map_err(|e| format!("Request failed: {}", e))?;
 
-        let stream = response.bytes_stream().map(move |result| {
-            match result {
-                Ok(bytes) => {
-                    let text = String::from_utf8_lossy(&bytes);
-                    for line in text.lines() {
-                        if line.starts_with("data: ") {
-                            let data = &line[6..];
-                            if let Ok(event) = serde_json::from_str::<ResponsesStreamEvent>(data) {
-                                if event.event_type == "response.output_text.delta" {
-                                    if let Some(delta) = event.delta {
-                                        return Ok(StreamChunk {
-                                            delta,
-                                            finish_reason: None,
-                                        });
-                                    }
-                                } else if event.event_type == "response.done" {
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(format!("API error: {}", error_text));
+        }
+
+        let stream = response.bytes_stream().map(move |result| match result {
+            Ok(bytes) => {
+                let text = String::from_utf8_lossy(&bytes);
+                for line in text.lines() {
+                    if line.starts_with("data: ") {
+                        let data = &line[6..];
+                        if let Ok(event) = serde_json::from_str::<ResponsesStreamEvent>(data) {
+                            if event.event_type == "response.output_text.delta" {
+                                if let Some(delta) = event.delta {
                                     return Ok(StreamChunk {
-                                        delta: String::new(),
-                                        finish_reason: Some("stop".to_string()),
+                                        delta,
+                                        finish_reason: None,
                                     });
                                 }
+                            } else if event.event_type == "response.done" {
+                                return Ok(StreamChunk {
+                                    delta: String::new(),
+                                    finish_reason: Some("stop".to_string()),
+                                });
                             }
                         }
                     }
-                    Ok(StreamChunk {
-                        delta: String::new(),
-                        finish_reason: None,
-                    })
                 }
-                Err(e) => Err(format!("Stream error: {}", e)),
+                Ok(StreamChunk {
+                    delta: String::new(),
+                    finish_reason: None,
+                })
             }
+            Err(e) => Err(format!("Stream error: {}", e)),
         });
 
         Ok(Box::pin(stream))
     }
-}
 
-impl OpenAIResponsesProvider {
-    fn build_request_body(
+    fn should_retry_missing_file(error: &str) -> bool {
+        let lower = error.to_ascii_lowercase();
+        lower.contains("file")
+            && (lower.contains("not found")
+                || lower.contains("invalid")
+                || lower.contains("expired"))
+    }
+
+    async fn invalidate_file_caches(&self, request: &ChatRequest) -> Result<(), String> {
+        for message in &request.messages {
+            for part in &message.content {
+                if let ContentPart::FileRef { file } = part {
+                    if file.file_id.is_some() || file.file_data.is_some() {
+                        invalidate_openai_file_cache(
+                            self.data_dir.as_deref(),
+                            &self.base_url,
+                            &self.api_key,
+                            &request.api_config_id,
+                            file,
+                        )
+                        .await?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn build_request_body(
         &self,
         request: &ChatRequest,
         schema: Option<serde_json::Value>,
     ) -> Result<serde_json::Value, String> {
+        let prepared_messages = prepare_request_messages_with_file_cache(
+            &self.client,
+            self.data_dir.as_deref(),
+            &self.base_url,
+            &self.api_key,
+            &request.api_config_id,
+            &request.messages,
+        )
+        .await?;
+
         let mut body = serde_json::json!({
             "model": self.default_model,
-            "input": request.messages.iter().map(|m| {
+            "input": prepared_messages.iter().map(|m| {
                 let role = match m.role {
                     ChatRole::System => "system",
                     ChatRole::Developer => "developer",
@@ -200,10 +364,24 @@ impl OpenAIResponsesProvider {
                     ChatRole::Assistant => "assistant",
                     ChatRole::Tool => "tool",
                 };
-                let content: String = m.content.iter().filter_map(|c| match c {
-                    ContentPart::Text { text } => Some(text.clone()),
-                    _ => None,
-                }).collect();
+                let content: Vec<_> = m.content.iter().filter_map(|c| match c {
+                    ContentPart::Text { text } => Some(serde_json::json!({
+                        "type": "input_text",
+                        "text": text
+                    })),
+                    ContentPart::ImageRef { image_url } => Some(serde_json::json!({
+                        "type": "input_image",
+                        "image_url": image_url.url,
+                        "detail": "auto"
+                    })),
+                    ContentPart::FileRef { file } => Some(serde_json::json!({
+                        "type": "input_file",
+                        "file_id": file.file_id,
+                        "file_data": file.file_data,
+                        "filename": file.filename
+                    })),
+                    ContentPart::ToolResult { .. } => None,
+                }).collect::<Vec<_>>();
                 serde_json::json!({
                     "role": role,
                     "content": content
@@ -230,6 +408,24 @@ impl OpenAIResponsesProvider {
         }
 
         Ok(body)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OpenAIResponsesProvider;
+
+    #[test]
+    fn retry_missing_file_detects_expected_errors() {
+        assert!(OpenAIResponsesProvider::should_retry_missing_file(
+            "API error: file expired"
+        ));
+        assert!(OpenAIResponsesProvider::should_retry_missing_file(
+            "API error: invalid file handle"
+        ));
+        assert!(!OpenAIResponsesProvider::should_retry_missing_file(
+            "API error: rate limit exceeded"
+        ));
     }
 }
 
@@ -264,4 +460,16 @@ struct ResponsesStreamEvent {
     #[serde(rename = "type")]
     event_type: String,
     delta: Option<String>,
+}
+
+// OpenAI Models API response types (shared with openai_chat)
+#[derive(Debug, Deserialize)]
+struct OpenAIModelsResponse {
+    data: Vec<OpenAIModel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIModel {
+    id: String,
+    owned_by: String,
 }

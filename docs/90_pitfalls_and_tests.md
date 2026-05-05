@@ -101,6 +101,8 @@
 | L1 物理子字段不自洽 | 暴雨却地面不湿、沙暴但能见度 100m | SceneInitializer / SceneStateExtractor prompt 模板强制一并填齐；额外 ConsistencyRule 检查（暴雨时 wetness>=阈值，沙暴时 dust_density>=阈值） |
 | 档位阈值在两侧不一致 | body 已 Storm 但 perception 仍 Strong | 阈值表集中在已校验配置快照（一份表两侧共享）；改阈值需同时跑两侧单元测试 |
 | 配置热路径反复 IO | 每次感知、对抗或日志写入都读 YAML/SQLite，拖慢回合 | 启动 / 打开 World / 保存设置时加载并校验配置，发布 `RuntimeConfigSnapshot`；热路径只读内存快照 |
+| Provider 契约热路径反复 IO | 每次聊天请求都读 `config/llm_api_contracts.json` 并解析，拖慢发送且增加竞态 | 启动时编译 `LlmApiContractsSnapshot`；按当前 API 连接缓存 `CompiledProviderContractView`；热路径只读缓存 |
+| Provider 规则散落硬编码 | 某个适配器偷偷绕过 `llm_api_contracts.json`，导致字段白名单、多模态能力和 fail-fast 规则漂移 | `CapabilityResolver` / `ProviderRequestMapper` 统一读取编译契约；代码评审和测试禁止新增散落白名单 |
 | UI 取整影响仲裁 | `999.6` 展示为 `1000` 后被当成下一档 | 属性存储和计算用 f64，UI 默认整数展示但不写回；档位按真实值与阈值比较 |
 | LLM 误读基础属性数值 | 直接把 physical=1800 写成必定擒拿成功 | AttributeResolver / SceneFilter 把 raw 属性 → AttributeTier / AttributeDelta / descriptors / constraints；FilteredSceneView 不暴露 raw 属性值给 CognitivePass |
 | LLM 误读灵力数值 | 8800 当成"高了点"、Δ=3000 当作"略胜" | SceneFilter 把 mana_power → AttributeTier + AttributeDelta；FilteredSceneView 不暴露 raw 数值给 CognitivePass |
@@ -133,6 +135,11 @@
 | ST 预设身份继续沿用 `apiId` | 切换 API 配置后预设丢失、自动切换或 Regex 授权失效 | RST 运行时使用稳定 `preset_key`；`source_api_id` / `apiId` 只用于导入导出兼容 |
 | 世界书选择按 Provider 分组 | 切换 API 配置后 Global lore / Chat lore / Character lore 变化，导致同一聊天上下文漂移 | 世界书文件、`chat_metadata.world_info`、`world_info.globalSelect`、`charLore` 均不读取 `active_api_config_id` |
 | API 切换触发资源保存 | 用户只是换连接，却意外改写预设、世界书或聊天 metadata | API 切换只保存 `active_api_config_id`；资源文件只在用户显式编辑对应资源时保存 |
+| 聊天附件内嵌 base64 到会话 JSON | 聊天文件膨胀、重复写盘、导出困难 | 附件源文件独立存于 `chat_attachments/`；消息只保留 `attachment_ref` |
+| 远端 `file_id` 被当作持久化真源 | Provider 清缓存或切账号后历史会话失效 | 本地 `source.bin` 是唯一真源；远端句柄只作上传缓存 |
+| 不支持多模态的 Provider 被静默 OCR 降级 | 用户以为模型“看了图/PDF”，实际只看了抽取文本 | DeepSeek / 未声明 capability 的 Claude Code Interface 发送前 fail fast；OCR / 文本提取只能是显式工作流 |
+| 直接把外部 URL 发给模型 | URL 失效、权限漂移、泄露访问轨迹、回放不一致 | 默认先镜像到本地附件库，再走 inline 或 Provider Files API |
+| 日志写入完整 inline base64 | SQLite 膨胀、敏感文档内容过度落盘 | 日志只保存 `attachment_id`、mime、大小、sha256 和 transport 摘要，不保存完整 base64 正文 |
 
 ### 1.7 日志与 Trace
 

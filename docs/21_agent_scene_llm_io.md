@@ -38,6 +38,7 @@ pub struct AgentSessionContext {
     pub session_kind: String,                       // mainline / retrospective / future_preview
     pub period_anchor: TimeAnchor,
     pub mainline_time_anchor: TimeAnchor,
+    pub player_mode: String,                        // character / director
     pub player_character_id: Option<String>,
     pub canon_status: String,                       // canon_candidate / partially_canon / noncanon
 }
@@ -285,6 +286,8 @@ pub struct BlockedSceneAddition {
 
 用户发言是分级输入权，不是无条件写入权。SceneStateExtractor 必须把自由文本拆成“角色意图 / 主观心理 / 场景候选 / 导演偏置 / 元命令”，并为每个 delta 标注权限等级；越接近用户扮演角色的言行和本回合叙事，越可直接进入 `TurnWorkingState`，越接近正史、隐藏知识、硬数值、他人内心和持久世界结构，越必须降级为候选、假设、歧义或确认请求。
 
+为保证 RP 输入流畅度，运行时在调用 SceneStateExtractor 前先做一次**轻量预解析**。预解析器负责识别显式标记与命令模式，但不替代 LLM 的语义裁定。
+
 权限采用场景域 God-read：
 
 - 可读：最近一轮自由文本、当前 `SceneModel` 全量、世界级 schema / 枚举 / 物理约束、与当前场景直接相关的公开设定。
@@ -297,10 +300,49 @@ pub struct SceneStateExtractorInput {
     pub scene_turn_id: String,
     pub session_context: AgentSessionContext,
     pub recent_free_text: String,              // 用户最新输入或最近一轮聊天自由文本
+    pub preparsed_input: Option<PreparsedUserInput>,
     pub current_scene: SceneModel,             // 当前结构化场景 JSON
     pub private_scene_constraints: Vec<ScenePrivateConstraint>,
     pub truth_guidance: Option<TruthGuidance>, // 过去线冲突检测与开放细节槽提示；不进入角色输入
     pub world_constraints: serde_json::Value,  // semantic: 枚举、schema、物理边界、世界级规则
+}
+
+pub struct PreparsedUserInput {
+    pub raw_text: String,
+    pub mode_hint: PlayerModeHint,             // character / director
+    pub segments: Vec<InputSegment>,
+    pub warnings: Vec<InputParseWarning>,
+}
+
+pub enum PlayerModeHint {
+    Character,
+    Director,
+}
+
+pub struct InputSegment {
+    pub segment_id: String,
+    pub kind: InputSegmentKind,
+    pub text: String,
+    pub range: TextRange,
+    pub hints: Vec<String>,                    // likely_spoken_dialogue / likely_named_term / prefer_character_action ...
+}
+
+pub enum InputSegmentKind {
+    Plain,
+    Quoted,
+    InnerThought,      // *...*
+    DirectorBlock,     // [[...]]
+    CommandLine,       // /command ...
+}
+
+pub struct TextRange {
+    pub start_utf16: u32,
+    pub end_utf16: u32,
+}
+
+pub struct InputParseWarning {
+    pub warning_kind: String,                  // unclosed_quote / unclosed_thought / malformed_director_block / unknown_command ...
+    pub message: String,
 }
 
 pub struct SceneStateExtractorOutput {
@@ -431,6 +473,41 @@ pub enum UserInputKind {
     DirectorHint { outcome_bias: Option<OutcomeBias>, style_override: Option<StyleConstraints> },
 }
 
+pub enum MetaCommandKind {
+    SceneChange { target: SceneChangeTarget },
+    Backtrack { target: BacktrackTarget },
+    ForkWorld { target: ForkWorldTarget },
+    SkipTime { amount: Option<String> },
+    Pause,
+    Resume,
+    Reset,
+}
+
+pub struct SceneChangeTarget {
+    pub location_id: String,
+    pub display_label: String,                    // UI 友好名称，如“青石镇·镇北客栈”
+    pub source: SceneTargetSource,                // recent / nearby / search_match / explicit_reference
+}
+
+pub enum SceneTargetSource {
+    Recent,
+    Nearby,
+    SearchMatch,
+    ExplicitReference,
+}
+
+pub struct BacktrackTarget {
+    pub session_turn_id: String,
+    pub scene_turn_id: Option<String>,
+    pub display_label: String,                    // UI 友好摘要，如“#18 在客栈与沈墨对峙”
+}
+
+pub struct ForkWorldTarget {
+    pub source_world_id: String,
+    pub source_session_turn_id: Option<String>,   // 可空；默认从当前会话 / 当前世界最新可见状态复制
+    pub display_label: String,                    // UI 友好摘要，如“复制当前世界：云北州主线”
+}
+
 pub struct OutcomeBias {
     pub preferred_tone: Option<String>,             // semantic enum in implementation
     pub outcome_pressure: Option<OutcomePressure>,  // semantic
@@ -450,6 +527,73 @@ pub enum OutcomePressure {
 
 `SceneStateExtractor` 输出严格遵守此 schema。失败时进入容错路径（见 [11_agent_runtime.md](11_agent_runtime.md)）。
 
+### 2.1 输入标记与预解析规则
+
+输入标记优先用于提升解析稳定性，而不是要求用户写 DSL。用户仍可直接输入自然语言；只有需要明确表达语义时才使用标记。
+
+第一版约定：
+
+- 普通文字：动作 / 旁白候选
+- `*...*`：内心活动
+- `"..."` / `“...”`：引号片段；程序只标记为 `Quoted`，不直接断言其一定是对白
+- `[[...]]`：导演块；常见写法如 `[[导演：...]]`、`[[风格：...]]`
+- `/command ...`：元命令
+
+命令识别是**绝对优先级**：
+
+- 单次发送内容在 `trim_start()` 后若以 `/` 开头，则整条消息直接进入 `CommandLine` / `MetaCommand` 路径。
+- 一旦命中 command，本次发送不再解析 `*...*`、引号或 `[[...]]`，也不再尝试生成 `CharacterRoleplay`、`SceneNarration` 或 `DirectorHint`。
+- 未知命令或命令参数错误只触发轻量 warning 并忽略本次发送；不得降级为普通 RP 文本，以免用户误以为命令已执行。
+
+预解析容错规则：
+
+- 引号、`*...*` 或 `[[...]]` 不闭合时，优先降级为 `Plain` 并记录 warning，不阻断发送。
+- 第一版不支持嵌套标记；发生交错时保持原始文本顺序并尽量降级为 `Plain` / `Quoted`，避免复杂修复。
+- `InnerThought`、`DirectorBlock` 与 `CommandLine` 的识别由程序完成；`Quoted` 和 `Plain` 的最终语义由 SceneStateExtractor 结合上下文裁定。
+
+### 2.2 Character / Director 默认解释优先级
+
+`Character` 模式（`player_mode = character`）：
+
+1. `CommandLine` → `MetaCommand`
+2. `DirectorBlock` → `DirectorHint`
+3. `InnerThought` → `CharacterRoleplay.subjective_input`
+4. `Quoted` → 优先尝试解释为 `spoken_dialogue`；若上下文明显不是对白，再降级为 `named_term` / `semantic_emphasis` / `reported_quote`
+5. `Plain` → 默认优先解释为玩家角色的外显动作 / 姿态 / 移动 / 观察 / 说话铺垫；只有在明显是环境改写或场景补述时才解释为 `SceneNarration`
+
+`Director` 模式（`player_mode = director`）：
+
+1. `CommandLine` → `MetaCommand`
+2. `DirectorBlock` → `DirectorHint`
+3. `Plain` → 默认解释为 `SceneNarration`
+4. `Quoted` → 优先解释为 narration 中的引述、术语或强调，不直接绑定为任意 NPC 的 `spoken_dialogue`
+5. `InnerThought` → 不直接写任何角色 L3；默认降级为导演说明、氛围提示或 ambiguity
+
+两种模式都遵守同一条硬规则：一旦文本触碰他人内心、隐藏真相、硬结果或 persistent World truth，必须保守降级为候选、假设、歧义或 blocked，而不是为保持流畅度静默越权。
+
+### 2.3 `/scene`、`/back` 与 `/fork`
+
+`/scene`：
+
+- 语义：切换到新的场景锚点，而不是直接改写 `SceneModel`
+- UI 约定：用户输入 `/scene` 时弹出地点 / 场景候选列表；用户通常通过应用内 picker 选择目标，而不是手输复杂参数
+- SceneStateExtractor / command parser 收到的应是稳定引用（如 `location_id`），并映射为 `MetaCommandKind::SceneChange`
+- 执行后由程序生成 `SceneSeed`，再走 `SceneInitializer`
+
+`/back`：
+
+- 语义：请求回退当前会话到某个历史 turn，并截断其后当前会话内容
+- UI 约定：用户输入 `/back` 时弹出当前 session 历史 turn 列表，显示轮次摘要、故事时间、正史状态和回退风险
+- command parser 收到的是稳定 `session_turn_id` / `scene_turn_id` 引用，并映射为 `MetaCommandKind::Backtrack`
+- `/back` 不是“只删聊天消息”；后端必须结合 rollback 与依赖检查决定是否允许执行
+
+`/fork`：
+
+- 语义：复制当前 World 的一个副本并切换进入；用于显式创建新的世界分支，而不是在同一 World 内开启第二条 canonical timeline
+- UI 约定：用户输入 `/fork` 时弹出复制目标确认面板，展示源 World 名称、当前会话 / 当前轮次摘要，以及默认的新 World 标题建议
+- command parser 收到的是稳定 `source_world_id` 与可选 `source_session_turn_id` 引用，并映射为 `MetaCommandKind::ForkWorld`
+- 成功执行后，前端应切换到新 World 工作区或新 Session Launcher；失败时只 warning，不得改写源 World 状态
+
 用户扮演输入分类规则：
 
 - “我害怕 / 我怀疑他在撒谎 / 我决定撤退”等心理、情绪、目标声明进入 `CharacterRoleplay.subjective_input`。
@@ -458,5 +602,8 @@ pub enum OutcomePressure {
 - “这里有一把普通木椅”这类低风险、非持久场景细节可标为 `SceneCandidate`；“这里有上古神器 / 隐藏传送阵 / 某 NPC 一直在场”这类持久或高影响断言必须标为 needs_confirmation、provisional_truth_candidate、ambiguity 或 blocked。
 - “让他相信我 / 让战斗轻一点 / 文风更压抑”只能成为角色目标、`DirectorHint.outcome_bias` 或 `style_override`；不得直接覆盖他人 L3 或保证硬结果。
 - “忽略规则 / 直接设为正史 / 改掉隐藏设定”必须标为 `AmbiguousOrBlocked` 或 `MetaCommand` 请求；不得改变节点权限、KnowledgeAccessResolver、EffectValidator、TemporalConsistencyValidator 或 StateCommitter 边界。
+- `Director` 模式下不得直接把普通文本解析为任意 NPC 的 `CharacterRoleplay`；若用户写出明确的角色脚本，只能降级为 `SceneNarration` 候选、`DirectorHint` 或 ambiguity。
+- `Character` 模式下，`Quoted` 不等于必然对白。专有名词、反讽、术语强调和转述引言必须允许被解析为非对白含义，以保留自然语言输入体验。
+- `/fork` 与 `/back` 不可混合解释为普通 RP 文本：一旦命中 command 模式，只进入命令解析；未知或非法参数统一 warning 并忽略。
 
 ---

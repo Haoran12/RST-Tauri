@@ -32,6 +32,12 @@ const router = createRouter({
       meta: { title: 'Agent World Editor' },
     },
     {
+      path: '/agent/worlds/:worldId/sessions/:sessionId',
+      name: 'agent-chat',
+      component: () => import('@/views/AgentChatView.vue'),
+      meta: { title: 'Agent 会话' },
+    },
+    {
       path: '/resources/characters',
       name: 'resources-characters',
       component: () => import('@/views/ResourcesCharactersView.vue'),

@@ -30,22 +30,19 @@ impl JsonStore {
 
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory: {}", e))?;
+            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
         }
 
         let content = serde_json::to_string_pretty(value)
             .map_err(|e| format!("Failed to serialize JSON: {}", e))?;
 
-        fs::write(&path, content)
-            .map_err(|e| format!("Failed to write {}: {}", relative_path, e))
+        fs::write(&path, content).map_err(|e| format!("Failed to write {}: {}", relative_path, e))
     }
 
     /// Delete JSON file
     pub fn delete(&self, relative_path: &str) -> Result<(), String> {
         let path = safe_join(&self.base_path, relative_path)?;
-        fs::remove_file(&path)
-            .map_err(|e| format!("Failed to delete {}: {}", relative_path, e))
+        fs::remove_file(&path).map_err(|e| format!("Failed to delete {}: {}", relative_path, e))
     }
 
     /// List files in directory
@@ -56,8 +53,8 @@ impl JsonStore {
             return Ok(Vec::new());
         }
 
-        let entries = fs::read_dir(&path)
-            .map_err(|e| format!("Failed to list {}: {}", relative_path, e))?;
+        let entries =
+            fs::read_dir(&path).map_err(|e| format!("Failed to list {}: {}", relative_path, e))?;
 
         let mut files = Vec::new();
         for entry in entries {

@@ -118,20 +118,28 @@ OutcomePlanner 每回合仍默认最多 1 次：它接收原行动、所有 `Rea
    - RetrospectiveSession 调用 HistoricalTruthResolver，生成 TruthGuidance
    - canon_status == noncanon 时，本回合只能写会话记录、非 canonical `world_turns` 运行回合、Trace 与 provisional truth，不能写 canonical Truth
 1. 收集用户输入（自由文本）
+1a. 运行轻量 InputPreparser：
+   - 若 `trim_start(recent_free_text)` 以 `/` 开头，则整条输入直接进入 command 路径，不再解析引号、`*...*` 或 `[[...]]`
+   - 否则程序切出 `Plain / Quoted / InnerThought / DirectorBlock` segments，并记录 warning / hint，不做最终语义裁定
+   - 预解析失败或标记不闭合默认降级为 plain / warning，不阻断用户回合
 1a. 若当前没有可用 SceneModel，或上一回合 MetaCommand / 程序事件要求切场景、大幅跳时：
    - 程序组装 SceneSeed、AgentSessionContext、公开世界 / 地点 / 人物上下文、场景相关私有约束、TruthGuidance、SceneGenerationPolicy
    - SceneInitializer(LLM) → SceneInitializationDraft（结构化）
    - SceneInitializerValidator + ConsistencyRule 校验；高风险假设需用户确认，否则提交为新的 SceneModel
-2. SceneStateExtractor(LLM) ← {AgentSessionContext, 最近自由文本, 当前结构化 Scene JSON, 场景相关私有约束, TruthGuidance}
+2. SceneStateExtractor(LLM) ← {AgentSessionContext, 最近自由文本, PreparsedUserInput, 当前结构化 Scene JSON, 场景相关私有约束, TruthGuidance}
    → SceneStateExtractorOutput（结构化）
    - 输出 SceneUpdate 候选 + UserInputDelta
    - 过去线输出 provisional_truth_candidates 与 conflict_warnings
    - UserInputDelta 可为 SceneNarration / CharacterRoleplay / MetaCommand / DirectorHint，并必须携带 authority_class / authority_notes 说明权限等级、降级或阻止原因
+   - `Character` 模式下 `Plain` 默认优先解释为玩家角色动作，`Quoted` 默认优先尝试解释为对白；`Director` 模式下 `Plain` 默认优先解释为场景旁白，`Quoted` 不直接绑定为任意角色台词
    - 解析失败 → 容错修复 → 仍失败则提示用户重写
 3. Validator + StateApplier 将 SceneUpdate / UserInputDelta 应用到本回合 `TurnWorkingState`：
    - SceneUpdate / SceneNarration → 仅作为候选更新工作副本中的 SceneModel；低风险、非持久、非冲突可自动应用，高风险或持久世界事实必须要求确认、降级为 assumption 或阻止
    - CharacterRoleplay → 写入对应角色的 IntentPlan（跳过其 CognitivePass）；该角色行动是否成功、造成何种硬效果仍由 OutcomePlanner + EffectValidator 决定；若包含 `subjective_input`，暂存给 SubjectiveStateReducer
    - MetaCommand → 时间/场景控制；生成结构化运行指令或 SceneSeed，不直接写 canonical Truth
+     - `/scene` 生成新的 SceneSeed 并触发 SceneInitializer
+     - `/back` 进入回退 / 截断流程；若涉及 canonical 依赖则先做 rollback 影响检查
+     - `/fork` 触发 World 级复制流程；成功后切换到新 World / 新会话入口，不在当前 World 内创建第二条 canonical timeline
    - DirectorHint → 暂存结构化 outcome_bias 与 style_override；只作为结果规划 / 叙事偏置，不强制 NPC 违背认知、技能、物理、正史或隐藏真相
    - hard conflict warning → UI 弹出“冲突后非正史 / 整条会话非正史”，不中断本回合
 4. 更新身体 / 资源 / 状态 / 冷却（Layer 1，机械演化）
@@ -210,6 +218,13 @@ OutcomePlanner 每回合仍默认最多 1 次：它接收原行动、所有 `Rea
 7. StateCommitter 是本回合唯一状态提交点，使用单个 SQLite 写事务写入 L1 / L3 / KnowledgeRevealEvent / Trace 索引。
 
 `TurnWorkingState` 是内存中的回合工作副本，不是第二套持久状态。它只保存本回合已通过结构校验、尚未提交的候选 SceneModel、用户扮演 intent、DirectorHint、ReactionWindow 与待验证 plan。任何需要跨回合保留的变化都必须进入 `StateUpdatePlan` / `KnowledgeRevealEvent`，并由 `StateCommitter` 提交。
+
+命令处理的额外边界：
+
+- 命中 command 模式的输入不进入普通 RP 解析；未知命令或参数错误只产生轻量 warning，并终止本次命令处理，不生成剧情回合。
+- `/scene` 的主要交互发生在前端命令面板；运行时接收的是稳定 `location_id` / picker 引用，而不是要求用户手输完整 scene DSL。
+- `/back` 语义上是“回退当前会话到某个历史 turn 并截断其后内容”，不是“只删聊天消息”。若命中 canonical 依赖、已提升 provisional truth、其他会话依赖或主线光标依赖，默认阻止并返回影响摘要。
+- `/fork` 是复制整个 World 并进入副本，而不是在当前 World 内开平行时间线；执行成功后，新旧 World 的主线光标、会话、Trace 与后续提交完全分离。
 
 ### 6.2 过去线正史资格与冲突处理
 

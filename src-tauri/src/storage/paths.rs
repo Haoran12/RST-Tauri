@@ -1,5 +1,7 @@
 //! Application data path helpers.
 
+#[cfg(windows)]
+use std::path::Prefix;
 use std::path::{Component, Path, PathBuf};
 
 use tauri::AppHandle;
@@ -9,29 +11,86 @@ use tauri::AppHandle;
 /// The default root is `./data` in development and `<exe-dir>/data` in a
 /// bundled app. `RST_DATA_DIR` is reserved for an explicit user override.
 pub fn app_data_root(_app: &AppHandle) -> Result<PathBuf, String> {
+    let app_root = app_install_root()?;
+
     if let Ok(explicit) = std::env::var("RST_DATA_DIR") {
-        if !explicit.trim().is_empty() {
-            return Ok(PathBuf::from(explicit));
+        let explicit = explicit.trim();
+        if !explicit.is_empty() {
+            let root = absolutize_from_app_root(&app_root, PathBuf::from(explicit))?;
+            ensure_data_root_allowed(&root, &app_root)?;
+            return Ok(root);
         }
     }
 
+    let root = app_root.join("data");
+    ensure_data_root_allowed(&root, &app_root)?;
+    Ok(root)
+}
+
+fn app_install_root() -> Result<PathBuf, String> {
     if cfg!(debug_assertions) {
         let cwd = std::env::current_dir()
             .map_err(|e| format!("Failed to get current directory: {}", e))?;
-        let root = if cwd.file_name().and_then(|n| n.to_str()) == Some("src-tauri") {
-            cwd.parent().map(Path::to_path_buf).unwrap_or(cwd)
-        } else {
-            cwd
-        };
-        Ok(root.join("data"))
+        Ok(
+            if cwd.file_name().and_then(|n| n.to_str()) == Some("src-tauri") {
+                cwd.parent().map(Path::to_path_buf).unwrap_or(cwd)
+            } else {
+                cwd
+            },
+        )
     } else {
-        let exe = std::env::current_exe()
-            .map_err(|e| format!("Failed to get executable path: {}", e))?;
+        let exe =
+            std::env::current_exe().map_err(|e| format!("Failed to get executable path: {}", e))?;
         let exe_dir = exe
             .parent()
             .ok_or_else(|| "Failed to resolve executable directory".to_string())?;
-        Ok(exe_dir.join("data"))
+        Ok(exe_dir.to_path_buf())
     }
+}
+
+fn absolutize_from_app_root(app_root: &Path, path: PathBuf) -> Result<PathBuf, String> {
+    reject_parent_components(&path)?;
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(app_root.join(path))
+    }
+}
+
+fn reject_parent_components(path: &Path) -> Result<(), String> {
+    for component in path.components() {
+        if matches!(component, Component::ParentDir) {
+            return Err("Data directory must not contain parent traversal".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn ensure_data_root_allowed(data_root: &Path, app_root: &Path) -> Result<(), String> {
+    reject_parent_components(data_root)?;
+
+    #[cfg(windows)]
+    {
+        if is_c_drive_path(data_root) && !data_root.starts_with(app_root) {
+            return Err(
+                "C: drive data writes are only allowed inside the application install directory"
+                    .to_string(),
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(windows)]
+fn is_c_drive_path(path: &Path) -> bool {
+    path.components().any(|component| match component {
+        Component::Prefix(prefix) => match prefix.kind() {
+            Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => drive.eq_ignore_ascii_case(&b'C'),
+            _ => false,
+        },
+        _ => false,
+    })
 }
 
 /// Join a trusted base path with an application-relative path.
@@ -70,13 +129,19 @@ pub fn validate_path_component(component: &str) -> Result<(), String> {
         return Err("Invalid empty or dot path component".to_string());
     }
 
-    let invalid = ['<', '>', ':', '"', '|', '?', '*', '\0'];
-    if component.chars().any(|c| invalid.contains(&c) || c.is_control()) {
+    let invalid = ['<', '>', ':', '"', '|', '?', '*', '/', '\\', '\0'];
+    if component
+        .chars()
+        .any(|c| invalid.contains(&c) || c.is_control())
+    {
         return Err(format!("Invalid path component: {}", component));
     }
 
     if component.ends_with(' ') || component.ends_with('.') {
-        return Err(format!("Invalid trailing character in path component: {}", component));
+        return Err(format!(
+            "Invalid trailing character in path component: {}",
+            component
+        ));
     }
 
     let stem = component
@@ -85,9 +150,8 @@ pub fn validate_path_component(component: &str) -> Result<(), String> {
         .unwrap_or(component)
         .to_ascii_uppercase();
     let reserved = [
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
-        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8",
-        "LPT9",
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
     if reserved.contains(&stem.as_str()) {
         return Err(format!("Reserved path component: {}", component));
@@ -113,7 +177,11 @@ pub fn safe_png_filename_from_import(filename: &str, fallback_id: &str) -> Strin
         })
         .collect();
     let trimmed = sanitized.trim_matches([' ', '.', '_']);
-    let stem = if trimmed.is_empty() { fallback_id } else { trimmed };
+    let stem = if trimmed.is_empty() {
+        fallback_id
+    } else {
+        trimmed
+    };
     format!("{}.png", stem)
 }
 
@@ -139,6 +207,23 @@ mod tests {
     fn safe_join_allows_expected_resource_paths() {
         let base = PathBuf::from("data");
         let path = safe_join(&base, "characters/abc-123.json").unwrap();
-        assert_eq!(path, PathBuf::from("data").join("characters").join("abc-123.json"));
+        assert_eq!(
+            path,
+            PathBuf::from("data")
+                .join("characters")
+                .join("abc-123.json")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn c_drive_data_root_must_be_under_app_root() {
+        let app_root = PathBuf::from("E:\\RST-Tauri");
+        let outside = PathBuf::from("C:\\Users\\Z\\AppData\\Local\\RST-Tauri");
+        assert!(ensure_data_root_allowed(&outside, &app_root).is_err());
+
+        let installed_on_c = PathBuf::from("C:\\RST-Tauri");
+        let own_data = installed_on_c.join("data");
+        assert!(ensure_data_root_allowed(&own_data, &installed_on_c).is_ok());
     }
 }

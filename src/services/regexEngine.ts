@@ -207,36 +207,65 @@ export class RegexEngine {
    */
   private getAllowedScripts(
     settings: RegexExtensionSettings,
-    _options: RegexRunOptions
+    options: RegexRunOptions
   ): SourcedScript[] {
     const result: SourcedScript[] = []
+    const seen = new Set<string>()
+    const scriptById = new Map(settings.regex.map(script => [script.id, script]))
+    const selectedPresets = settings.regex_presets.filter(preset => preset.is_selected)
 
-    // 1. Global 脚本：全部可见
-    for (const script of settings.regex) {
-      result.push({
-        script,
-        source: ScriptSource.Global,
-      })
+    // 1. Global 脚本：没有启用 preset 时保留历史行为，全部 global 可见。
+    if (selectedPresets.length === 0) {
+      for (const script of settings.regex) {
+        if (!seen.has(script.id)) {
+          seen.add(script.id)
+          result.push({
+            script,
+            source: ScriptSource.Global,
+          })
+        }
+      }
+    } else {
+      for (const preset of selectedPresets) {
+        for (const item of preset.global ?? []) {
+          const script = scriptById.get(item.id)
+          if (script && !seen.has(script.id)) {
+            seen.add(script.id)
+            result.push({ script, source: ScriptSource.Global })
+          }
+        }
+      }
     }
 
     // 2. Preset 脚本：需要通过 preset_allowed_regex
-    // TODO: 从当前预设加载脚本
-    // 当前预设名需要在 options.presetKey 中传递
-    // if (options.presetKey) {
-    //   const allowedIds = settings.preset_allowed_regex[options.presetKey]
-    //   if (allowedIds) {
-    //     // 只添加在 allow list 中的脚本
-    //   }
-    // }
+    if (options.presetKey) {
+      const allowedIds = settings.preset_allowed_regex[options.presetKey] ?? []
+      for (const preset of selectedPresets) {
+        for (const item of preset.preset ?? []) {
+          if (!allowedIds.includes(item.id)) continue
+          const script = scriptById.get(item.id)
+          if (script && !seen.has(script.id)) {
+            seen.add(script.id)
+            result.push({ script, source: ScriptSource.Preset })
+          }
+        }
+      }
+    }
 
     // 3. Scoped 脚本：需要通过 character_allowed_regex
-    // TODO: 从当前角色卡加载脚本
-    // 当前角色名需要在 options.characterName 中传递
-    // if (options.characterName) {
-    //   if (settings.character_allowed_regex.includes(options.characterName)) {
-    //     // 添加角色卡内嵌脚本
-    //   }
-    // }
+    const characterScopeEnabled = options.characterName
+      ? settings.character_allowed_regex.includes(options.characterName)
+      : false
+    for (const preset of selectedPresets) {
+      for (const item of preset.scoped ?? []) {
+        if (!characterScopeEnabled && !settings.character_allowed_regex.includes(item.id)) continue
+        const script = scriptById.get(item.id)
+        if (script && !seen.has(script.id)) {
+          seen.add(script.id)
+          result.push({ script, source: ScriptSource.Scoped })
+        }
+      }
+    }
 
     return result
   }
@@ -313,8 +342,17 @@ export class RegexEngine {
       return text
     }
 
-    // 执行替换
-    let result = text.replace(regex, script.replace_string)
+    // 执行替换，支持 $1/$<name>，并补充 {{match}}。
+    let result = text.replace(regex, (...args: unknown[]) => {
+      const match = String(args[0] ?? '')
+      const captures = args.slice(1, -2).map(value => String(value ?? ''))
+      let replacement = script.replace_string.replaceAll('{{match}}', match)
+      replacement = replacement.replace(/\$(\d+)/g, (_, index: string) => {
+        const capture = captures[Number(index) - 1]
+        return capture ?? ''
+      })
+      return replacement
+    })
 
     // 处理 trim_strings
     if (script.trim_strings && script.trim_strings.length > 0) {

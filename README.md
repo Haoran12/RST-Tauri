@@ -2,8 +2,17 @@
 
 Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 
-- **SillyTavern 模式**：复刻 SillyTavern 体验，角色卡 V3 + 世界书 + 预设 + Regex + API 配置解耦，JSON 存储。
+- **SillyTavern 模式**：复刻 SillyTavern 体验，角色卡 V3 PNG metadata、外部世界书、预设、Regex、图片 / PDF 附件与 API 配置解耦。
 - **Agent 模式**：基于 RP Agent 架构的高级角色扮演系统，分层"客观世界 / 人物具身状态 / 主观认知与意图 / 结果规划与状态更新 / 叙事输出"，支持多时期会话、World Editor 与 SQLite 存储。
+
+## 当前代码状态
+
+截至 2026-05-04，仓库状态可概括为：
+
+- **后端**：ST 模式主资源与运行时组装、Provider 契约、多模态附件、Agent 数据模型、程序化核心，以及 SceneInitializer / SceneStateExtractor / CharacterCognitivePass / OutcomePlanner / SurfaceRealizer 五类 Agent LLM 节点已落地。
+- **Agent 运行时**：`AgentRuntime`、`StateCommitter`、ReactionWindow、Temporal validator 等模块已建骨架，但主循环、单写提交、Active Set、Dirty Flags 和 Trace 写点尚未完成。
+- **前端**：已具备 Tauri Shell、路由、资源工作台、ST 聊天页、资源页、API 配置页、日志页，以及 Agent 工作区 / World Editor 原型页；Agent 页面目前仍以原型和占位 UI 为主。
+- **Structured Text Editor**：`docs/42_structured_text_editor.md` 定义了目标设计，但仓库当前尚未落地独立 CodeMirror 6 编辑器模块。
 
 ## 文档结构
 
@@ -18,6 +27,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 | [73_st_worldbook_injection.md](docs/73_st_worldbook_injection.md) | ST 世界书注入流程：来源合并、排序、扫描、递归、预算和落槽 | 实现世界书运行时 |
 | [74_st_presets.md](docs/74_st_presets.md) | ST 预设系统：预设类型、导入导出、自动选择、Master Export | 实现预设管理 |
 | [75_st_runtime_assembly.md](docs/75_st_runtime_assembly.md) | ST 运行时组装：全局状态、会话 metadata、Provider 参数适配 | 实现生成请求组装 |
+| [77_st_multimodal_attachments.md](docs/77_st_multimodal_attachments.md) | ST 多模态附件：图片 / PDF 存储、聊天记录引用、请求组装与 Provider 差异适配 | 实现 ST 聊天附件 |
 | [76_st_regex.md](docs/76_st_regex.md) | ST 正则扩展：脚本数据模型、作用域、运行时替换和导入导出 | 实现 Regex 扩展兼容 |
 | [10_agent_data_model.md](docs/10_agent_data_model.md) | Agent 三层语义 + Layer 1/2/3 数据模型总览 | Agent 数据契约入口 |
 | [11_agent_runtime.md](docs/11_agent_runtime.md) | 三层运行时 + 主循环 + Active Set + 验证规则 + 调用预算 | Agent 运行时编排 |
@@ -33,9 +43,9 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 | [21_agent_scene_llm_io.md](docs/21_agent_scene_llm_io.md) | SceneInitializer + SceneStateExtractor + UserInputDelta I/O | Agent 场景 LLM 节点实现 |
 | [22_agent_outcome_narration_io.md](docs/22_agent_outcome_narration_io.md) | StyleConstraints + OutcomePlanner + ReactionWindow + SurfaceRealizerInput | Agent 结果规划与叙事节点实现 |
 | [30_logging_and_observability.md](docs/30_logging_and_observability.md) | Agent Trace + 运行 Logs + LLM 请求响应还原 + 异常事件 + 定期清理 | 日志、调试与可观测性 |
-| [40_agent_world_editor.md](docs/40_agent_world_editor.md) | Agent 世界编辑器：结构化 World / Location / Knowledge / Character CRUD、paused-only 提交、校验与 editor commit journal | 实现 Agent World 作者工具 |
-| [41_frontend_interaction.md](docs/41_frontend_interaction.md) | 前端交互主框架：App Shell、资源工作台、一级页面、路由、主题与 UI 状态边界 | 设计与实现全应用 UI 交互 |
-| [42_structured_text_editor.md](docs/42_structured_text_editor.md) | 结构化文本编辑器：Plain / JSON / YAML 模式、缩进矫正、括号 / 引号诊断和跨模式 content 编辑绑定 | 实现 ST 与 Agent 共用的大文本编辑组件 |
+| [40_agent_world_editor.md](docs/40_agent_world_editor.md) | Agent 世界编辑器设计 spec：结构化 World / Location / Knowledge / Character CRUD、paused-only 提交、校验与 editor commit journal，并补充当前前端原型状态 | 设计和实现 Agent World 作者工具 |
+| [41_frontend_interaction.md](docs/41_frontend_interaction.md) | 前端交互主框架 spec：App Shell、资源工作台、一级页面、路由、主题与 UI 状态边界，并标注当前已实现壳层与占位区域 | 设计与实现全应用 UI 交互 |
+| [42_structured_text_editor.md](docs/42_structured_text_editor.md) | 结构化文本编辑器设计 spec：Plain / JSON / YAML 模式、缩进矫正、括号 / 引号诊断和跨模式 content 编辑绑定；当前仍未落地独立模块 | 规划 ST 与 Agent 共用的大文本编辑组件 |
 | [90_pitfalls_and_tests.md](docs/90_pitfalls_and_tests.md) | 潜在坑点 + 测试矩阵入口 | 风险登记与质量门禁 |
 | [91_test_matrix.md](docs/91_test_matrix.md) | 按阶段组织的测试用例 / 验证方案 | 实现可执行测试与验收 |
 

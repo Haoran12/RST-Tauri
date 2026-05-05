@@ -20,6 +20,7 @@ import {
 export const useWorldbooksStore = defineStore('worldbooks', () => {
   // State
   const worldbookList = ref<WorldbookListItem[]>([])
+  const currentWorldbookId = ref<string | null>(null)
   const currentWorldbook = ref<WorldInfoFile | null>(null)
   const currentEntryUid = ref<number | null>(null)
   const isLoading = ref(false)
@@ -27,6 +28,11 @@ export const useWorldbooksStore = defineStore('worldbooks', () => {
 
   // Computed
   const worldbookCount = computed(() => worldbookList.value.length)
+
+  const currentWorldbookItem = computed(() => {
+    if (!currentWorldbookId.value) return null
+    return worldbookList.value.find((w) => w.id === currentWorldbookId.value) ?? null
+  })
 
   const currentEntry = computed(() => {
     if (!currentWorldbook.value || currentEntryUid.value === null) return null
@@ -79,6 +85,7 @@ export const useWorldbooksStore = defineStore('worldbooks', () => {
 
     try {
       currentWorldbook.value = await getWorldbook(id)
+      currentWorldbookId.value = id
       currentEntryUid.value = null
     } catch (e) {
       error.value = String(e)
@@ -104,16 +111,13 @@ export const useWorldbooksStore = defineStore('worldbooks', () => {
   }
 
   async function saveCurrentWorldbook() {
-    if (!currentWorldbook.value) return
+    if (!currentWorldbook.value || !currentWorldbookId.value) return
 
     isLoading.value = true
     error.value = null
 
     try {
-      // Find the ID from the list
-      const item = worldbookList.value.find(
-        (w) => w.name === currentWorldbook.value!.name
-      )
+      const item = worldbookList.value.find((w) => w.id === currentWorldbookId.value)
       if (!item) throw new Error('Worldbook not found in list')
 
       await saveWorldbook(item.id, currentWorldbook.value)
@@ -131,8 +135,9 @@ export const useWorldbooksStore = defineStore('worldbooks', () => {
     try {
       await deleteWorldbook(id)
       worldbookList.value = await listWorldbooks()
-      if (currentWorldbook.value) {
+      if (currentWorldbookId.value === id) {
         currentWorldbook.value = null
+        currentWorldbookId.value = null
         currentEntryUid.value = null
       }
     } catch (e) {
@@ -143,15 +148,13 @@ export const useWorldbooksStore = defineStore('worldbooks', () => {
   }
 
   async function updateMeta(name: string, description: string) {
-    if (!currentWorldbook.value) return
+    if (!currentWorldbook.value || !currentWorldbookId.value) return
 
     isLoading.value = true
     error.value = null
 
     try {
-      const item = worldbookList.value.find(
-        (w) => w.name === currentWorldbook.value!.name
-      )
+      const item = worldbookList.value.find((w) => w.id === currentWorldbookId.value)
       if (!item) throw new Error('Worldbook not found in list')
 
       await updateWorldbookMeta(item.id, name, description)
@@ -174,16 +177,50 @@ export const useWorldbooksStore = defineStore('worldbooks', () => {
     }
   }
 
-  async function createNewEntry(): Promise<number> {
-    if (!currentWorldbook.value) throw new Error('No worldbook loaded')
+  async function updateGlobalSettings(settings: {
+    name?: string
+    description?: string
+  }) {
+    if (!currentWorldbook.value || !currentWorldbookId.value) return
 
     isLoading.value = true
     error.value = null
 
     try {
-      const item = worldbookList.value.find(
-        (w) => w.name === currentWorldbook.value!.name
-      )
+      const item = worldbookList.value.find((w) => w.id === currentWorldbookId.value)
+      if (!item) throw new Error('Worldbook not found in list')
+
+      // Update local state
+      if (settings.name !== undefined) currentWorldbook.value.name = settings.name
+      if (settings.description !== undefined) currentWorldbook.value.description = settings.description
+
+      // Save to file
+      await saveWorldbook(item.id, currentWorldbook.value)
+
+      // Update list
+      const listIndex = worldbookList.value.findIndex((w) => w.id === item.id)
+      if (listIndex >= 0) {
+        worldbookList.value[listIndex] = {
+          ...worldbookList.value[listIndex],
+          name: currentWorldbook.value.name ?? '',
+          description: currentWorldbook.value.description ?? '',
+        }
+      }
+    } catch (e) {
+      error.value = String(e)
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  async function createNewEntry(): Promise<number> {
+    if (!currentWorldbook.value || !currentWorldbookId.value) throw new Error('No worldbook loaded')
+
+    isLoading.value = true
+    error.value = null
+
+    try {
+      const item = worldbookList.value.find((w) => w.id === currentWorldbookId.value)
       if (!item) throw new Error('Worldbook not found in list')
 
       const uid = await createWorldbookEntry(item.id)
@@ -200,15 +237,13 @@ export const useWorldbooksStore = defineStore('worldbooks', () => {
   }
 
   async function updateEntry(uid: number, entry: WorldInfoEntry) {
-    if (!currentWorldbook.value) return
+    if (!currentWorldbook.value || !currentWorldbookId.value) return
 
     isLoading.value = true
     error.value = null
 
     try {
-      const item = worldbookList.value.find(
-        (w) => w.name === currentWorldbook.value!.name
-      )
+      const item = worldbookList.value.find((w) => w.id === currentWorldbookId.value)
       if (!item) throw new Error('Worldbook not found in list')
 
       await updateWorldbookEntry(item.id, uid, entry)
@@ -229,15 +264,13 @@ export const useWorldbooksStore = defineStore('worldbooks', () => {
   }
 
   async function deleteEntry(uid: number) {
-    if (!currentWorldbook.value) return
+    if (!currentWorldbook.value || !currentWorldbookId.value) return
 
     isLoading.value = true
     error.value = null
 
     try {
-      const item = worldbookList.value.find(
-        (w) => w.name === currentWorldbook.value!.name
-      )
+      const item = worldbookList.value.find((w) => w.id === currentWorldbookId.value)
       if (!item) throw new Error('Worldbook not found in list')
 
       await deleteWorldbookEntry(item.id, uid)
@@ -262,15 +295,13 @@ export const useWorldbooksStore = defineStore('worldbooks', () => {
   }
 
   async function reorderEntries(uidOrder: number[]) {
-    if (!currentWorldbook.value) return
+    if (!currentWorldbook.value || !currentWorldbookId.value) return
 
     isLoading.value = true
     error.value = null
 
     try {
-      const item = worldbookList.value.find(
-        (w) => w.name === currentWorldbook.value!.name
-      )
+      const item = worldbookList.value.find((w) => w.id === currentWorldbookId.value)
       if (!item) throw new Error('Worldbook not found in list')
 
       await reorderWorldbookEntries(item.id, uidOrder)
@@ -323,6 +354,7 @@ export const useWorldbooksStore = defineStore('worldbooks', () => {
 
   function clearCurrentWorldbook() {
     currentWorldbook.value = null
+    currentWorldbookId.value = null
     currentEntryUid.value = null
   }
 
@@ -333,6 +365,7 @@ export const useWorldbooksStore = defineStore('worldbooks', () => {
   return {
     // State
     worldbookList,
+    currentWorldbookId,
     currentWorldbook,
     currentEntryUid,
     isLoading,
@@ -340,6 +373,7 @@ export const useWorldbooksStore = defineStore('worldbooks', () => {
 
     // Computed
     worldbookCount,
+    currentWorldbookItem,
     currentEntry,
     sortedEntries,
     groups,
@@ -351,6 +385,7 @@ export const useWorldbooksStore = defineStore('worldbooks', () => {
     saveCurrentWorldbook,
     deleteWorldbookById,
     updateMeta,
+    updateGlobalSettings,
     createNewEntry,
     updateEntry,
     deleteEntry,

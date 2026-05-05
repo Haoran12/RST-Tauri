@@ -28,15 +28,15 @@ const emit = defineEmits<{
 // Get position label
 function getPositionLabel(position: number | undefined): string {
   switch (position) {
-    case WorldInfoPosition.BEFORE_CHAR: return 'Before'
-    case WorldInfoPosition.AFTER_CHAR: return 'After'
-    case WorldInfoPosition.AN_TOP: return 'AN Top'
-    case WorldInfoPosition.AN_BOTTOM: return 'AN Bottom'
-    case WorldInfoPosition.AT_DEPTH: return 'At Depth'
-    case WorldInfoPosition.EM_TOP: return 'EM Top'
-    case WorldInfoPosition.EM_BOTTOM: return 'EM Bottom'
-    case WorldInfoPosition.OUTLET: return 'Outlet'
-    default: return 'Before'
+    case WorldInfoPosition.BEFORE_CHAR: return '角色前'
+    case WorldInfoPosition.AFTER_CHAR: return '角色后'
+    case WorldInfoPosition.AN_TOP: return 'AN顶部'
+    case WorldInfoPosition.AN_BOTTOM: return 'AN底部'
+    case WorldInfoPosition.AT_DEPTH: return '指定深度'
+    case WorldInfoPosition.EM_TOP: return 'EM顶部'
+    case WorldInfoPosition.EM_BOTTOM: return 'EM底部'
+    case WorldInfoPosition.OUTLET: return '出口'
+    default: return '角色前'
   }
 }
 
@@ -63,7 +63,7 @@ function getEntryName(entry: WorldInfoEntry): string {
   if (entry.key && entry.key.length > 0) {
     return entry.key.slice(0, 3).join(', ') + (entry.key.length > 3 ? '...' : '')
   }
-  return `Entry ${entry.uid}`
+  return `条目 ${entry.uid}`
 }
 
 // Get entry preview
@@ -87,9 +87,9 @@ function createEntry() {
 <template>
   <div class="entry-list">
     <div class="entry-list-header">
-      <NText depth="3">Entries: {{ entries.length }}</NText>
+      <NText depth="3">条目数: {{ entries.length }}</NText>
       <NButton size="small" type="primary" @click="createEntry">
-        + New Entry
+        + 新建条目
       </NButton>
     </div>
 
@@ -141,7 +141,7 @@ function createEntry() {
     </div>
 
     <div v-if="entries.length === 0" class="entry-list-empty">
-      <NText depth="3">No entries yet. Click "New Entry" to create one.</NText>
+      <NText depth="3">暂无条目，点击"新建条目"创建。</NText>
     </div>
   </div>
 </template>
@@ -163,7 +163,26 @@ function createEntry() {
 
 .entry-list-content {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.entry-list-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.entry-list-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.entry-list-content::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 3px;
+}
+
+.entry-list-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .entry-list-empty {

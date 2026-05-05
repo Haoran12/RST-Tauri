@@ -31,6 +31,20 @@
 - [ ] 世界书词条完整触发（含正则 / 概率 / 时间）。
 - [ ] 预设正确应用。
 - [ ] 切换 API 配置只改变下一次请求的连接与 Provider 映射，不改变 active presets、自动预设选择结果、世界书来源合并、`chat_metadata.world_info`、`world_info.globalSelect`、角色卡世界书绑定或资源文件内容。
+- [ ] ST 用户消息可按原始顺序混合 `text` 与 `attachment_ref` parts；读取旧纯文本聊天时自动视为单个 text part。
+- [ ] 图片 / PDF 附件源文件保存到 `./data/chat_attachments/<attachment_id>/`，聊天 JSON 只保存稳定引用，不内嵌 base64。
+- [ ] 用户以 URL 导入图片 / PDF 时，应用先镜像到本地附件库，再允许消息引用该附件。
+- [ ] OpenAI Responses 能发送图片与 PDF；重复使用同一附件时可复用 Provider file 句柄，但本地删除源文件前历史消息仍能检测出数据缺失。
+- [ ] OpenAI Chat Completions 能发送图片与 PDF；图片走 `image_url` / `data:` URL，PDF 走 `file_id` 或 `file_data`。
+- [ ] Anthropic Messages 能发送图片与 PDF；多轮重复引用大附件时优先 Files API 句柄。
+- [ ] Gemini 能发送图片与 PDF；重复使用同一附件时可复用 Files API `file_uri`。
+- [ ] DeepSeek 配置遇到 `attachment_ref` 时在发送前直接报能力错误，不静默 OCR、抽纯文本或删除附件。
+- [ ] Claude Code Interface 若未声明 `image` / `document` capability，遇到 `attachment_ref` 时在发送前直接报能力错误。
+- [ ] 切换 API 配置不会改写历史消息中的 `attachment_ref`、不会移动本地附件源文件，也不会沿用不匹配账号/endpoint 的远端文件句柄缓存。
+- [ ] 应用启动时加载并编译 `config/llm_api_contracts.json` 为只读快照；普通聊天请求不会重新读盘解析该文件。
+- [ ] `CapabilityResolver` / `ProviderRequestMapper` 使用同一份编译后契约视图；不存在某个 Provider 走硬编码旁路而绕开 `llm_api_contracts.json` 的情况。
+- [ ] 当前 API 连接的契约视图按 `api_config_id + provider + protocol + model + base_url (+ provider_variant)` 缓存；同一连接重复请求命中缓存，不重复编译。
+- [ ] 修改 `api_config_id`、model、endpoint/base_url 或 Claude Code `provider_variant` 时，只失效并重建对应连接 key 的契约缓存项。
 - [ ] ST 世界书来源合并与去重使用 RST 内部稳定 `lore_id`，ST 文件名 / 显示名只影响导入导出和 UI 展示。
 - [ ] Regex 脚本按 global -> preset -> scoped 顺序运行，且 `markdownOnly` / `promptOnly` 不写回聊天 JSON。
 - [ ] 角色卡和预设内嵌 Regex 未获允许前不运行，允许状态按 avatar / RST `preset_key` 正确持久化；切换 API 配置不会改变同一预设的授权状态。
@@ -193,6 +207,7 @@
 - [ ] SceneInitializer / SceneStateExtractor / CognitivePass / OutcomePlanner / SurfaceRealizer 的 request、response、schema、状态、耗时都被记录。
 - [ ] 每条 Agent LLM 调用日志都记录实际 `api_config_id`、provider、model。
 - [ ] 流式输出保存原始 chunk 顺序，并生成 `assembled_text` / `readable_text`。
+- [ ] 多模态请求日志不保存本地绝对文件路径，也不保存完整 inline base64 正文；只保存 `attachment_id`、mime、大小、sha256、transport 摘要和必要的 Provider 字段。
 - [ ] API Key、Authorization header、Provider secret、代理认证不会进入 SQLite。
 - [ ] API 适配改动覆盖一等目标：OpenAI Responses、OpenAI Chat Completions、Google Gemini、Anthropic、DeepSeek、Claude Code Interface；请求字段、流式解析、结构化输出、错误响应与日志脱敏均有对应行为。
 - [ ] CognitivePass schema 失败、程序修复、OutcomePlanner 兜底都有 Trace 与异常事件。

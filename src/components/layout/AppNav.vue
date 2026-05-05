@@ -111,7 +111,8 @@ function handleMenuSelect(key: string) {
 <style scoped>
 .app-nav {
   width: 72px;
-  height: 100vh;
+  height: 100%;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   background-color: var(--color-bg-app, #f0f2f5);

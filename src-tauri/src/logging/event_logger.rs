@@ -116,7 +116,12 @@ impl EventLogger {
         .bind(&event.character_id)
         .bind(&event.runtime_config_snapshot_id)
         .bind(&event.world_rules_snapshot_id)
-        .bind(event.detail_json.as_ref().map(|d| serde_json::to_string(d).unwrap_or_default()))
+        .bind(
+            event
+                .detail_json
+                .as_ref()
+                .map(|d| serde_json::to_string(d).unwrap_or_default()),
+        )
         .bind(&event.created_at)
         .execute(&self.pool)
         .await
@@ -126,7 +131,12 @@ impl EventLogger {
     }
 
     /// Log a simple info event
-    pub async fn info(&self, event_type: &str, message: &str, source_module: &str) -> Result<(), String> {
+    pub async fn info(
+        &self,
+        event_type: &str,
+        message: &str,
+        source_module: &str,
+    ) -> Result<(), String> {
         self.log(&AppEventLog {
             event_id: uuid::Uuid::new_v4().to_string(),
             level: EventLevel::Info,
@@ -143,11 +153,17 @@ impl EventLogger {
             world_rules_snapshot_id: None,
             detail_json: None,
             created_at: Utc::now().to_rfc3339(),
-        }).await
+        })
+        .await
     }
 
     /// Log a warning event
-    pub async fn warn(&self, event_type: &str, message: &str, source_module: &str) -> Result<(), String> {
+    pub async fn warn(
+        &self,
+        event_type: &str,
+        message: &str,
+        source_module: &str,
+    ) -> Result<(), String> {
         self.log(&AppEventLog {
             event_id: uuid::Uuid::new_v4().to_string(),
             level: EventLevel::Warn,
@@ -164,11 +180,17 @@ impl EventLogger {
             world_rules_snapshot_id: None,
             detail_json: None,
             created_at: Utc::now().to_rfc3339(),
-        }).await
+        })
+        .await
     }
 
     /// Log an error event
-    pub async fn error(&self, event_type: &str, message: &str, source_module: &str) -> Result<(), String> {
+    pub async fn error(
+        &self,
+        event_type: &str,
+        message: &str,
+        source_module: &str,
+    ) -> Result<(), String> {
         self.log(&AppEventLog {
             event_id: uuid::Uuid::new_v4().to_string(),
             level: EventLevel::Error,
@@ -185,24 +207,27 @@ impl EventLogger {
             world_rules_snapshot_id: None,
             detail_json: None,
             created_at: Utc::now().to_rfc3339(),
-        }).await
+        })
+        .await
     }
 
     /// Get recent events
     pub async fn get_recent(&self, limit: i64) -> Result<Vec<AppEventLog>, String> {
-        let rows = sqlx::query(
-            "SELECT * FROM app_event_logs ORDER BY created_at DESC LIMIT ?",
-        )
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| format!("Failed to get events: {}", e))?;
+        let rows = sqlx::query("SELECT * FROM app_event_logs ORDER BY created_at DESC LIMIT ?")
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to get events: {}", e))?;
 
         Ok(rows.iter().map(|r| row_to_event(r)).collect())
     }
 
     /// Get events by level
-    pub async fn get_by_level(&self, level: &EventLevel, limit: i64) -> Result<Vec<AppEventLog>, String> {
+    pub async fn get_by_level(
+        &self,
+        level: &EventLevel,
+        limit: i64,
+    ) -> Result<Vec<AppEventLog>, String> {
         let rows = sqlx::query(
             "SELECT * FROM app_event_logs WHERE level = ? ORDER BY created_at DESC LIMIT ?",
         )
@@ -218,13 +243,11 @@ impl EventLogger {
     /// Delete events older than specified days
     pub async fn delete_old_events(&self, days: i64) -> Result<u64, String> {
         let cutoff = Utc::now() - chrono::Duration::days(days);
-        let result = sqlx::query(
-            "DELETE FROM app_event_logs WHERE created_at < ?",
-        )
-        .bind(cutoff.to_rfc3339())
-        .execute(&self.pool)
-        .await
-        .map_err(|e| format!("Failed to delete old events: {}", e))?;
+        let result = sqlx::query("DELETE FROM app_event_logs WHERE created_at < ?")
+            .bind(cutoff.to_rfc3339())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to delete old events: {}", e))?;
 
         Ok(result.rows_affected())
     }
@@ -256,7 +279,9 @@ fn row_to_event(row: &sqlx::sqlite::SqliteRow) -> AppEventLog {
         character_id: row.get("character_id"),
         runtime_config_snapshot_id: row.get("runtime_config_snapshot_id"),
         world_rules_snapshot_id: row.get("world_rules_snapshot_id"),
-        detail_json: row.get::<Option<&str>, _>("detail_json").and_then(|s| serde_json::from_str(s).ok()),
+        detail_json: row
+            .get::<Option<&str>, _>("detail_json")
+            .and_then(|s| serde_json::from_str(s).ok()),
         created_at: row.get("created_at"),
     }
 }

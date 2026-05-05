@@ -29,15 +29,11 @@ export interface ChatResponse {
 
 // Send chat message (non-streaming)
 export async function sendChatMessage(
-  apiConfig: ApiConfig,
-  systemPrompt: string,
-  messages: ChatRequestMessage[]
+  _apiConfig: ApiConfig,
+  _systemPrompt: string,
+  _messages: ChatRequestMessage[]
 ): Promise<ChatResponse> {
-  return await invoke<ChatResponse>('send_chat_message', {
-    apiConfigId: apiConfig.id,
-    systemPrompt,
-    messages,
-  })
+  throw new Error('sendChatMessage 已停用；请改为通过 ST runtime assembly 的会话发送路径调用。')
 }
 
 // Send chat message (streaming)
@@ -65,15 +61,10 @@ export async function streamChatMessage(
 
 // Send structured chat message
 export async function sendStructuredChatMessage(
-  apiConfig: ApiConfig,
-  systemPrompt: string,
-  messages: ChatRequestMessage[],
-  schema: Record<string, unknown>
+  _apiConfig: ApiConfig,
+  _systemPrompt: string,
+  _messages: ChatRequestMessage[],
+  _schema: Record<string, unknown>
 ): Promise<Record<string, unknown>> {
-  return await invoke<Record<string, unknown>>('send_structured_chat_message', {
-    apiConfigId: apiConfig.id,
-    systemPrompt,
-    messages,
-    schema,
-  })
+  throw new Error('sendStructuredChatMessage 已停用；请改为通过 Agent PromptBuilder / structured runtime 路径发送。')
 }

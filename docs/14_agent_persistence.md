@@ -30,6 +30,7 @@ CREATE TABLE agent_sessions (
     title TEXT NOT NULL,
     session_kind TEXT NOT NULL,               -- mainline / retrospective / future_preview
     period_anchor TEXT NOT NULL,              -- JSON: TimeAnchor
+    player_mode TEXT NOT NULL,                -- character / director
     player_character_id TEXT,
     canon_status TEXT NOT NULL,               -- canon_candidate / partially_canon / noncanon
     conflict_policy TEXT,                     -- noncanon_after_conflict / whole_session_noncanon
@@ -581,6 +582,7 @@ CREATE INDEX idx_app_events_created ON app_event_logs(created_at);
 - `NaturalRegion` 跨越多个行政节点时，用 `location_spatial_relations` 表达，不复制节点，也不允许多重 `parent_id`。
 - `subject_id + facet_type` 联合索引服务"取角色 X 的所有 facets"这一最高频查询。
 - `world_mainline_cursor` 定义玩家当前主线前沿；判断过去线必须比较 `agent_sessions.period_anchor` 与 `mainline_time_anchor`，不得使用 `world_turns.created_at`。
+- `agent_sessions.player_mode` 是会话级权限边界：`character` 表示绑定 `player_character_id` 的扮演会话；`director` 表示世界外导演视角，`player_character_id` 必须为空。不得复用 `NULL player_character_id` 同时表达“导演模式”和“未初始化”。
 - `agent_sessions` 保存同一 World 下的聊天入口；`session_turns` 保存会话内显示顺序。删除 / 归档会话不等于删除 canonical Truth。
 - `agent_sessions.canon_status`、`session_turns.canon_status` 与 `world_turns.runtime_turn_status` 使用不同枚举，分别表示整条会话资格、聊天消息状态和运行回合状态，不得在代码中复用同一个 enum。
 - `world_turns` 是 Agent runtime turn journal，不等同于 canonical commit journal；`parent_turn_id` 表示运行 / 依赖链，`story_time_anchor` 表示故事内时间。只有 `runtime_turn_status = canon | provisional_promoted` 且存在 `state_commit_records` 的回合才提交 canonical Truth。补玩过去线时，新的 runtime turn 可以晚创建但 story time 更早。
@@ -592,6 +594,7 @@ CREATE INDEX idx_app_events_created ON app_event_logs(created_at);
 - `objective_relationships` 保存当前主线 L1 客观关系与授权等级的 materialized cache；对应时间权威必须存在于 `temporal_state_records(state_kind=objective_relation|authorization)` 或可追溯来源中。`AccessCondition::SocialAccessAtLeast` 当前热路径可读此表，按 `TimeAnchor` 查询必须读时态记录；任何情况下都禁止读取 L3 `relation_models`。
 - 没有"memory_records"表；正史事件约束使用 `knowledge_entries.kind = 'historical_event'`，角色亲历 / 听闻 / 推断记忆使用 `knowledge_entries.kind = 'memory'`。
 - 回滚 canonical turn 时，必须检查后续 canonical facts、已提升 provisional truth、其他会话和 `world_mainline_cursor` 是否依赖该回合；存在依赖时默认阻止并生成影响报告，不能只按聊天消息删除。
+- `/back` 对用户呈现为“回退当前会话并截断此后内容”，但底层不能等价为物理删除消息：优先归档 / 截断 `session_turns` 与相关非正史记录；若涉及 canonical rollback，仍必须走 `state_commit_records.rollback_patch` 与依赖检查流程。
 - Agent Trace 以 `scene_turn_id` 为主轴，解释回合如何演化；运行 Logs 以 `request_id` / `event_id` 为主轴，解释应用运行时发生了什么。两者可互相关联，但日志不得作为 Agent 判断或 LLM 输入来源。
 - `config_snapshots` 记录已发布配置快照的 hash 和脱敏摘要，用于复盘“当时用了哪套预算 / 阈值”。`snapshot_kind=runtime_config` 对应全局 `RuntimeConfigSnapshot`，`snapshot_kind=world_rules` 对应 `WorldRulesSnapshot`。Agent 回合相关 Trace / Logs 同时记录 `runtime_config_snapshot_id` 与 `world_rules_snapshot_id`；ST 或全局运行事件通常只记录 runtime 配置。该表不是热路径配置源，Resolver 不得从表中查询阈值。
 - Agent 模式允许五类 LLM 节点绑定不同 API 配置；`agent_llm_profiles.bindings` 保存用户选择，`llm_call_logs.api_config_id` 保存每次调用实际使用的配置。

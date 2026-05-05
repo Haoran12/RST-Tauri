@@ -14,11 +14,12 @@ import {
   updateCharacterAvatar,
   getCharacterAvatar,
   type CharacterImportResult,
+  type CharacterListItem,
 } from '@/services/storage'
 
 export const useCharactersStore = defineStore('characters', () => {
   // State
-  const characters = ref<TavernCardV3[]>([])
+  const characters = ref<CharacterListItem[]>([])
   const currentCharacter = ref<TavernCardV3 | null>(null)
   const isLoading = ref(false)
   const error = ref<string | null>(null)
@@ -27,7 +28,7 @@ export const useCharactersStore = defineStore('characters', () => {
   const characterCount = computed(() => characters.value.length)
 
   const charactersWithEmbeddedWorldbook = computed(() =>
-    characters.value.filter((c) => c.data.character_book != null)
+    characters.value.filter((item) => item.character.data.character_book != null)
   )
 
   // Actions
@@ -66,11 +67,9 @@ export const useCharactersStore = defineStore('characters', () => {
     try {
       await saveCharacter(id, currentCharacter.value)
       // Update list
-      const index = characters.value.findIndex(
-        (c) => c.data.name === currentCharacter.value!.data.name
-      )
+      const index = characters.value.findIndex((item) => item.id === id)
       if (index >= 0) {
-        characters.value[index] = currentCharacter.value
+        characters.value[index] = { id, character: currentCharacter.value }
       }
     } catch (e) {
       error.value = String(e)
@@ -110,7 +109,7 @@ export const useCharactersStore = defineStore('characters', () => {
       const result = await importCharacterFromPng(pngData, file.name)
 
       // Add to list
-      characters.value.push(result.character)
+      characters.value.push({ id: result.id, character: result.character })
 
       return result
     } catch (e) {
@@ -145,7 +144,7 @@ export const useCharactersStore = defineStore('characters', () => {
       )
 
       // Add to list
-      characters.value.push(result.character)
+      characters.value.push({ id: result.id, character: result.character })
 
       return result
     } catch (e) {
@@ -195,11 +194,9 @@ export const useCharactersStore = defineStore('characters', () => {
 
       // Update character in list to reflect worldbook binding
       const character = await getCharacter(characterId)
-      const index = characters.value.findIndex(
-        (c) => c.data.name === character.data.name
-      )
+      const index = characters.value.findIndex((item) => item.id === characterId)
       if (index >= 0) {
-        characters.value[index] = character
+        characters.value[index] = { id: characterId, character }
       }
       if (currentCharacter.value?.data.name === character.data.name) {
         currentCharacter.value = character

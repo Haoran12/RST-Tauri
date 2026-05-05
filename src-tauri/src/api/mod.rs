@@ -2,12 +2,15 @@
 //!
 //! Unified interface for multiple AI providers
 
-pub mod provider;
-pub mod openai_chat;
-pub mod openai_responses;
 pub mod anthropic;
-pub mod gemini;
-pub mod deepseek;
+pub mod anthropic_files;
 pub mod claude_code;
+pub mod deepseek;
+pub mod gemini;
+pub mod gemini_files;
+pub mod openai_chat;
+pub mod openai_files;
+pub mod openai_responses;
+pub mod provider;
 
 pub use provider::*;

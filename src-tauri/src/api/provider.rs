@@ -23,13 +23,34 @@ pub enum ContentPart {
     Text { text: String },
     #[serde(rename = "image_url")]
     ImageRef { image_url: ImageUrl },
+    #[serde(rename = "file")]
+    FileRef { file: FileRef },
     #[serde(rename = "tool_result")]
-    ToolResult { tool_call_id: String, content: String },
+    ToolResult {
+        tool_call_id: String,
+        content: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageUrl {
     pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileRef {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attachment_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_data: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
 }
 
 /// Chat message
@@ -104,7 +125,10 @@ pub enum ResponseFormat {
     #[serde(rename = "json_object")]
     JsonObject,
     #[serde(rename = "json_schema")]
-    JsonSchema { schema: serde_json::Value, strict: bool },
+    JsonSchema {
+        schema: serde_json::Value,
+        strict: bool,
+    },
 }
 
 /// Chat request
@@ -156,14 +180,33 @@ pub struct StreamChunk {
     pub finish_reason: Option<String>,
 }
 
+/// Model information returned by list_models
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelInfo {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owned_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_input_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<serde_json::Value>,
+}
+
 /// AI Provider trait
 #[async_trait]
 pub trait AIProvider: Send + Sync {
     /// Provider name
     fn name(&self) -> &str;
 
-    /// Available models
+    /// Available models (static fallback)
     fn models(&self) -> Vec<String>;
+
+    /// List available models from the provider API
+    async fn list_models(&self) -> Result<Vec<ModelInfo>, String>;
 
     /// Free text chat (ST mode)
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, String>;

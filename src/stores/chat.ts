@@ -1,9 +1,18 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { ChatSession, ChatMessage, CharacterCard, ApiConfig } from '@/types/st'
-import type { ChatRequestMessage } from '@/services/api'
+import type {
+  ChatSession,
+  ChatMessage,
+  CharacterCard,
+  ApiConfig,
+  ChatAttachmentRef,
+  ChatSessionMetadata,
+} from '@/types/st'
 import * as storage from '@/services/storage'
-import { sendChatMessage, streamChatMessage } from '@/services/api'
+import { sendAssembledSTChatMessage } from '@/services/runtime'
+import { useRuntimeStore } from '@/stores/runtime'
+
+const MAX_CHAT_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
 export const useChatStore = defineStore('chat', () => {
   // Current session
@@ -16,6 +25,7 @@ export const useChatStore = defineStore('chat', () => {
   // Messages
   const messages = ref<ChatMessage[]>([])
   const pendingMessage = ref<string>('')
+  const pendingAttachments = ref<ChatAttachmentRef[]>([])
   const isGenerating = ref(false)
   const streamingContent = ref<string>('')
 
@@ -25,6 +35,15 @@ export const useChatStore = defineStore('chat', () => {
   // Computed
   const hasSession = computed(() => currentSession.value !== null)
   const hasCharacter = computed(() => currentCharacter.value !== null)
+  const hasPendingAttachments = computed(() => pendingAttachments.value.length > 0)
+
+  function normalizeChatMetadata(metadata?: ChatSessionMetadata): ChatSessionMetadata {
+    return {
+      world_info: metadata?.world_info ?? null,
+      disabled_world_info: metadata?.disabled_world_info ?? [],
+      ...metadata,
+    }
+  }
 
   // Load sessions
   async function loadSessions() {
@@ -43,6 +62,7 @@ export const useChatStore = defineStore('chat', () => {
       character_id: characterId,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      chat_metadata: normalizeChatMetadata(),
       messages: [],
     }
 
@@ -60,6 +80,7 @@ export const useChatStore = defineStore('chat', () => {
   async function loadSession(id: string) {
     try {
       const session = await storage.getChatSession(id)
+      session.chat_metadata = normalizeChatMetadata(session.chat_metadata)
       currentSession.value = session
       messages.value = session.messages
 
@@ -78,28 +99,80 @@ export const useChatStore = defineStore('chat', () => {
     currentCharacter.value = character
   }
 
+  async function addPendingAttachments(files: File[]) {
+    const uploaded: ChatAttachmentRef[] = []
+    for (const file of files) {
+      if (file.size > MAX_CHAT_ATTACHMENT_BYTES) {
+        throw new Error(`附件不能超过 10 MB: ${file.name}`)
+      }
+      const mimeType = file.type || inferMimeType(file.name)
+      if (!isSupportedAttachment(mimeType, file.name)) {
+        throw new Error(`不支持的附件类型: ${file.name}`)
+      }
+
+      const buffer = await file.arrayBuffer()
+      const bytes = Array.from(new Uint8Array(buffer))
+      const record = await storage.saveChatAttachment(file.name, mimeType, bytes)
+      uploaded.push({
+        attachment_id: record.attachment_id,
+        kind: record.kind,
+        mime_type: record.mime_type,
+        filename: record.filename,
+        size_bytes: record.size_bytes,
+      })
+    }
+    pendingAttachments.value.push(...uploaded)
+  }
+
+  function removePendingAttachment(attachmentId: string) {
+    pendingAttachments.value = pendingAttachments.value.filter(
+      attachment => attachment.attachment_id !== attachmentId
+    )
+  }
+
+  function clearPendingAttachments() {
+    pendingAttachments.value = []
+  }
+
   // Send message (non-streaming)
   async function sendMessage(content: string, apiConfig: ApiConfig) {
     if (!currentSession.value || isGenerating.value) return
 
     isGenerating.value = true
     error.value = null
+    const messageContent = content.trim()
+    const attachments = [...pendingAttachments.value]
+    if (!messageContent && attachments.length === 0) {
+      isGenerating.value = false
+      return
+    }
 
     // Add user message
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'user',
-      content,
+      content: messageContent,
       created_at: new Date().toISOString(),
+      attachments,
     }
     messages.value.push(userMessage)
+    pendingAttachments.value = []
 
     try {
-      // Build request
-      const systemPrompt = buildSystemPrompt()
-      const requestMessages = buildRequestMessages()
+      await saveCurrentSession()
+      const runtimeStore = useRuntimeStore()
+      await runtimeStore.loadGlobalState()
 
-      const response = await sendChatMessage(apiConfig, systemPrompt, requestMessages)
+      const response = await sendAssembledSTChatMessage({
+        api_config_id: apiConfig.id,
+        character_id: currentSession.value.character_id ?? null,
+        session_id: currentSession.value.id,
+        preset_name: runtimeStore.globalState.active_preset || 'Default',
+        world_info_settings: runtimeStore.globalState.world_info_settings,
+        chat_lore_id: null,
+        global_lore_ids: [],
+        max_context: 8192,
+      })
 
       // Add assistant message
       const assistantMessage: ChatMessage = {
@@ -107,6 +180,7 @@ export const useChatStore = defineStore('chat', () => {
         role: 'assistant',
         content: response.content,
         created_at: new Date().toISOString(),
+        attachments: [],
       }
       messages.value.push(assistantMessage)
 
@@ -114,8 +188,10 @@ export const useChatStore = defineStore('chat', () => {
       await saveCurrentSession()
     } catch (e) {
       error.value = String(e)
+      pendingAttachments.value = attachments
       // Remove the user message on error
       messages.value.pop()
+      await saveCurrentSession()
     } finally {
       isGenerating.value = false
     }
@@ -128,63 +204,74 @@ export const useChatStore = defineStore('chat', () => {
     isGenerating.value = true
     streamingContent.value = ''
     error.value = null
+    const messageContent = content.trim()
+    const attachments = [...pendingAttachments.value]
+    if (!messageContent && attachments.length === 0) {
+      isGenerating.value = false
+      return
+    }
 
     // Add user message
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'user',
-      content,
+      content: messageContent,
       created_at: new Date().toISOString(),
+      attachments,
     }
     messages.value.push(userMessage)
-
-    // Add placeholder assistant message for streaming
-    const assistantMessage: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      content: '',
-      created_at: new Date().toISOString(),
-    }
-    messages.value.push(assistantMessage)
+    pendingAttachments.value = []
 
     try {
-      const systemPrompt = buildSystemPrompt()
-      const requestMessages = buildRequestMessages()
+      await saveCurrentSession()
+      const runtimeStore = useRuntimeStore()
+      await runtimeStore.loadGlobalState()
 
-      await streamChatMessage(
-        apiConfig,
-        systemPrompt,
-        requestMessages,
-        (chunk: string) => {
-          streamingContent.value += chunk
-          // Update the assistant message content
-          const lastMsg = messages.value[messages.value.length - 1]
-          if (lastMsg && lastMsg.role === 'assistant') {
-            lastMsg.content = streamingContent.value
-          }
-        },
-        () => {
-          // Stream complete
-          isGenerating.value = false
-          streamingContent.value = ''
-          saveCurrentSession()
-        }
-      )
+      // Add placeholder only after persisting the user message used by runtime assembly.
+      const assistantMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: '',
+        created_at: new Date().toISOString(),
+        attachments: [],
+      }
+      messages.value.push(assistantMessage)
+
+      const response = await sendAssembledSTChatMessage({
+        api_config_id: apiConfig.id,
+        character_id: currentSession.value.character_id ?? null,
+        session_id: currentSession.value.id,
+        preset_name: runtimeStore.globalState.active_preset || 'Default',
+        world_info_settings: runtimeStore.globalState.world_info_settings,
+        chat_lore_id: null,
+        global_lore_ids: [],
+        max_context: 8192,
+      })
+
+      streamingContent.value = response.content
+      assistantMessage.content = response.content
+      await saveCurrentSession()
     } catch (e) {
       error.value = String(e)
+      pendingAttachments.value = attachments
       // Remove both user and placeholder assistant messages on error
-      messages.value.pop()
-      messages.value.pop()
+      if (messages.value[messages.value.length - 1]?.role === 'assistant') {
+        messages.value.pop()
+      }
+      if (messages.value[messages.value.length - 1]?.id === userMessage.id) {
+        messages.value.pop()
+      }
+      await saveCurrentSession()
+    } finally {
       isGenerating.value = false
       streamingContent.value = ''
     }
   }
 
-  // Stop generation
+  // Stop only affects the local pending indicator until provider streaming is implemented.
   function stopGeneration() {
     isGenerating.value = false
     streamingContent.value = ''
-    // TODO: Implement actual abort
   }
 
   // Clear messages
@@ -219,6 +306,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!currentSession.value) return
 
     currentSession.value.messages = messages.value
+    currentSession.value.chat_metadata = normalizeChatMetadata(currentSession.value.chat_metadata)
     currentSession.value.updated_at = new Date().toISOString()
 
     try {
@@ -228,43 +316,21 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  // Build system prompt from character
-  function buildSystemPrompt(): string {
-    if (!currentCharacter.value) return ''
+  async function setWorldbookDisabled(loreId: string, disabled: boolean) {
+    if (!currentSession.value) return
 
-    const data = currentCharacter.value.data
-    const parts: string[] = []
-
-    if (data.system_prompt) {
-      parts.push(data.system_prompt)
+    const metadata = normalizeChatMetadata(currentSession.value.chat_metadata)
+    const disabledSet = new Set(metadata.disabled_world_info ?? [])
+    if (disabled) {
+      disabledSet.add(loreId)
+    } else {
+      disabledSet.delete(loreId)
     }
-
-    if (data.description) {
-      parts.push(`Description: ${data.description}`)
+    currentSession.value.chat_metadata = {
+      ...metadata,
+      disabled_world_info: Array.from(disabledSet),
     }
-
-    if (data.personality) {
-      parts.push(`Personality: ${data.personality}`)
-    }
-
-    if (data.scenario) {
-      parts.push(`Scenario: ${data.scenario}`)
-    }
-
-    return parts.join('\n\n')
-  }
-
-  // Build request messages from chat history
-  function buildRequestMessages(): ChatRequestMessage[] {
-    // Exclude the last assistant message if streaming
-    const msgs = isGenerating.value
-      ? messages.value.slice(0, -1)
-      : messages.value
-
-    return msgs.map(m => ({
-      role: m.role as 'system' | 'user' | 'assistant',
-      content: m.content,
-    }))
+    await saveCurrentSession()
   }
 
   return {
@@ -274,6 +340,7 @@ export const useChatStore = defineStore('chat', () => {
     currentCharacter,
     messages,
     pendingMessage,
+    pendingAttachments,
     isGenerating,
     streamingContent,
     error,
@@ -281,17 +348,33 @@ export const useChatStore = defineStore('chat', () => {
     // Computed
     hasSession,
     hasCharacter,
+    hasPendingAttachments,
 
     // Actions
     loadSessions,
     createSession,
     loadSession,
     setCharacter,
+    addPendingAttachments,
+    removePendingAttachment,
+    clearPendingAttachments,
     sendMessage,
     sendMessageStream,
     stopGeneration,
     clearMessages,
     deleteSession,
     saveCurrentSession,
+    setWorldbookDisabled,
   }
 })
+
+function isSupportedAttachment(mimeType: string, filename: string) {
+  return mimeType.startsWith('image/') || mimeType === 'application/pdf' || filename.toLowerCase().endsWith('.pdf')
+}
+
+function inferMimeType(filename: string) {
+  if (filename.toLowerCase().endsWith('.pdf')) {
+    return 'application/pdf'
+  }
+  return 'application/octet-stream'
+}

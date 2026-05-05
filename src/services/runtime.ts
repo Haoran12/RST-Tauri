@@ -11,6 +11,7 @@ import type {
   WorldInfoInjectionResult,
   AssembledRequest,
 } from '@/types/runtime';
+import type { ChatResponse } from '@/services/api';
 import type {
   SamplerPreset,
   InstructTemplate,
@@ -46,24 +47,10 @@ export async function setActiveApiConfig(apiConfigId: string | null): Promise<vo
 }
 
 /**
- * 设置激活的预设
+ * 设置激活的完整预设
  */
-export async function setActivePresets(options: {
-  sampler?: string;
-  instruct?: string;
-  context?: string;
-  sysprompt?: string;
-  reasoning?: string;
-  prompt?: string;
-}): Promise<void> {
-  return await invoke('set_active_presets', {
-    sampler: options.sampler ?? null,
-    instruct: options.instruct ?? null,
-    context: options.context ?? null,
-    sysprompt: options.sysprompt ?? null,
-    reasoning: options.reasoning ?? null,
-    prompt: options.prompt ?? null,
-  });
+export async function setActivePreset(presetName: string): Promise<void> {
+  return await invoke('set_active_preset', { presetName });
 }
 
 // ============================================================================
@@ -124,6 +111,13 @@ export async function assembleSTRequest(input: AssembleRequestInput): Promise<As
 }
 
 /**
+ * 经过 ST runtime assembly gate 后发送聊天请求
+ */
+export async function sendAssembledSTChatMessage(input: AssembleRequestInput): Promise<ChatResponse> {
+  return await invoke<ChatResponse>('send_assembled_st_chat_message', { input });
+}
+
+/**
  * 执行世界书注入
  */
 export async function runWorldInfoInjection(input: WorldInfoInjectionInput): Promise<WorldInfoInjectionResult> {
@@ -135,11 +129,13 @@ export async function runWorldInfoInjection(input: WorldInfoInjectionInput): Pro
  */
 export async function mapRequestToProvider(
   request: AssembledRequest,
+  apiConfigId: string,
   providerType: string,
   model: string
 ): Promise<Record<string, unknown>> {
   return await invoke<Record<string, unknown>>('map_request_to_provider', {
     request,
+    apiConfigId,
     providerType,
     model,
   });
@@ -160,12 +156,7 @@ export async function buildCompleteChatRequest(
   characterId: string | null,
   worldInfoSettings: STWorldInfoSettings,
   options?: {
-    samplerPreset?: string;
-    instructTemplate?: string;
-    contextTemplate?: string;
-    systemPrompt?: string;
-    reasoningTemplate?: string;
-    promptPreset?: string;
+    presetName?: string;
     chatLoreId?: string;
     globalLoreIds?: string[];
     maxContext?: number;
@@ -182,12 +173,7 @@ export async function buildCompleteChatRequest(
     api_config_id: apiConfigId,
     character_id: characterId,
     session_id: sessionId,
-    sampler_preset: options?.samplerPreset ?? null,
-    instruct_template: options?.instructTemplate ?? null,
-    context_template: options?.contextTemplate ?? null,
-    system_prompt: options?.systemPrompt ?? null,
-    reasoning_template: options?.reasoningTemplate ?? null,
-    prompt_preset: options?.promptPreset ?? null,
+    preset_name: options?.presetName ?? null,
     world_info_settings: worldInfoSettings,
     chat_lore_id: options?.chatLoreId ?? null,
     global_lore_ids: options?.globalLoreIds ?? [],
@@ -199,6 +185,7 @@ export async function buildCompleteChatRequest(
   // 2. 映射到 Provider 格式
   const providerRequest = await mapRequestToProvider(
     assembleOutput.request,
+    apiConfigId,
     assembleOutput.provider_type,
     assembleOutput.model
   );

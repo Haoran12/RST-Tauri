@@ -39,19 +39,25 @@ export const useSettingsStore = defineStore('settings', () => {
       apiConfigs.value.push(config)
     } catch (e) {
       error.value = String(e)
+      throw e
     }
   }
 
   async function updateApiConfig(id: string, updates: Partial<ApiConfig>) {
     const index = apiConfigs.value.findIndex(c => c.id === id)
-    if (index !== -1) {
-      const updated = { ...apiConfigs.value[index], ...updates, updated_at: new Date().toISOString() }
-      try {
-        await storage.saveApiConfig(updated)
-        apiConfigs.value[index] = updated
-      } catch (e) {
-        error.value = String(e)
-      }
+    if (index === -1) {
+      const message = `API config not found: ${id}`
+      error.value = message
+      throw new Error(message)
+    }
+
+    const updated = { ...apiConfigs.value[index], ...updates, updated_at: new Date().toISOString() }
+    try {
+      await storage.saveApiConfig(updated)
+      apiConfigs.value[index] = updated
+    } catch (e) {
+      error.value = String(e)
+      throw e
     }
   }
 
@@ -64,6 +70,7 @@ export const useSettingsStore = defineStore('settings', () => {
       }
     } catch (e) {
       error.value = String(e)
+      throw e
     }
   }
 

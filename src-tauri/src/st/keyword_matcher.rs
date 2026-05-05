@@ -3,8 +3,8 @@
 //! 关键词匹配系统，支持基础匹配、正则匹配和匹配目标扩展。
 //! 参考: SillyTavern/public/scripts/world-info.js
 
-use regex::Regex;
 use crate::storage::st_resources::{WorldInfoEntry, WorldInfoLogic};
+use regex::Regex;
 
 /// 关键词匹配结果
 #[derive(Debug, Clone)]
@@ -82,8 +82,12 @@ impl KeywordMatcher {
         }
 
         // 获取匹配设置
-        let case_sensitive = entry.case_sensitive.unwrap_or(context.global_case_sensitive);
-        let match_whole_words = entry.match_whole_words.unwrap_or(context.global_match_whole_words);
+        let case_sensitive = entry
+            .case_sensitive
+            .unwrap_or(context.global_case_sensitive);
+        let match_whole_words = entry
+            .match_whole_words
+            .unwrap_or(context.global_match_whole_words);
 
         // 匹配主关键词
         // 来源可以是：扫描文本、或启用的扩展目标
@@ -120,7 +124,10 @@ impl KeywordMatcher {
                 x if x == WorldInfoLogic::NOT_ALL => {
                     // 需要不是所有次关键词都匹配
                     // 即：如果所有次关键词都匹配，则失败
-                    if has_secondary && secondary_matches.as_ref().map(|m| m.len()).unwrap_or(0) == entry.keysecondary.len() {
+                    if has_secondary
+                        && secondary_matches.as_ref().map(|m| m.len()).unwrap_or(0)
+                            == entry.keysecondary.len()
+                    {
                         return None;
                     }
                     secondary_matches.unwrap_or_default()
@@ -134,7 +141,10 @@ impl KeywordMatcher {
                 }
                 x if x == WorldInfoLogic::AND_ALL => {
                     // 需要所有次关键词都匹配
-                    if !has_secondary || secondary_matches.as_ref().map(|m| m.len()).unwrap_or(0) != entry.keysecondary.len() {
+                    if !has_secondary
+                        || secondary_matches.as_ref().map(|m| m.len()).unwrap_or(0)
+                            != entry.keysecondary.len()
+                    {
                         return None;
                     }
                     secondary_matches.unwrap_or_default()
@@ -191,25 +201,47 @@ impl KeywordMatcher {
 
             // 检查各扩展目标
             if entry.match_persona_description && !global_scan_data.persona_description.is_empty() {
-                if self.match_single_key(key, &global_scan_data.persona_description, case_sensitive) {
+                if self.match_single_key(key, &global_scan_data.persona_description, case_sensitive)
+                {
                     found = true;
                 }
             }
 
-            if !found && entry.match_character_description && !global_scan_data.character_description.is_empty() {
-                if self.match_single_key(key, &global_scan_data.character_description, case_sensitive) {
+            if !found
+                && entry.match_character_description
+                && !global_scan_data.character_description.is_empty()
+            {
+                if self.match_single_key(
+                    key,
+                    &global_scan_data.character_description,
+                    case_sensitive,
+                ) {
                     found = true;
                 }
             }
 
-            if !found && entry.match_character_personality && !global_scan_data.character_personality.is_empty() {
-                if self.match_single_key(key, &global_scan_data.character_personality, case_sensitive) {
+            if !found
+                && entry.match_character_personality
+                && !global_scan_data.character_personality.is_empty()
+            {
+                if self.match_single_key(
+                    key,
+                    &global_scan_data.character_personality,
+                    case_sensitive,
+                ) {
                     found = true;
                 }
             }
 
-            if !found && entry.match_character_depth_prompt && !global_scan_data.character_depth_prompt.is_empty() {
-                if self.match_single_key(key, &global_scan_data.character_depth_prompt, case_sensitive) {
+            if !found
+                && entry.match_character_depth_prompt
+                && !global_scan_data.character_depth_prompt.is_empty()
+            {
+                if self.match_single_key(
+                    key,
+                    &global_scan_data.character_depth_prompt,
+                    case_sensitive,
+                ) {
                     found = true;
                 }
             }
@@ -330,12 +362,7 @@ impl KeywordMatcher {
     }
 
     /// 匹配正则表达式
-    fn match_regex(
-        &mut self,
-        pattern: &str,
-        text: &str,
-        case_sensitive: bool,
-    ) -> Option<String> {
+    fn match_regex(&mut self, pattern: &str, text: &str, case_sensitive: bool) -> Option<String> {
         // 解析 /pattern/flags 格式
         let (regex_pattern, flags) = self.parse_regex_pattern(pattern, case_sensitive);
 

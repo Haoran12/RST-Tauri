@@ -3,7 +3,27 @@ import type {
   ApiConfig,
   TavernCardV3,
   ChatSession,
+  ChatAttachmentRecord,
+  AttachmentUploadCacheDiagnostics,
+  ClearAttachmentUploadCacheResult,
 } from '@/types/st'
+import type {
+  StructuredTextBackendRequest,
+  StructuredTextValidationResult,
+} from '@/types/structuredText'
+
+// ============================================================================
+// Model Info
+// ============================================================================
+
+export interface ModelInfo {
+  id: string
+  display_name: string | null
+  owned_by: string | null
+  max_input_tokens: number | null
+  max_output_tokens: number | null
+  capabilities: Record<string, unknown> | null
+}
 
 // ============================================================================
 // API Config
@@ -25,6 +45,10 @@ export async function deleteApiConfig(id: string): Promise<void> {
   return await invoke('delete_api_config', { id })
 }
 
+export async function listModels(configId: string): Promise<ModelInfo[]> {
+  return await invoke<ModelInfo[]>('list_models', { configId })
+}
+
 // ============================================================================
 // Character
 // ============================================================================
@@ -36,8 +60,13 @@ export interface CharacterImportResult {
   avatar_filename: string
 }
 
-export async function listCharacters(): Promise<TavernCardV3[]> {
-  return await invoke<TavernCardV3[]>('list_characters')
+export interface CharacterListItem {
+  id: string
+  character: TavernCardV3
+}
+
+export async function listCharacters(): Promise<CharacterListItem[]> {
+  return await invoke<CharacterListItem[]>('list_characters')
 }
 
 export async function getCharacter(id: string): Promise<TavernCardV3> {
@@ -202,4 +231,87 @@ export async function saveChatSession(session: ChatSession): Promise<void> {
 
 export async function deleteChatSession(id: string): Promise<void> {
   return await invoke('delete_chat_session', { id })
+}
+
+export async function saveChatAttachment(
+  filename: string,
+  mimeType: string,
+  data: number[]
+): Promise<ChatAttachmentRecord> {
+  return await invoke<ChatAttachmentRecord>('save_chat_attachment', {
+    input: {
+      filename,
+      mimeType,
+      data,
+    },
+  })
+}
+
+export async function getChatAttachment(attachmentId: string): Promise<ChatAttachmentRecord> {
+  return await invoke<ChatAttachmentRecord>('get_chat_attachment', { attachmentId })
+}
+
+export async function getChatAttachmentBlob(attachmentId: string): Promise<number[]> {
+  return await invoke<number[]>('get_chat_attachment_blob', { attachmentId })
+}
+
+export async function listAttachmentUploadCache(
+  attachmentId: string
+): Promise<AttachmentUploadCacheDiagnostics> {
+  return await invoke<AttachmentUploadCacheDiagnostics>('list_attachment_upload_cache', {
+    attachmentId,
+  })
+}
+
+export async function clearAttachmentUploadCache(
+  attachmentId: string,
+  apiConfigId?: string | null
+): Promise<ClearAttachmentUploadCacheResult> {
+  return await invoke<ClearAttachmentUploadCacheResult>('clear_attachment_upload_cache', {
+    attachmentId,
+    apiConfigId: apiConfigId ?? null,
+  })
+}
+
+// ============================================================================
+// Structured Text
+// ============================================================================
+
+export async function validateStructuredText(
+  input: StructuredTextBackendRequest
+): Promise<StructuredTextValidationResult> {
+  return await invoke<StructuredTextValidationResult>('validate_structured_text', { input })
+}
+
+export async function formatStructuredText(
+  input: StructuredTextBackendRequest
+): Promise<StructuredTextValidationResult> {
+  return await invoke<StructuredTextValidationResult>('format_structured_text', { input })
+}
+
+// ============================================================================
+// Presets
+// ============================================================================
+
+import type { PresetFile } from '@/types/preset'
+
+export interface PresetListItem {
+  name: string
+  source_api_id?: string
+}
+
+export async function listPresets(): Promise<PresetListItem[]> {
+  return await invoke<PresetListItem[]>('list_presets')
+}
+
+export async function loadPreset(name: string): Promise<PresetFile> {
+  return await invoke<PresetFile>('load_preset', { name })
+}
+
+export async function savePreset(preset: PresetFile): Promise<void> {
+  return await invoke('save_preset', { preset })
+}
+
+export async function deletePreset(name: string): Promise<void> {
+  return await invoke('delete_preset', { name })
 }

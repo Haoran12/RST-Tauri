@@ -206,32 +206,86 @@ impl RegexEngine {
         options: &RegexRunOptions,
     ) -> Vec<SourcedScript> {
         let mut result = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let script_by_id: HashMap<&str, &RegexScriptData> = settings
+            .regex
+            .iter()
+            .map(|script| (script.id.as_str(), script))
+            .collect();
+        let selected_presets: Vec<&RegexPreset> = settings
+            .regex_presets
+            .iter()
+            .filter(|preset| preset.is_selected)
+            .collect();
 
-        // 1. Global 脚本：全部可见
-        for script in &settings.regex {
-            result.push(SourcedScript {
-                script: script.clone(),
-                source: ScriptSource::Global,
-            });
+        // 1. Global 脚本：没有启用 preset 时保留历史行为，全部 global 可见。
+        if selected_presets.is_empty() {
+            for script in &settings.regex {
+                if seen.insert(script.id.clone()) {
+                    result.push(SourcedScript {
+                        script: script.clone(),
+                        source: ScriptSource::Global,
+                    });
+                }
+            }
+        } else {
+            for preset in &selected_presets {
+                for item in &preset.global {
+                    if let Some(script) = script_by_id.get(item.id.as_str()) {
+                        if seen.insert(script.id.clone()) {
+                            result.push(SourcedScript {
+                                script: (*script).clone(),
+                                source: ScriptSource::Global,
+                            });
+                        }
+                    }
+                }
+            }
         }
 
         // 2. Preset 脚本：需要通过 preset_allowed_regex
-        // TODO: 从当前预设加载脚本
-        // 当前预设名需要在 options.preset_key 中传递
-        // if let Some(preset_key) = &options.preset_key {
-        //     if let Some(allowed_ids) = settings.preset_allowed_regex.get(preset_key) {
-        //         // 只添加在 allow list 中的脚本
-        //     }
-        // }
+        if let Some(preset_key) = &options.preset_key {
+            if let Some(allowed_ids) = settings.preset_allowed_regex.get(preset_key) {
+                for preset in &selected_presets {
+                    for item in &preset.preset {
+                        if !allowed_ids.contains(&item.id) {
+                            continue;
+                        }
+                        if let Some(script) = script_by_id.get(item.id.as_str()) {
+                            if seen.insert(script.id.clone()) {
+                                result.push(SourcedScript {
+                                    script: (*script).clone(),
+                                    source: ScriptSource::Preset,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // 3. Scoped 脚本：需要通过 character_allowed_regex
-        // TODO: 从当前角色卡加载脚本
-        // 当前角色名需要在 options.character_name 中传递
-        // if let Some(character_name) = &options.character_name {
-        //     if settings.character_allowed_regex.contains(character_name) {
-        //         // 添加角色卡内嵌脚本
-        //     }
-        // }
+        let character_scope_enabled = options
+            .character_name
+            .as_ref()
+            .map(|name| settings.character_allowed_regex.contains(name))
+            .unwrap_or(false);
+        for preset in &selected_presets {
+            for item in &preset.scoped {
+                let script_allowed = settings.character_allowed_regex.contains(&item.id);
+                if !script_allowed && !character_scope_enabled {
+                    continue;
+                }
+                if let Some(script) = script_by_id.get(item.id.as_str()) {
+                    if seen.insert(script.id.clone()) {
+                        result.push(SourcedScript {
+                            script: (*script).clone(),
+                            source: ScriptSource::Scoped,
+                        });
+                    }
+                }
+            }
+        }
 
         result
     }
@@ -298,20 +352,35 @@ impl RegexEngine {
     }
 
     /// 执行单个脚本
-    fn run_script(&mut self, script: &RegexScriptData, text: &str, _options: &RegexRunOptions) -> String {
+    fn run_script(
+        &mut self,
+        script: &RegexScriptData,
+        text: &str,
+        _options: &RegexRunOptions,
+    ) -> String {
         // 编译正则
         let regex = match self.compile_regex(&script.find_regex, script.substitute_regex) {
             Some(re) => re,
             None => return text.to_string(),
         };
 
-        // 执行替换
-        let result = regex.replace_all(text, &script.replace_string);
+        // 执行替换；支持 regex crate 的 $1/${name}，并补充 ST 常用的 {{match}}。
+        let result = regex.replace_all(text, |captures: &regex::Captures| {
+            let matched = captures.get(0).map(|m| m.as_str()).unwrap_or_default();
+            let template = script.replace_string.replace("{{match}}", matched);
+            let mut expanded = String::new();
+            captures.expand(&template, &mut expanded);
+            expanded
+        });
 
-        // TODO: 处理 trim_strings
-        // TODO: 处理宏替换
+        let mut output = result.to_string();
+        for trim in &script.trim_strings {
+            if !trim.is_empty() {
+                output = output.replace(trim, "");
+            }
+        }
 
-        result.to_string()
+        output
     }
 
     /// 编译正则表达式
