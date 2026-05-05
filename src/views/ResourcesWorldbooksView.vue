@@ -11,6 +11,7 @@ import {
   NInputNumber,
   NUpload,
   NText,
+  NSwitch,
   useMessage,
   type UploadCustomRequestOptions,
 } from 'naive-ui'
@@ -30,8 +31,9 @@ const editDescription = ref('')
 
 // Global settings state
 const showGlobalSettings = ref(false)
-const globalScanDepth = ref(4)
-const globalTokenBudget = ref(32767)
+const globalScanDepth = ref<number | null>(null)
+const globalTokenBudget = ref<number | null>(null)
+const globalRecursiveScanning = ref(false)
 
 // Load worldbooks on mount
 onMounted(() => {
@@ -51,7 +53,33 @@ function handleCreateWorldbookEvent() {
 }
 
 function handleShowGlobalSettingsEvent() {
+  // Load current values from worldbook
+  if (store.currentWorldbook) {
+    globalScanDepth.value = store.currentWorldbook.scan_depth ?? null
+    globalTokenBudget.value = store.currentWorldbook.token_budget ?? null
+    globalRecursiveScanning.value = store.currentWorldbook.recursive_scanning ?? false
+  }
   showGlobalSettings.value = true
+}
+
+// Save global settings
+async function saveGlobalSettings() {
+  if (!store.currentWorldbook) return
+
+  try {
+    // Update local state
+    store.currentWorldbook.scan_depth = globalScanDepth.value
+    store.currentWorldbook.token_budget = globalTokenBudget.value
+    store.currentWorldbook.recursive_scanning = globalRecursiveScanning.value
+
+    // Save to file
+    await store.saveCurrentWorldbook()
+
+    message.success('全局设置已保存')
+    showGlobalSettings.value = false
+  } catch (e) {
+    message.error(String(e))
+  }
 }
 
 // Create new worldbook
@@ -321,6 +349,8 @@ async function handleExport() {
             v-model:value="globalScanDepth"
             :min="1"
             :max="999"
+            clearable
+            placeholder="默认"
             style="width: 100%"
           />
         </NFormItem>
@@ -328,10 +358,21 @@ async function handleExport() {
           <NInputNumber
             v-model:value="globalTokenBudget"
             :min="1"
+            clearable
+            placeholder="默认"
             style="width: 100%"
           />
         </NFormItem>
+        <NFormItem label="递归扫描">
+          <NSwitch v-model:value="globalRecursiveScanning" />
+        </NFormItem>
       </NForm>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="showGlobalSettings = false">取消</NButton>
+          <NButton type="primary" @click="saveGlobalSettings">保存</NButton>
+        </NSpace>
+      </template>
     </NModal>
   </div>
 </template>
