@@ -339,6 +339,91 @@ export interface PromptPreset {
   impersonation_prompt?: string
 }
 
+/**
+ * 默认内置提示词条目定义列表
+ *
+ * 这些条目在每个预设中都存在，不可删除，但可以禁用或调整顺序。
+ * 部分条目内容由系统动态生成，用户无法直接编辑。
+ */
+export const BUILTIN_PROMPT_DEFINITIONS: BuiltinPromptItemDefinition[] = [
+  {
+    identifier: 'builtin:system_prompt',
+    name: 'System Prompt',
+    role: 'system',
+    source: 'static',
+    content: '',
+    defaultEnabled: true,
+    defaultPosition: 0,
+    system_prompt: true,
+    description: '预设级系统提示词，定义 AI 的基本行为模式',
+  },
+  {
+    identifier: 'builtin:character_description',
+    name: 'Character Description',
+    role: 'system',
+    source: 'generated',
+    generator: 'character_description',
+    defaultEnabled: true,
+    defaultPosition: 10,
+    description: '角色描述，从当前角色卡动态提取',
+  },
+  {
+    identifier: 'builtin:character_personality',
+    name: 'Character Personality',
+    role: 'system',
+    source: 'generated',
+    generator: 'character_personality',
+    defaultEnabled: true,
+    defaultPosition: 20,
+    description: '角色性格，从当前角色卡动态提取',
+  },
+  {
+    identifier: 'builtin:scenario',
+    name: 'Scenario',
+    role: 'system',
+    source: 'generated',
+    generator: 'scenario',
+    defaultEnabled: true,
+    defaultPosition: 30,
+    description: '场景设定，从当前角色卡动态提取',
+  },
+  {
+    identifier: 'builtin:world_info',
+    name: 'World Info',
+    role: 'system',
+    source: 'generated',
+    generator: 'world_info',
+    defaultEnabled: true,
+    defaultPosition: 40,
+    description: '世界书内容，根据触发条件动态注入',
+  },
+  {
+    identifier: 'builtin:chat_history',
+    name: 'Chat History',
+    role: 'system',
+    source: 'generated',
+    generator: 'chat_history',
+    defaultEnabled: true,
+    defaultPosition: 100,
+    marker: true,
+    description: '聊天历史记录占位标记',
+  },
+]
+
+/**
+ * 检查标识符是否为内置条目
+ */
+export function isBuiltinPrompt(identifier: string): boolean {
+  return identifier.startsWith('builtin:')
+}
+
+/**
+ * 获取内置条目定义
+ */
+export function getBuiltinDefinition(identifier: string): BuiltinPromptItemDefinition | undefined {
+  return BUILTIN_PROMPT_DEFINITIONS.find((d) => d.identifier === identifier)
+}
+
 export function createDefaultPromptPreset(name = ''): PromptPreset {
   return {
     name,

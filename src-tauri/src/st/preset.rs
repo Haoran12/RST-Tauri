@@ -362,21 +362,175 @@ impl ReasoningTemplate {
 }
 
 // ============================================================================
-// Prompt Preset - 完整提示词组装配置
+// Built-in Prompt Items - 内置预设提示词条目
 // ============================================================================
 
-/// Prompt 条目
+/// 内置提示词条目内容来源类型
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BuiltinPromptSource {
+    /// 静态内容，用户可查看但不可编辑
+    Static,
+    /// 系统动态生成内容
+    Generated,
+}
+
+/// 内置提示词条目定义
+///
+/// 内置条目由系统提供，不可删除，部分内容不可编辑。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuiltinPromptItemDefinition {
+    /// 内置条目标识符，以 "builtin:" 开头
+    pub identifier: String,
+    /// 显示名称
+    pub name: String,
+    /// 角色
+    pub role: String,
+    /// 内容来源类型
+    pub source: BuiltinPromptSource,
+    /// 静态内容（source 为 static 时使用）
+    #[serde(default)]
+    pub content: String,
+    /// 内容生成器名称（source 为 generated 时使用）
+    #[serde(default)]
+    pub generator: Option<String>,
+    /// 默认是否启用
+    #[serde(default = "default_true")]
+    pub default_enabled: bool,
+    /// 默认排序位置（数字越小越靠前）
+    #[serde(default)]
+    pub default_position: i32,
+    /// 是否为系统提示词
+    #[serde(default)]
+    pub system_prompt: bool,
+    /// 是否为标记条目
+    #[serde(default)]
+    pub marker: bool,
+    /// 描述说明
+    #[serde(default)]
+    pub description: String,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// 获取所有内置提示词条目定义
+pub fn get_builtin_prompt_definitions() -> Vec<BuiltinPromptItemDefinition> {
+    vec![
+        BuiltinPromptItemDefinition {
+            identifier: "builtin:system_prompt".to_string(),
+            name: "System Prompt".to_string(),
+            role: "system".to_string(),
+            source: BuiltinPromptSource::Static,
+            content: String::new(),
+            generator: None,
+            default_enabled: true,
+            default_position: 0,
+            system_prompt: true,
+            marker: false,
+            description: "预设级系统提示词，定义 AI 的基本行为模式".to_string(),
+        },
+        BuiltinPromptItemDefinition {
+            identifier: "builtin:character_description".to_string(),
+            name: "Character Description".to_string(),
+            role: "system".to_string(),
+            source: BuiltinPromptSource::Generated,
+            content: String::new(),
+            generator: Some("character_description".to_string()),
+            default_enabled: true,
+            default_position: 10,
+            system_prompt: false,
+            marker: false,
+            description: "角色描述，从当前角色卡动态提取".to_string(),
+        },
+        BuiltinPromptItemDefinition {
+            identifier: "builtin:character_personality".to_string(),
+            name: "Character Personality".to_string(),
+            role: "system".to_string(),
+            source: BuiltinPromptSource::Generated,
+            content: String::new(),
+            generator: Some("character_personality".to_string()),
+            default_enabled: true,
+            default_position: 20,
+            system_prompt: false,
+            marker: false,
+            description: "角色性格，从当前角色卡动态提取".to_string(),
+        },
+        BuiltinPromptItemDefinition {
+            identifier: "builtin:scenario".to_string(),
+            name: "Scenario".to_string(),
+            role: "system".to_string(),
+            source: BuiltinPromptSource::Generated,
+            content: String::new(),
+            generator: Some("scenario".to_string()),
+            default_enabled: true,
+            default_position: 30,
+            system_prompt: false,
+            marker: false,
+            description: "场景设定，从当前角色卡动态提取".to_string(),
+        },
+        BuiltinPromptItemDefinition {
+            identifier: "builtin:world_info".to_string(),
+            name: "World Info".to_string(),
+            role: "system".to_string(),
+            source: BuiltinPromptSource::Generated,
+            content: String::new(),
+            generator: Some("world_info".to_string()),
+            default_enabled: true,
+            default_position: 40,
+            system_prompt: false,
+            marker: false,
+            description: "世界书内容，根据触发条件动态注入".to_string(),
+        },
+        BuiltinPromptItemDefinition {
+            identifier: "builtin:chat_history".to_string(),
+            name: "Chat History".to_string(),
+            role: "system".to_string(),
+            source: BuiltinPromptSource::Generated,
+            content: String::new(),
+            generator: Some("chat_history".to_string()),
+            default_enabled: true,
+            default_position: 100,
+            system_prompt: false,
+            marker: true,
+            description: "聊天历史记录占位标记".to_string(),
+        },
+    ]
+}
+
+/// 检查标识符是否为内置条目
+pub fn is_builtin_prompt(identifier: &str) -> bool {
+    identifier.starts_with("builtin:")
+}
+
+// ============================================================================
+// Prompt Item - 提示词条目
+// ============================================================================
+
+/// Prompt 条目（运行时）
+///
+/// 包含内置条目的元信息，用于前端区分显示和交互。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptItem {
     pub identifier: String,
     pub name: String,
-    pub role: String, // system | user | assistant
+    pub role: String,
     #[serde(default)]
     pub content: String,
     #[serde(default)]
     pub system_prompt: bool,
     #[serde(default)]
     pub marker: bool,
+    /// 是否为内置条目
+    #[serde(default)]
+    pub builtin: bool,
+    /// 内置条目是否可编辑内容
+    #[serde(default = "default_true")]
+    pub editable: bool,
+    /// 内置条目描述
+    #[serde(default)]
+    pub description: String,
 }
 
 /// Prompt 顺序条目
