@@ -10,7 +10,7 @@ import {
   NModal,
   NPopconfirm,
   NSpace,
-  NStatistic,
+  NSelect,
   NTag,
   NUpload,
   useMessage,
@@ -18,7 +18,7 @@ import {
 } from 'naive-ui'
 import { usePresetsStore, type PresetSectionKey } from '@/stores/presets'
 import { useRuntimeStore } from '@/stores/runtime'
-import type { PresetFile } from '@/types/preset'
+import type { PromptItem } from '@/types/preset'
 
 const store = usePresetsStore()
 const runtimeStore = useRuntimeStore()
@@ -26,9 +26,11 @@ const message = useMessage()
 
 const showCreateModal = ref(false)
 const createName = ref('')
-const showMetaModal = ref(false)
-const metaName = ref('')
-const editorText = ref('')
+const showEditModal = ref(false)
+const editIdentifier = ref('')
+const editName = ref('')
+const editRole = ref<'system' | 'user' | 'assistant'>('system')
+const editContent = ref('')
 
 const sectionLabels: Record<PresetSectionKey, string> = {
   sampler: 'Sampler',
@@ -55,29 +57,23 @@ const isDefaultPreset = computed(() => store.currentPreset?.name === 'Default')
 const isActivePreset = computed(
   () => !!store.currentPreset && runtimeStore.globalState.active_preset === store.currentPreset.name,
 )
-const configuredSectionCount = computed(() => {
-  if (!store.currentPreset) return 0
-  return (Object.keys(sectionLabels) as PresetSectionKey[]).filter((key) =>
-    Boolean(store.currentPreset?.[key]),
-  ).length
-})
 
-function getSectionValue() {
-  if (!store.currentPreset) return {}
-  return store.currentPreset[store.currentSection] ?? {}
-}
-
-function syncEditorText() {
-  editorText.value = JSON.stringify(getSectionValue(), null, 2)
-}
-
-function openMetaModal() {
-  metaName.value = store.currentPreset?.name ?? ''
-  showMetaModal.value = true
-}
+const roleOptions = [
+  { label: 'System', value: 'system' },
+  { label: 'User', value: 'user' },
+  { label: 'Assistant', value: 'assistant' },
+]
 
 function openCreateModal() {
   showCreateModal.value = true
+}
+
+function openEditModal(item: PromptItem) {
+  editIdentifier.value = item.identifier
+  editName.value = item.name
+  editRole.value = item.role
+  editContent.value = item.content || ''
+  showEditModal.value = true
 }
 
 onMounted(async () => {
@@ -88,17 +84,11 @@ onMounted(async () => {
     const preferred = store.presetList.find((preset) => preset.name === activeName)
     await store.loadPreset((preferred ?? store.presetList[0]).name)
   }
-  syncEditorText()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('open-preset-create', openCreateModal)
 })
-
-watch(
-  () => [store.currentPreset?.name, store.currentSection],
-  () => syncEditorText(),
-)
 
 async function createPreset() {
   if (!createName.value.trim()) {
@@ -113,51 +103,27 @@ async function createPreset() {
     }
     createName.value = ''
     showCreateModal.value = false
-    syncEditorText()
     message.success('预设已创建')
   } catch (e) {
     message.error(String(e))
   }
 }
 
-async function saveMeta() {
-  if (!store.currentPreset || !metaName.value.trim()) {
-    message.error('名称不能为空')
-    return
-  }
+async function savePromptItem() {
+  if (!store.currentPreset?.prompt?.prompts) return
 
-  const oldName = store.currentPreset.name
-  const newName = metaName.value.trim()
-  try {
-    if (oldName !== newName) {
-      if (oldName === 'Default') {
-        message.error('默认预设不能重命名')
-        return
-      }
-      await store.renamePreset(oldName, newName)
-      if (runtimeStore.globalState.active_preset === oldName) {
-        await runtimeStore.setPresetName(newName)
-      }
+  const prompts = store.currentPreset.prompt.prompts
+  const index = prompts.findIndex((p) => p.identifier === editIdentifier.value)
+  if (index >= 0) {
+    prompts[index] = {
+      identifier: editIdentifier.value,
+      name: editName.value,
+      role: editRole.value,
+      content: editContent.value,
     }
-    showMetaModal.value = false
-    syncEditorText()
-    message.success('元数据已保存')
-  } catch (e) {
-    message.error(String(e))
-  }
-}
-
-async function saveCurrentSection() {
-  if (!store.currentPreset) return
-
-  try {
-    const parsed = editorText.value.trim() ? JSON.parse(editorText.value) : {}
-    const preset = store.currentPreset as PresetFile
-    preset[store.currentSection] = parsed
-    await store.savePreset(preset)
-    message.success('预设已保存')
-  } catch (e) {
-    message.error(`JSON 无效：${String(e)}`)
+    await store.savePreset(store.currentPreset)
+    message.success('提示词已保存')
+    showEditModal.value = false
   }
 }
 
@@ -172,32 +138,12 @@ async function activateCurrentPreset() {
   }
 }
 
-async function deleteCurrentPreset() {
-  if (!store.currentPreset) return
-
-  const deletedName = store.currentPreset.name
-  try {
-    await store.deletePreset(deletedName)
-    if (runtimeStore.globalState.active_preset === deletedName) {
-      await runtimeStore.setPresetName('Default')
-    }
-    if (store.presetList[0]) {
-      await store.loadPreset(store.presetList[0].name)
-    }
-    syncEditorText()
-    message.success('预设已删除')
-  } catch (e) {
-    message.error(String(e))
-  }
-}
-
 async function handleImport(options: UploadCustomRequestOptions) {
   const file = options.file.file
   if (!file) return
 
   try {
     await store.importPreset(file)
-    syncEditorText()
     message.success('预设已导入')
   } catch (e) {
     message.error(String(e))
@@ -220,17 +166,43 @@ async function handleExport() {
     message.error(String(e))
   }
 }
+
+// Listen for prompt item edit event from ContextList
+function handleEditPromptItem(event: CustomEvent<PromptItem>) {
+  openEditModal(event.detail)
+}
+
+onMounted(() => {
+  window.addEventListener('edit-prompt-item', handleEditPromptItem as EventListener)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('edit-prompt-item', handleEditPromptItem as EventListener)
+})
 </script>
 
 <template>
   <div class="presets-view">
-    <NCard class="preset-editor-panel" :title="currentTitle">
-      <template #header-extra>
-        <NSpace size="small">
-          <NTag v-if="isActivePreset" size="small" type="success">当前</NTag>
-          <NButton size="small" @click="showCreateModal = true">
-            新建
-          </NButton>
+    <!-- Empty state when no preset selected -->
+    <div v-if="!store.currentPreset" class="empty-state">
+      <NCard class="empty-card">
+        <div class="empty-content">
+          <NEmpty description="请在左侧面板选择或创建预设" />
+        </div>
+      </NCard>
+    </div>
+
+    <!-- Preset Editor when preset is selected -->
+    <template v-else>
+      <!-- Header with actions -->
+      <div class="editor-header">
+        <div class="header-left">
+          <h2 class="preset-title">{{ store.currentPreset.name }}</h2>
+          <NSpace>
+            <NTag v-if="isActivePreset" size="small" type="success">当前</NTag>
+          </NSpace>
+        </div>
+        <NSpace class="header-actions">
           <NUpload
             :show-file-list="false"
             accept=".json"
@@ -238,66 +210,56 @@ async function handleExport() {
           >
             <NButton size="small">导入</NButton>
           </NUpload>
-          <NButton size="small" :disabled="!store.currentPreset" @click="openMetaModal">
-            元数据
-          </NButton>
-          <NButton size="small" :disabled="!store.currentPreset" @click="handleExport">
+          <NButton size="small" @click="handleExport">
             导出
           </NButton>
           <NButton
             size="small"
-            :disabled="!store.currentPreset || isActivePreset"
+            :disabled="isActivePreset"
             @click="activateCurrentPreset"
           >
             设为当前
           </NButton>
-          <NButton
-            size="small"
-            type="primary"
-            :disabled="!store.currentPreset"
-            @click="saveCurrentSection"
-          >
-            保存
-          </NButton>
-          <NPopconfirm @positive-click="deleteCurrentPreset">
-            <template #trigger>
-              <NButton
-                size="small"
-                type="error"
-                :disabled="!store.currentPreset || isDefaultPreset"
-              >
-                删除
-              </NButton>
-            </template>
-            确定删除当前预设？
-          </NPopconfirm>
         </NSpace>
-      </template>
-
-      <div v-if="store.currentPreset" class="editor-content">
-        <div class="preset-summary">
-          <div>
-            <h2 class="section-title">{{ currentSectionLabel }}</h2>
-            <p class="section-desc">{{ currentSectionDescription }}</p>
-          </div>
-          <NSpace>
-            <NStatistic label="分区" :value="configuredSectionCount" />
-            <NStatistic label="文件" :value="store.presetList.length" />
-          </NSpace>
-        </div>
-
-        <NInput
-          v-model:value="editorText"
-          type="textarea"
-          class="json-editor"
-          placeholder="{}"
-          :autosize="false"
-        />
       </div>
 
-      <NEmpty v-else class="empty-state" description="暂无预设" />
-    </NCard>
+      <!-- Section Tabs -->
+      <div class="section-tabs">
+        <NButton
+          v-for="(label, key) in sectionLabels"
+          :key="key"
+          size="small"
+          :type="store.currentSection === key ? 'primary' : 'default'"
+          @click="store.selectSection(key as PresetSectionKey)"
+        >
+          {{ label }}
+        </NButton>
+      </div>
 
+      <!-- Section Editor -->
+      <NCard class="section-editor-card">
+        <div class="section-header">
+          <h3 class="section-title">{{ currentSectionLabel }}</h3>
+          <p class="section-desc">{{ currentSectionDescription }}</p>
+        </div>
+
+        <!-- Prompt section shows prompt items -->
+        <template v-if="store.currentSection === 'prompt'">
+          <div class="prompt-section">
+            <NEmpty description="提示词条目在左侧面板管理" />
+          </div>
+        </template>
+
+        <!-- Other sections show JSON editor -->
+        <template v-else>
+          <div class="json-section">
+            <p class="json-hint">此分区通过 JSON 编辑，请在左侧面板选择 Prompt 分区管理提示词条目。</p>
+          </div>
+        </template>
+      </NCard>
+    </template>
+
+    <!-- Create Modal -->
     <NModal
       v-model:show="showCreateModal"
       preset="dialog"
@@ -313,19 +275,42 @@ async function handleExport() {
       </NForm>
     </NModal>
 
+    <!-- Edit Prompt Item Modal -->
     <NModal
-      v-model:show="showMetaModal"
-      preset="dialog"
-      title="预设元数据"
-      positive-text="保存"
-      negative-text="取消"
-      @positive-click="saveMeta"
+      v-model:show="showEditModal"
+      preset="card"
+      title="编辑提示词"
+      style="width: 600px"
     >
-      <NForm>
-        <NFormItem label="名称" required>
-          <NInput v-model:value="metaName" placeholder="预设名称" :disabled="isDefaultPreset" />
+      <NForm label-placement="left" label-width="80px">
+        <NFormItem label="标识符">
+          <NInput :value="editIdentifier" disabled />
+        </NFormItem>
+        <NFormItem label="名称">
+          <NInput v-model:value="editName" placeholder="提示词名称" />
+        </NFormItem>
+        <NFormItem label="角色">
+          <NSelect
+            v-model:value="editRole"
+            :options="roleOptions"
+            placeholder="选择角色"
+          />
+        </NFormItem>
+        <NFormItem label="内容">
+          <NInput
+            v-model:value="editContent"
+            type="textarea"
+            placeholder="提示词内容"
+            :autosize="{ minRows: 5, maxRows: 15 }"
+          />
         </NFormItem>
       </NForm>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="showEditModal = false">取消</NButton>
+          <NButton type="primary" @click="savePromptItem">保存</NButton>
+        </NSpace>
+      </template>
     </NModal>
   </div>
 </template>
@@ -333,47 +318,79 @@ async function handleExport() {
 <style scoped>
 .presets-view {
   height: 100%;
-  min-height: 0;
+  display: flex;
+  flex-direction: column;
   padding: 16px;
-  display: flex;
-  flex-direction: column;
+  gap: 16px;
   overflow: hidden;
 }
 
-.preset-editor-panel {
+.empty-state {
   flex: 1;
-  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.preset-editor-panel :deep(.n-card__content) {
+.empty-card {
+  max-width: 400px;
+}
+
+.empty-content {
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-  flex: 1;
+  align-items: center;
+  gap: 16px;
+  padding: 24px;
 }
 
-.editor-content {
-  flex: 1;
-  min-height: 0;
+.editor-header {
   display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.preset-summary {
-  display: flex;
-  align-items: flex-start;
   justify-content: space-between;
-  gap: 24px;
-  padding: 4px 0 16px;
-  border-bottom: 1px solid var(--color-border-subtle, #e0e0e6);
-  margin-bottom: 12px;
+  align-items: flex-start;
+  flex-shrink: 0;
+}
+
+.header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.preset-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.header-actions {
+  flex-shrink: 0;
+}
+
+.section-tabs {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.section-editor-card {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.section-editor-card :deep(.n-card__content) {
+  height: 100%;
+  overflow-y: auto;
+}
+
+.section-header {
+  margin-bottom: 16px;
 }
 
 .section-title {
   margin: 0 0 8px;
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 600;
 }
 
@@ -383,22 +400,17 @@ async function handleExport() {
   color: var(--color-text-secondary, #6b7280);
 }
 
-.json-editor {
-  flex: 1;
-  min-height: 0;
+.prompt-section {
+  padding: 24px;
 }
 
-.json-editor :deep(textarea) {
-  height: 100% !important;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  line-height: 1.5;
+.json-section {
+  padding: 24px;
 }
 
-.empty-state {
-  height: 100%;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.json-hint {
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-text-secondary, #6b7280);
 }
 </style>
