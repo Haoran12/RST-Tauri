@@ -242,6 +242,56 @@ export function createDefaultReasoningTemplate(name = ''): ReasoningTemplate {
 // Prompt Preset - 完整提示词组装配置
 // ============================================================================
 
+// ============================================================================
+// Built-in Prompt Items - 内置预设提示词条目
+// ============================================================================
+
+/**
+ * 内置提示词条目内容来源类型
+ */
+export type BuiltinPromptSource = 'static' | 'generated'
+
+/**
+ * 内置提示词条目定义
+ *
+ * 内置条目由系统提供，不可删除，部分内容不可编辑。
+ * - static: 静态内容，用户可查看但不可编辑内容
+ * - generated: 系统动态生成内容，每次加载时由系统生成
+ */
+export interface BuiltinPromptItemDefinition {
+  /** 内置条目标识符，以 'builtin:' 开头 */
+  identifier: string
+  /** 显示名称 */
+  name: string
+  /** 角色 */
+  role: 'system' | 'user' | 'assistant'
+  /** 内容来源类型 */
+  source: BuiltinPromptSource
+  /** 静态内容（source 为 static 时使用） */
+  content?: string
+  /** 内容生成器名称（source 为 generated 时使用） */
+  generator?: string
+  /** 默认是否启用 */
+  defaultEnabled?: boolean
+  /** 默认排序位置（数字越小越靠前） */
+  defaultPosition?: number
+  /** 是否为系统提示词 */
+  system_prompt?: boolean
+  /** 是否为标记条目 */
+  marker?: boolean
+  /** 描述说明 */
+  description?: string
+}
+
+// ============================================================================
+// Prompt Item - 提示词条目
+// ============================================================================
+
+/**
+ * 提示词条目（运行时）
+ *
+ * 包含内置条目的元信息，用于前端区分显示和交互。
+ */
 export interface PromptItem {
   identifier: string
   name: string
@@ -249,11 +299,19 @@ export interface PromptItem {
   content?: string
   system_prompt?: boolean
   marker?: boolean
+  /** 是否为内置条目 */
+  builtin?: boolean
+  /** 内置条目是否可编辑内容 */
+  editable?: boolean
+  /** 内置条目描述 */
+  description?: string
 }
 
 export interface PromptOrderItem {
   identifier: string
   enabled?: boolean
+  /** 用户自定义排序位置（仅对内置条目有效，用于覆盖默认位置） */
+  position?: number
 }
 
 export interface PromptOrder {
