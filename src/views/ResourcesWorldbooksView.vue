@@ -87,9 +87,6 @@ async function saveGlobalSettings() {
     message.error(String(e))
   }
 }
-    message.error(String(e))
-  }
-}
 
 // Create new worldbook
 async function createWorldbook() {
