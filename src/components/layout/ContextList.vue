@@ -15,7 +15,7 @@ import {
 } from 'naive-ui'
 import { computed, ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { SearchOutline, AddOutline, TrashOutline, SettingsOutline } from '@vicons/ionicons5'
+import { SearchOutline, AddOutline, TrashOutline, SettingsOutline, ReorderFourOutline } from '@vicons/ionicons5'
 import { useAgentStore } from '@/stores/agent'
 import { useAppShellStore } from '@/stores/appShell'
 import { useCharactersStore } from '@/stores/characters'
@@ -24,6 +24,7 @@ import { usePresetsStore, type PresetSectionKey } from '@/stores/presets'
 import { useWorldbooksStore } from '@/stores/worldbooks'
 import type { WorldInfoEntry } from '@/types/st'
 import { WorldInfoPosition } from '@/types/st'
+import type { PromptItem } from '@/types/preset'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,6 +35,10 @@ const chatStore = useChatStore()
 const presetsStore = usePresetsStore()
 const worldbooksStore = useWorldbooksStore()
 const searchQuery = ref('')
+
+// Drag and drop state for prompt items
+const draggedItem = ref<PromptItem | null>(null)
+const dragOverItem = ref<PromptItem | null>(null)
 
 type ContextItem = {
   id: string
@@ -474,6 +479,101 @@ async function createPromptItem() {
   await presetsStore.savePreset(preset)
 }
 
+// ============================================================================
+// Drag and drop for prompt items
+// ============================================================================
+
+function onDragStart(event: DragEvent, item: PromptItem) {
+  draggedItem.value = item
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', item.identifier)
+  }
+}
+
+function onDragEnd() {
+  draggedItem.value = null
+  dragOverItem.value = null
+}
+
+function onDragOver(event: DragEvent, item: PromptItem) {
+  event.preventDefault()
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'move'
+  }
+  if (draggedItem.value && draggedItem.value.identifier !== item.identifier) {
+    dragOverItem.value = item
+  }
+}
+
+function onDragLeave() {
+  dragOverItem.value = null
+}
+
+async function onDrop(event: DragEvent, targetItem: PromptItem) {
+  event.preventDefault()
+  if (!draggedItem.value || draggedItem.value.identifier === targetItem.identifier) {
+    return
+  }
+
+  const preset = presetsStore.currentPreset
+  if (!preset?.prompt?.prompts) return
+
+  const prompts = preset.prompt.prompts
+  const draggedIndex = prompts.findIndex(p => p.identifier === draggedItem.value!.identifier)
+  const targetIndex = prompts.findIndex(p => p.identifier === targetItem.identifier)
+
+  if (draggedIndex === -1 || targetIndex === -1) return
+
+  // Reorder the prompts array
+  const [removed] = prompts.splice(draggedIndex, 1)
+  prompts.splice(targetIndex, 0, removed)
+
+  // Update positions in prompt_order
+  if (!preset.prompt.prompt_order || preset.prompt.prompt_order.length === 0) {
+    preset.prompt.prompt_order = [{ order: [] }]
+  }
+
+  const order = preset.prompt.prompt_order[0].order
+  prompts.forEach((p, index) => {
+    const existingOrder = order.find(o => o.identifier === p.identifier)
+    if (existingOrder) {
+      existingOrder.position = index
+    } else {
+      order.push({ identifier: p.identifier, enabled: true, position: index })
+    }
+  })
+
+  await presetsStore.savePreset(preset)
+
+  draggedItem.value = null
+  dragOverItem.value = null
+}
+
+// Get sorted prompt items with position from prompt_order
+const sortedPromptItems = computed(() => {
+  const prompts = presetsStore.currentPreset?.prompt?.prompts
+  if (!prompts) return []
+
+  const order = presetsStore.currentPreset?.prompt?.prompt_order?.[0]?.order
+  if (!order) return prompts
+
+  // Create a map of identifier to position
+  const positionMap = new Map<string, number>()
+  order.forEach(item => {
+    if (item.position !== undefined) {
+      positionMap.set(item.identifier, item.position)
+    }
+  })
+
+  // Sort prompts by position, fallback to original order
+  return [...prompts].sort((a, b) => {
+    const posA = positionMap.get(a.identifier) ?? prompts.indexOf(a)
+    const posB = positionMap.get(b.identifier) ?? prompts.indexOf(b)
+    return posA - posB
+  })
+})
+
 // Load worldbooks when entering the page
 watch(() => route.name, async (newName) => {
   if (newName === 'resources-worldbooks') {
@@ -702,7 +802,7 @@ watch(currentWorldId, async (worldId) => {
         <!-- Prompt actions -->
         <div class="entry-actions">
           <NText depth="3" class="entry-count">
-            条目: {{ promptItems.length }}
+            条目: {{ sortedPromptItems.length }}
           </NText>
           <NButton size="small" type="primary" @click="createPromptItem">
             <template #icon>
@@ -726,16 +826,33 @@ watch(currentWorldId, async (worldId) => {
           </NInput>
         </div>
 
-        <!-- Prompt list -->
+        <!-- Prompt list with drag and drop -->
         <div class="list-content">
           <NSpin :show="presetsStore.isLoading">
-            <div v-if="filteredPromptItems.length > 0" class="entry-list">
+            <div v-if="sortedPromptItems.length > 0" class="entry-list">
               <div
-                v-for="item in filteredPromptItems"
+                v-for="item in sortedPromptItems"
                 :key="item.identifier"
                 class="entry-item"
-                :class="{ 'entry-item-builtin': item.builtin }"
+                :class="{
+                  'entry-item-builtin': item.builtin,
+                  'entry-item-dragging': draggedItem?.identifier === item.identifier,
+                  'entry-item-drag-over': dragOverItem?.identifier === item.identifier
+                }"
+                draggable="true"
+                @dragstart="(e) => onDragStart(e, item)"
+                @dragend="onDragEnd"
+                @dragover="(e) => onDragOver(e, item)"
+                @dragleave="onDragLeave"
+                @drop="(e) => onDrop(e, item)"
               >
+                <!-- Drag handle -->
+                <div class="entry-drag-handle">
+                  <NIcon :size="16" class="drag-icon">
+                    <ReorderFourOutline />
+                  </NIcon>
+                </div>
+
                 <!-- Enable switch -->
                 <div class="entry-switch">
                   <NSwitch
@@ -764,11 +881,6 @@ watch(currentWorldId, async (worldId) => {
                     >
                       {{ getRoleLabel(item.role) }}
                     </NTag>
-                  </div>
-                  <div class="entry-meta">
-                    <NText depth="3" class="entry-position">
-                      {{ item.description || item.identifier }}
-                    </NText>
                   </div>
                 </div>
 
@@ -981,9 +1093,14 @@ watch(currentWorldId, async (worldId) => {
   align-items: center;
   padding: 8px 8px;
   border-radius: 4px;
-  cursor: pointer;
-  transition: background-color 0.2s;
+  cursor: grab;
+  transition: all 0.2s ease;
   gap: 8px;
+  user-select: none;
+}
+
+.entry-item:active {
+  cursor: grabbing;
 }
 
 .entry-item:hover {
@@ -998,8 +1115,43 @@ watch(currentWorldId, async (worldId) => {
   background-color: rgba(250, 173, 20, 0.1);
 }
 
+.entry-item-dragging {
+  opacity: 0.5;
+  transform: scale(0.98);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.entry-item-drag-over {
+  border-top: 2px solid var(--color-primary, #18a058);
+  background-color: rgba(24, 160, 88, 0.08);
+}
+
 .entry-selected {
   background-color: rgba(24, 160, 88, 0.1);
+}
+
+.entry-drag-handle {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  cursor: grab;
+  opacity: 0.4;
+  transition: opacity 0.2s;
+}
+
+.entry-drag-handle:hover {
+  opacity: 0.8;
+}
+
+.entry-drag-handle:active {
+  cursor: grabbing;
+}
+
+.drag-icon {
+  color: var(--color-text-secondary, #6b7280);
 }
 
 .entry-switch {
