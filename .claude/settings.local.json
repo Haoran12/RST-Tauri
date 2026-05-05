@@ -1,42 +1,5 @@
 {
   "permissions": {
-    "allow": [
-      "WebSearch",
-      "WebFetch(domain:docs.sillytavern.app)",
-      "WebFetch(domain:github.com)",
-      "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:tauri.app)",
-      "WebFetch(domain:v2.tauri.app)",
-      "WebFetch(domain:www.volcengine.com)",
-      "WebFetch(domain:cloud.tencent.com)",
-      "WebFetch(domain:api-docs.deepseek.com)",
-      "WebFetch(domain:docs.anthropic.com)",
-      "WebFetch(domain:platform.openai.com)",
-      "WebFetch(domain:ai.google.dev)",
-      "Bash(cargo tauri *)",
-      "Bash(npm --version)",
-      "Bash(rustc --version)",
-      "Bash(cargo --version)",
-      "Bash(npm create *)",
-      "Bash(npm install *)",
-      "Bash(cargo install *)",
-      "Bash(npm run *)",
-      "Bash(cargo build *)",
-      "Bash(convert --version)",
-      "Bash(cargo check *)",
-      "Bash(npx tsc *)",
-      "Bash(cargo test *)",
-      "Bash(grep -oE \"src\\\\\\\\\\\\\\\\agent\\\\\\\\\\\\\\\\[^:]+:\")",
-      "Bash(npx vue-tsc *)",
-      "Bash(git checkout *)",
-      "Bash(git restore *)",
-      "Bash(timeout 30)",
-      "Bash(npm list *)",
-      "Bash(timeout 15)",
-      "Bash(netstat -ano)",
-      "Bash(findstr :5173)",
-      "Bash(git add *)",
-      "Bash(git commit -m ' *)"
-    ]
+    "defaultMode": "bypassPermissions"
   }
 }

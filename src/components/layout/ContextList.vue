@@ -55,6 +55,7 @@ const presetSectionLabels: Record<PresetSectionKey, string> = {
 
 // Computed page type
 const isWorldbooksPage = computed(() => route.name === 'resources-worldbooks')
+const isPresetsPage = computed(() => route.name === 'resources-presets')
 const currentWorldId = computed(() => String(route.params.worldId || 'default'))
 
 // Worldbook file options for selector
@@ -62,6 +63,14 @@ const worldbookOptions = computed(() => {
   return worldbooksStore.worldbookList.map((wb) => ({
     label: wb.name || '未命名世界书',
     value: wb.id,
+  }))
+})
+
+// Preset file options for selector
+const presetOptions = computed(() => {
+  return presetsStore.presetList.map((p) => ({
+    label: p.name,
+    value: p.name,
   }))
 })
 
@@ -74,6 +83,24 @@ const filteredEntries = computed(() => {
     const name = entry.comment || entry.key?.join(', ') || `条目 ${entry.uid}`
     return name.toLowerCase().includes(query) ||
       (entry.content?.toLowerCase().includes(query) ?? false)
+  })
+})
+
+// Prompt items from current preset
+const promptItems = computed(() => {
+  const prompts = presetsStore.currentPreset?.prompt?.prompts
+  if (!prompts) return []
+  return prompts
+})
+
+// Filtered prompt items
+const filteredPromptItems = computed(() => {
+  if (!searchQuery.value) return promptItems.value
+  const query = searchQuery.value.toLowerCase()
+  return promptItems.value.filter((item) => {
+    return item.name.toLowerCase().includes(query) ||
+      item.identifier.toLowerCase().includes(query) ||
+      (item.content?.toLowerCase().includes(query) ?? false)
   })
 })
 
@@ -337,6 +364,115 @@ function getActivationModeType(entry: WorldInfoEntry): 'default' | 'success' | '
   return 'default'
 }
 
+// Handle preset selection
+async function handlePresetSelect(name: string | null) {
+  if (name) {
+    await presetsStore.loadPreset(name)
+  } else {
+    presetsStore.clearCurrentPreset()
+  }
+}
+
+// Create new preset
+function createPreset() {
+  window.dispatchEvent(new CustomEvent('open-preset-create'))
+}
+
+// Delete current preset
+async function deleteCurrentPreset() {
+  if (!presetsStore.currentPreset) return
+  await presetsStore.deletePreset(presetsStore.currentPreset.name)
+}
+
+// Get role label and color
+function getRoleLabel(role: string): string {
+  switch (role) {
+    case 'system': return 'System'
+    case 'user': return 'User'
+    case 'assistant': return 'Assistant'
+    default: return role
+  }
+}
+
+function getRoleType(role: string): 'default' | 'success' | 'info' | 'warning' | 'error' {
+  switch (role) {
+    case 'system': return 'warning'
+    case 'user': return 'info'
+    case 'assistant': return 'success'
+    default: return 'default'
+  }
+}
+
+// Check if prompt item is enabled
+function isPromptEnabled(identifier: string): boolean {
+  const order = presetsStore.currentPreset?.prompt?.prompt_order?.[0]?.order
+  if (!order) return true // Default enabled if no order specified
+  const item = order.find((o) => o.identifier === identifier)
+  return item?.enabled !== false
+}
+
+// Toggle prompt item enabled state
+async function togglePromptEnabled(identifier: string, enabled: boolean) {
+  if (!presetsStore.currentPreset) return
+  const preset = presetsStore.currentPreset
+  if (!preset.prompt) {
+    preset.prompt = { prompts: [], prompt_order: [] }
+  }
+  if (!preset.prompt.prompt_order || preset.prompt.prompt_order.length === 0) {
+    preset.prompt.prompt_order = [{ order: [] }]
+  }
+  const order = preset.prompt.prompt_order[0].order || []
+  const existingIndex = order.findIndex((o) => o.identifier === identifier)
+  if (existingIndex >= 0) {
+    order[existingIndex].enabled = enabled
+  } else {
+    order.push({ identifier, enabled })
+  }
+  preset.prompt.prompt_order[0].order = order
+  await presetsStore.savePreset(preset)
+}
+
+// Delete prompt item
+async function deletePromptItem(identifier: string) {
+  if (!presetsStore.currentPreset?.prompt?.prompts) return
+  const preset = presetsStore.currentPreset
+  // Remove from prompts array
+  preset.prompt.prompts = preset.prompt.prompts.filter((p) => p.identifier !== identifier)
+  // Remove from order array
+  if (preset.prompt.prompt_order?.[0]?.order) {
+    preset.prompt.prompt_order[0].order = preset.prompt.prompt_order[0].order.filter(
+      (o) => o.identifier !== identifier
+    )
+  }
+  await presetsStore.savePreset(preset)
+}
+
+// Create new prompt item
+async function createPromptItem() {
+  if (!presetsStore.currentPreset) return
+  const preset = presetsStore.currentPreset
+  if (!preset.prompt) {
+    preset.prompt = { prompts: [], prompt_order: [] }
+  }
+  if (!preset.prompt.prompts) {
+    preset.prompt.prompts = []
+  }
+  // Generate unique identifier
+  const existingIds = new Set(preset.prompt.prompts.map((p) => p.identifier))
+  let counter = 1
+  while (existingIds.has(`prompt_${counter}`)) {
+    counter++
+  }
+  const newIdentifier = `prompt_${counter}`
+  preset.prompt.prompts.push({
+    identifier: newIdentifier,
+    name: `新提示词 ${counter}`,
+    role: 'system',
+    content: '',
+  })
+  await presetsStore.savePreset(preset)
+}
+
 // Load worldbooks when entering the page
 watch(() => route.name, async (newName) => {
   if (newName === 'resources-worldbooks') {
@@ -517,6 +653,139 @@ watch(currentWorldId, async (worldId) => {
       </div>
     </template>
 
+    <!-- Preset-specific layout -->
+    <template v-else-if="isPresetsPage">
+      <!-- File selector header -->
+      <div class="list-header">
+        <span class="list-title-preset">预设</span>
+      </div>
+
+      <!-- Preset file selector -->
+      <div class="file-selector">
+        <NSelect
+          :value="presetsStore.currentPreset?.name"
+          :options="presetOptions"
+          placeholder="选择预设..."
+          clearable
+          size="small"
+          @update:value="handlePresetSelect"
+        />
+      </div>
+
+      <!-- File action buttons -->
+      <div class="file-actions">
+        <NButton size="small" type="primary" @click="createPreset">
+          <template #icon>
+            <NIcon><AddOutline /></NIcon>
+          </template>
+          新建
+        </NButton>
+        <NPopconfirm
+          v-if="presetsStore.currentPreset && presetsStore.currentPreset.name !== 'Default'"
+          @positive-click="deleteCurrentPreset"
+        >
+          <template #trigger>
+            <NButton size="small" type="error">
+              <template #icon>
+                <NIcon><TrashOutline /></NIcon>
+              </template>
+              删除
+            </NButton>
+          </template>
+          确定删除此预设吗？
+        </NPopconfirm>
+      </div>
+
+      <!-- Prompt items when preset is selected -->
+      <template v-if="presetsStore.currentPreset">
+        <!-- Prompt actions -->
+        <div class="entry-actions">
+          <NText depth="3" class="entry-count">
+            条目: {{ promptItems.length }}
+          </NText>
+          <NButton size="small" type="primary" @click="createPromptItem">
+            <template #icon>
+              <NIcon><AddOutline /></NIcon>
+            </template>
+            新建
+          </NButton>
+        </div>
+
+        <!-- Search -->
+        <div class="list-search">
+          <NInput
+            v-model:value="searchQuery"
+            placeholder="搜索提示词..."
+            clearable
+            size="small"
+          >
+            <template #prefix>
+              <NIcon :size="16"><SearchOutline /></NIcon>
+            </template>
+          </NInput>
+        </div>
+
+        <!-- Prompt list -->
+        <div class="list-content">
+          <NSpin :show="presetsStore.isLoading">
+            <div v-if="filteredPromptItems.length > 0" class="entry-list">
+              <div
+                v-for="item in filteredPromptItems"
+                :key="item.identifier"
+                class="entry-item"
+              >
+                <!-- Enable switch -->
+                <div class="entry-switch">
+                  <NSwitch
+                    :value="isPromptEnabled(item.identifier)"
+                    size="small"
+                    @update:value="(v: boolean) => togglePromptEnabled(item.identifier, v)"
+                  />
+                </div>
+
+                <!-- Prompt info -->
+                <div class="entry-info">
+                  <div class="entry-header">
+                    <span class="entry-name">{{ item.name }}</span>
+                    <NTag
+                      size="tiny"
+                      :type="getRoleType(item.role)"
+                      :bordered="false"
+                    >
+                      {{ getRoleLabel(item.role) }}
+                    </NTag>
+                  </div>
+                  <div class="entry-meta">
+                    <NText depth="3" class="entry-position">
+                      {{ item.identifier }}
+                    </NText>
+                  </div>
+                </div>
+
+                <!-- Delete button -->
+                <NPopconfirm @positive-click="deletePromptItem(item.identifier)">
+                  <template #trigger>
+                    <NButton quaternary circle size="tiny" type="error" class="delete-btn">
+                      <template #icon>
+                        <NIcon><TrashOutline /></NIcon>
+                      </template>
+                    </NButton>
+                  </template>
+                  确定删除此提示词吗？
+                </NPopconfirm>
+              </div>
+            </div>
+            <NEmpty v-else description="暂无提示词" />
+          </NSpin>
+        </div>
+      </template>
+
+      <!-- Empty state when no preset selected -->
+      <div v-else class="empty-state">
+        <NEmpty description="请选择或创建预设" />
+      </div>
+    </template>
+
     <!-- Default layout for other pages -->
     <template v-else>
       <div class="list-header">
@@ -590,6 +859,11 @@ watch(currentWorldId, async (worldId) => {
 }
 
 .list-title-worldbook {
+  font-weight: 600;
+  font-size: 18px;
+}
+
+.list-title-preset {
   font-weight: 600;
   font-size: 18px;
 }
