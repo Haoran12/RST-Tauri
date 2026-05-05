@@ -5,12 +5,14 @@ import {
   NBadge,
   NText,
   NIcon,
+  useDialog,
 } from 'naive-ui'
 import {
   EyeOffOutline,
   PinOutline,
   FlashOutline,
   SearchOutline,
+  TrashOutline,
 } from '@vicons/ionicons5'
 import type { WorldInfoEntry } from '@/types/st'
 import { WorldInfoPosition } from '@/types/st'
@@ -24,7 +26,10 @@ const emit = defineEmits<{
   (e: 'select', uid: number): void
   (e: 'create'): void
   (e: 'reorder', uidOrder: number[]): void
+  (e: 'delete', uid: number): void
 }>()
+
+const dialog = useDialog()
 
 // Get activation mode label
 function getActivationModeLabel(entry: WorldInfoEntry): string {
@@ -97,6 +102,20 @@ function selectEntry(uid: number) {
 function createEntry() {
   emit('create')
 }
+
+// Delete entry with confirmation
+function deleteEntry(uid: number, event: Event) {
+  event.stopPropagation()
+  dialog.warning({
+    title: '删除条目',
+    content: '确定要删除此条目吗？此操作不可撤销。',
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: () => {
+      emit('delete', uid)
+    },
+  })
+}
 </script>
 
 <template>
@@ -163,6 +182,21 @@ function createEntry() {
           <NText depth="3" class="entry-preview">
             {{ getEntryPreview(entry) }}
           </NText>
+        </div>
+
+        <div class="entry-actions">
+          <NButton
+            quaternary
+            circle
+            size="small"
+            @click="(e: Event) => deleteEntry(uid, e)"
+          >
+            <template #icon>
+              <NIcon :size="16" color="#d03050">
+                <TrashOutline />
+              </NIcon>
+            </template>
+          </NButton>
         </div>
       </div>
     </div>
@@ -269,5 +303,18 @@ function createEntry() {
   white-space: nowrap;
   max-width: 250px;
   display: inline-block;
+}
+
+.entry-actions {
+  display: flex;
+  align-items: center;
+  margin-left: 8px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.entry-item:hover .entry-actions {
+  opacity: 1;
 }
 </style>

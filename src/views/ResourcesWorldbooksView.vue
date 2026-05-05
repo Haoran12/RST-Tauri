@@ -37,6 +37,7 @@ const globalScanDepth = ref(4)
 const globalTokenBudgetPercent = ref(25)
 const globalTokenBudgetCap = ref(0)
 const globalRecursiveScanning = ref(true)
+const globalMaxRecursionSteps = ref(3) // UI值: 0=不限制, 1=不递归, 2=扫描+递归1次, 3=扫描+递归2次...
 const globalCaseSensitive = ref(false)
 const globalIncludeNames = ref(true)
 
@@ -64,6 +65,7 @@ function handleShowGlobalSettingsEvent() {
   globalTokenBudgetPercent.value = settings.world_info_budget
   globalTokenBudgetCap.value = settings.world_info_budget_cap
   globalRecursiveScanning.value = settings.world_info_recursive
+  globalMaxRecursionSteps.value = settings.world_info_max_recursion_steps === 99 ? 0 : settings.world_info_max_recursion_steps + 1 // 转换: UI值 0=不限制(99), 1=不递归(0), 2=递归1次(1)...
   globalCaseSensitive.value = settings.world_info_case_sensitive
   globalIncludeNames.value = settings.world_info_include_names
   showGlobalSettings.value = true
@@ -77,6 +79,7 @@ async function saveGlobalSettings() {
       world_info_budget: globalTokenBudgetPercent.value,
       world_info_budget_cap: globalTokenBudgetCap.value,
       world_info_recursive: globalRecursiveScanning.value,
+      world_info_max_recursion_steps: globalMaxRecursionSteps.value === 0 ? 99 : globalMaxRecursionSteps.value - 1, // 转换: 0=不限制(99), 1=不递归(0), 2=递归1次(1)...
       world_info_case_sensitive: globalCaseSensitive.value,
       world_info_include_names: globalIncludeNames.value,
     })
@@ -245,38 +248,6 @@ async function handleExport() {
         </NSpace>
       </div>
 
-      <!-- Global settings summary -->
-      <NCard class="global-settings-card" size="small">
-        <div class="global-settings-summary">
-          <NSpace :size="24">
-            <div class="setting-item">
-              <NText depth="3" class="setting-label">扫描深度</NText>
-              <NText class="setting-value">
-                {{ store.currentWorldbook.scan_depth ?? '默认' }}
-              </NText>
-            </div>
-            <div class="setting-item">
-              <NText depth="3" class="setting-label">Token 预算</NText>
-              <NText class="setting-value">
-                {{ store.currentWorldbook.token_budget ?? '默认' }}
-              </NText>
-            </div>
-            <div class="setting-item">
-              <NText depth="3" class="setting-label">递归扫描</NText>
-              <NText class="setting-value">
-                {{ store.currentWorldbook.recursive_scanning ? '开启' : '关闭' }}
-              </NText>
-            </div>
-            <div class="setting-item">
-              <NText depth="3" class="setting-label">条目数</NText>
-              <NText class="setting-value">
-                {{ store.sortedEntries.length }}
-              </NText>
-            </div>
-          </NSpace>
-        </div>
-      </NCard>
-
       <!-- Entry Editor -->
       <NCard class="entry-editor-card">
         <template v-if="store.currentEntry">
@@ -376,10 +347,22 @@ async function handleExport() {
         <NFormItem label="递归扫描">
           <NSwitch v-model:value="globalRecursiveScanning" />
         </NFormItem>
+        <NFormItem label="最大递归深度">
+          <NInputNumber
+            v-model:value="globalMaxRecursionSteps"
+            :min="0"
+            :max="99"
+            style="width: 100%"
+          >
+            <template #suffix>
+              <NText depth="3" style="font-size: 12px">0 = 不限制</NText>
+            </template>
+          </NInputNumber>
+        </NFormItem>
         <NFormItem label="区分大小写">
           <NSwitch v-model:value="globalCaseSensitive" />
         </NFormItem>
-        <NFormItem label="包含条目名称">
+        <NFormItem label="包含名称">
           <NSwitch v-model:value="globalIncludeNames" />
         </NFormItem>
       </NForm>
@@ -451,30 +434,6 @@ async function handleExport() {
 
 .header-actions {
   flex-shrink: 0;
-}
-
-.global-settings-card {
-  flex-shrink: 0;
-}
-
-.global-settings-summary {
-  display: flex;
-  align-items: center;
-}
-
-.setting-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.setting-label {
-  font-size: 11px;
-}
-
-.setting-value {
-  font-size: 14px;
-  font-weight: 500;
 }
 
 .entry-editor-card {
