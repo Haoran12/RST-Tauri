@@ -37,6 +37,8 @@ const globalScanDepth = ref(4)
 const globalTokenBudgetPercent = ref(25)
 const globalTokenBudgetCap = ref(0)
 const globalRecursiveScanning = ref(true)
+const globalCaseSensitive = ref(false)
+const globalIncludeNames = ref(true)
 
 // Load worldbooks on mount
 onMounted(() => {
@@ -62,6 +64,8 @@ function handleShowGlobalSettingsEvent() {
   globalTokenBudgetPercent.value = settings.world_info_budget
   globalTokenBudgetCap.value = settings.world_info_budget_cap
   globalRecursiveScanning.value = settings.world_info_recursive
+  globalCaseSensitive.value = settings.world_info_case_sensitive
+  globalIncludeNames.value = settings.world_info_include_names
   showGlobalSettings.value = true
 }
 
@@ -73,6 +77,8 @@ async function saveGlobalSettings() {
       world_info_budget: globalTokenBudgetPercent.value,
       world_info_budget_cap: globalTokenBudgetCap.value,
       world_info_recursive: globalRecursiveScanning.value,
+      world_info_case_sensitive: globalCaseSensitive.value,
+      world_info_include_names: globalIncludeNames.value,
     })
 
     message.success('全局设置已保存')
@@ -344,7 +350,7 @@ async function handleExport() {
       v-model:show="showGlobalSettings"
       preset="card"
       title="全局世界书设置"
-      style="width: 400px"
+      style="width: 450px"
     >
       <NForm label-placement="left" label-width="120px">
         <NFormItem label="扫描深度">
@@ -372,6 +378,12 @@ async function handleExport() {
         </NFormItem>
         <NFormItem label="递归扫描">
           <NSwitch v-model:value="globalRecursiveScanning" />
+        </NFormItem>
+        <NFormItem label="区分大小写">
+          <NSwitch v-model:value="globalCaseSensitive" />
+        </NFormItem>
+        <NFormItem label="包含条目名称">
+          <NSwitch v-model:value="globalIncludeNames" />
         </NFormItem>
       </NForm>
       <template #footer>

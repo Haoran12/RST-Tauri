@@ -118,7 +118,7 @@ impl Default for STWorldInfoSettings {
             world_info_min_activations_depth_max: 0,
             world_info_budget: 25,
             world_info_budget_cap: 0,
-            world_info_include_names: false,
+            world_info_include_names: true,
             world_info_recursive: true,
             world_info_overflow_alert: true,
             world_info_case_sensitive: false,
