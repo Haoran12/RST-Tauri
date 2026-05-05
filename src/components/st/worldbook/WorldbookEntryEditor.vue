@@ -226,12 +226,25 @@ function cancelOverlay() {
       <NDivider />
 
       <!-- Position & Order -->
-      <NFormItem label="位置">
-        <NSelect
-          v-model:value="localEntry.position"
-          :options="positionOptions"
-          @update:value="saveChanges"
-        />
+      <NFormItem label="注入位置">
+        <div class="inline-row">
+          <NSelect
+            v-model:value="localEntry.position"
+            :options="positionOptions"
+            style="flex: 1; min-width: 150px;"
+            @update:value="saveChanges"
+          />
+          <div class="inline-field">
+            <span class="inline-label">顺序</span>
+            <NInputNumber
+              v-model:value="localEntry.order"
+              :min="0"
+              :max="999"
+              style="width: 80px;"
+              @blur="saveChanges"
+            />
+          </div>
+        </div>
       </NFormItem>
 
       <NFormItem v-if="isAtDepth" label="深度">
@@ -259,32 +272,25 @@ function cancelOverlay() {
         />
       </NFormItem>
 
-      <NFormItem label="顺序">
-        <NInputNumber
-          v-model:value="localEntry.order"
-          :min="0"
-          :max="999"
-          @blur="saveChanges"
-        />
-        <span class="hint">数值越小越靠前</span>
-      </NFormItem>
-
       <NDivider />
 
       <!-- Probability & Budget -->
       <NFormItem label="概率">
-        <NInputNumber
-          v-model:value="localEntry.probability"
-          :min="0"
-          :max="100"
-          :step="1"
-          @blur="saveChanges"
-        />
-        <span class="hint">%</span>
-      </NFormItem>
-
-      <NFormItem label="启用概率">
-        <NSwitch v-model:value="localEntry.use_probability" @update:value="saveChanges" />
+        <div class="inline-row">
+          <NInputNumber
+            v-model:value="localEntry.probability"
+            :min="0"
+            :max="100"
+            :step="1"
+            style="width: 100px;"
+            @blur="saveChanges"
+          />
+          <span class="hint">%</span>
+          <div class="inline-field">
+            <span class="inline-label">启用概率</span>
+            <NSwitch v-model:value="localEntry.use_probability" @update:value="saveChanges" />
+          </div>
+        </div>
       </NFormItem>
 
       <NFormItem label="忽略预算">
@@ -321,12 +327,17 @@ function cancelOverlay() {
       <NDivider />
 
       <!-- Recursion -->
-      <NFormItem label="排除递归">
-        <NSwitch v-model:value="localEntry.exclude_recursion" @update:value="saveChanges" />
-      </NFormItem>
-
-      <NFormItem label="阻止递归">
-        <NSwitch v-model:value="localEntry.prevent_recursion" @update:value="saveChanges" />
+      <NFormItem label="递归设置">
+        <div class="inline-row">
+          <div class="inline-field">
+            <NSwitch v-model:value="localEntry.exclude_recursion" @update:value="saveChanges" />
+            <span class="inline-label-text">不可被递归激活</span>
+          </div>
+          <div class="inline-field">
+            <NSwitch v-model:value="localEntry.prevent_recursion" @update:value="saveChanges" />
+            <span class="inline-label-text">阻止进一步递归</span>
+          </div>
+        </div>
       </NFormItem>
 
       <NFormItem label="延迟至">
@@ -379,7 +390,7 @@ function cancelOverlay() {
 
       <!-- Match Targets -->
       <NFormItem label="匹配目标">
-        <NSpace vertical>
+        <div class="match-targets-grid">
           <NCheckbox
             :checked="localEntry.match_persona_description"
             @update:checked="(v: boolean) => { localEntry.match_persona_description = v; saveChanges() }"
@@ -416,7 +427,7 @@ function cancelOverlay() {
           >
             创建者备注
           </NCheckbox>
-        </NSpace>
+        </div>
       </NFormItem>
 
       <NDivider />
@@ -499,6 +510,30 @@ function cancelOverlay() {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.inline-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inline-label {
+  color: var(--color-text, inherit);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.inline-label-text {
+  color: var(--color-text-secondary, #999);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.match-targets-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 16px;
 }
 
 .content-preview {
