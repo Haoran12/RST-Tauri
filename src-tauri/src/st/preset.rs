@@ -539,6 +539,9 @@ pub struct PromptOrderItem {
     pub identifier: String,
     #[serde(default)]
     pub enabled: bool,
+    /// 用户自定义排序位置（仅对内置条目有效，用于覆盖默认位置）
+    #[serde(default)]
+    pub position: Option<i32>,
 }
 
 /// Prompt 顺序
