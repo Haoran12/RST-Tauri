@@ -240,7 +240,7 @@ function cancelOverlay() {
               v-model:value="localEntry.order"
               :min="0"
               :max="999"
-              style="width: 100px;"
+              style="width: 120px;"
               @blur="saveChanges"
             />
           </div>
@@ -281,8 +281,8 @@ function cancelOverlay() {
             v-model:value="localEntry.probability"
             :min="0"
             :max="100"
-            :step="1"
-            style="width: 100px;"
+            :step="0.5"
+            style="width: 120px;"
             @blur="saveChanges"
           />
           <span class="hint">%</span>
@@ -526,8 +526,8 @@ function cancelOverlay() {
 }
 
 .inline-label-text {
-  color: var(--color-text-secondary, #999);
-  font-size: 12px;
+  color: var(--color-text, inherit);
+  font-size: 13px;
   white-space: nowrap;
 }
 
