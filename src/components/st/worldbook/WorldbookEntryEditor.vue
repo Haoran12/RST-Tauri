@@ -93,6 +93,28 @@ const roleOptions = [
   { label: '助手', value: ExtensionPromptRole.ASSISTANT },
 ]
 
+// Activation mode options
+type ActivationMode = 'keyword' | 'constant' | 'vectorized'
+const activationModeOptions = [
+  { label: '关键词匹配', value: 'keyword' as ActivationMode },
+  { label: '常驻', value: 'constant' as ActivationMode },
+  { label: '向量化', value: 'vectorized' as ActivationMode },
+]
+
+// Get activation mode from entry
+function getActivationMode(): ActivationMode {
+  if (localEntry.value.constant) return 'constant'
+  if (localEntry.value.vectorized) return 'vectorized'
+  return 'keyword'
+}
+
+// Set activation mode to entry
+function setActivationMode(mode: ActivationMode) {
+  localEntry.value.constant = mode === 'constant'
+  localEntry.value.vectorized = mode === 'vectorized'
+  saveChanges()
+}
+
 // Group options (existing groups + new)
 const groupOptions = computed(() => {
   const existing = props.groups.map((g) => ({ label: g, value: g }))
@@ -169,10 +191,14 @@ function cancelOverlay() {
         />
       </NFormItem>
 
-      <!-- Status (常驻) -->
-      <NFormItem label="常驻">
-        <NSwitch v-model:value="localEntry.constant" @update:value="saveChanges" />
-        <span class="hint">始终包含在上下文中</span>
+      <!-- Activation Mode -->
+      <NFormItem label="激活模式">
+        <NSelect
+          :value="getActivationMode()"
+          :options="activationModeOptions"
+          style="flex: 1;"
+          @update:value="setActivationMode"
+        />
       </NFormItem>
 
       <!-- Scan Settings (常驻) -->
@@ -330,12 +356,12 @@ function cancelOverlay() {
       <NFormItem label="递归设置">
         <div class="inline-row">
           <div class="inline-field">
+            <span class="inline-label-text"> &nbsp;&nbsp; 不可被递归激活</span>
             <NSwitch v-model:value="localEntry.exclude_recursion" @update:value="saveChanges" />
-            <span class="inline-label-text">不可被递归激活</span>
           </div>
           <div class="inline-field">
-            <NSwitch v-model:value="localEntry.prevent_recursion" @update:value="saveChanges" />
-            <span class="inline-label-text">阻止进一步递归</span>
+            <span class="inline-label-text"> &nbsp;&nbsp;&nbsp; 阻止进一步递归</span>
+            <NSwitch v-model:value="localEntry.prevent_recursion" @update:value="saveChanges" />            
           </div>
         </div>
       </NFormItem>

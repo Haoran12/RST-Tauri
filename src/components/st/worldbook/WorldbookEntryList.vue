@@ -10,6 +10,7 @@ import {
   EyeOffOutline,
   PinOutline,
   FlashOutline,
+  SearchOutline,
 } from '@vicons/ionicons5'
 import type { WorldInfoEntry } from '@/types/st'
 import { WorldInfoPosition } from '@/types/st'
@@ -24,6 +25,20 @@ const emit = defineEmits<{
   (e: 'create'): void
   (e: 'reorder', uidOrder: number[]): void
 }>()
+
+// Get activation mode label
+function getActivationModeLabel(entry: WorldInfoEntry): string {
+  if (entry.constant) return '常驻'
+  if (entry.vectorized) return '向量化'
+  return '关键词'
+}
+
+// Get activation mode color
+function getActivationModeColor(entry: WorldInfoEntry): 'default' | 'success' | 'info' | 'warning' | 'error' {
+  if (entry.constant) return 'success'
+  if (entry.vectorized) return 'info'
+  return 'default'
+}
 
 // Get position label
 function getPositionLabel(position: number | undefined): string {
@@ -112,6 +127,11 @@ function createEntry() {
               <PinOutline />
             </NIcon>
           </NBadge>
+          <NBadge v-else-if="entry.vectorized" :value="''" type="info">
+            <NIcon :size="16" color="#70c0e8">
+              <SearchOutline />
+            </NIcon>
+          </NBadge>
           <NBadge v-else-if="(entry.probability ?? 100) < 100" :value="''" type="warning">
             <NIcon :size="16" color="#f2c97d">
               <FlashOutline />
@@ -122,6 +142,13 @@ function createEntry() {
         <div class="entry-content">
           <div class="entry-header">
             <NText class="entry-name">{{ getEntryName(entry) }}</NText>
+            <NTag
+              size="small"
+              :type="getActivationModeColor(entry)"
+              :bordered="false"
+            >
+              {{ getActivationModeLabel(entry) }}
+            </NTag>
             <NTag
               size="small"
               :type="getPositionColor(entry.position)"
