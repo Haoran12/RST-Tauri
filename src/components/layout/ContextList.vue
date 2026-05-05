@@ -148,6 +148,20 @@ function getPositionLabel(position: number | undefined): string {
   }
 }
 
+// Get activation mode label
+function getActivationModeLabel(entry: WorldInfoEntry): string {
+  if (entry.constant) return '常驻'
+  if (entry.vectorized) return '向量化'
+  return '关键词'
+}
+
+// Get activation mode tag type
+function getActivationModeType(entry: WorldInfoEntry): 'default' | 'success' | 'info' | 'warning' | 'error' {
+  if (entry.constant) return 'success'
+  if (entry.vectorized) return 'info'
+  return 'default'
+}
+
 // Load worldbooks when entering the page
 watch(() => route.name, async (newName) => {
   if (newName === 'resources-worldbooks') {
