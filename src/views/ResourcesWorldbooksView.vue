@@ -33,19 +33,30 @@ const editScanDepth = ref<number | null>(null)
 const editTokenBudget = ref<number | null>(null)
 const editRecursiveScanning = ref(false)
 
+// Global settings state
+const showGlobalSettings = ref(false)
+const globalScanDepth = ref(4)
+const globalTokenBudget = ref(32767)
+
 // Load worldbooks on mount
 onMounted(() => {
   store.loadWorldbooks()
   // Listen for create event from ContextList
   window.addEventListener('create-worldbook', handleCreateWorldbookEvent)
+  window.addEventListener('show-worldbook-global-settings', handleShowGlobalSettingsEvent)
 })
 
 onUnmounted(() => {
   window.removeEventListener('create-worldbook', handleCreateWorldbookEvent)
+  window.removeEventListener('show-worldbook-global-settings', handleShowGlobalSettingsEvent)
 })
 
 function handleCreateWorldbookEvent() {
   showCreateModal.value = true
+}
+
+function handleShowGlobalSettingsEvent() {
+  showGlobalSettings.value = true
 }
 
 // Create new worldbook
@@ -325,6 +336,32 @@ async function handleExport() {
         </NFormItem>
         <NFormItem label="递归扫描">
           <NSwitch v-model:value="editRecursiveScanning" />
+        </NFormItem>
+      </NForm>
+    </NModal>
+
+    <!-- Global Settings Modal -->
+    <NModal
+      v-model:show="showGlobalSettings"
+      preset="card"
+      title="全局世界书设置"
+      style="width: 400px"
+    >
+      <NForm label-placement="left" label-width="120px">
+        <NFormItem label="全局扫描深度">
+          <NInputNumber
+            v-model:value="globalScanDepth"
+            :min="1"
+            :max="999"
+            style="width: 100%"
+          />
+        </NFormItem>
+        <NFormItem label="全局 Token 预算">
+          <NInputNumber
+            v-model:value="globalTokenBudget"
+            :min="1"
+            style="width: 100%"
+          />
         </NFormItem>
       </NForm>
     </NModal>

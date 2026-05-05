@@ -12,9 +12,6 @@ import {
   NPopconfirm,
   NText,
   NTag,
-  NInputNumber,
-  NCollapse,
-  NCollapseItem,
 } from 'naive-ui'
 import { computed, ref, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
@@ -27,11 +24,6 @@ const route = useRoute()
 const worldbooksStore = useWorldbooksStore()
 const searchQuery = ref('')
 const loading = ref(false)
-
-// Global settings state
-const showGlobalSettings = ref(false)
-const globalScanDepth = ref(4)
-const globalTokenBudget = ref(32767)
 
 // Computed page type
 const isWorldbooksPage = computed(() => route.name === 'resources-worldbooks')
@@ -119,6 +111,11 @@ function createWorldbook() {
   window.dispatchEvent(new CustomEvent('create-worldbook'))
 }
 
+// Show global settings in right panel
+function showGlobalSettings() {
+  window.dispatchEvent(new CustomEvent('show-worldbook-global-settings'))
+}
+
 // Delete current worldbook
 async function deleteCurrentWorldbook() {
   if (!worldbooksStore.currentWorldbookId) return
@@ -172,39 +169,12 @@ onMounted(async () => {
       <!-- File selector header -->
       <div class="list-header">
         <span class="list-title-worldbook">世界书</span>
-        <NButton quaternary size="small" @click="showGlobalSettings = !showGlobalSettings">
+        <NButton quaternary size="small" @click="showGlobalSettings">
           <template #icon>
             <NIcon><SettingsOutline /></NIcon>
           </template>
         </NButton>
       </div>
-
-      <!-- Global Settings Panel -->
-      <NCollapse v-if="showGlobalSettings" class="global-settings-collapse">
-        <NCollapseItem title="全局设置" name="global">
-          <div class="global-settings-form">
-            <div class="setting-row">
-              <NText depth="3" class="setting-label">全局扫描深度</NText>
-              <NInputNumber
-                v-model:value="globalScanDepth"
-                :min="1"
-                :max="999"
-                size="small"
-                class="setting-input"
-              />
-            </div>
-            <div class="setting-row">
-              <NText depth="3" class="setting-label">全局 Token 预算</NText>
-              <NInputNumber
-                v-model:value="globalTokenBudget"
-                :min="1"
-                size="small"
-                class="setting-input"
-              />
-            </div>
-          </div>
-        </NCollapseItem>
-      </NCollapse>
 
       <!-- Worldbook file selector -->
       <div class="file-selector">
@@ -397,31 +367,6 @@ onMounted(async () => {
 .list-title-worldbook {
   font-weight: 600;
   font-size: 18px;
-}
-
-.global-settings-collapse {
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--color-border-subtle, #e0e0e6);
-}
-
-.global-settings-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.setting-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.setting-label {
-  font-size: 13px;
-}
-
-.setting-input {
-  width: 120px;
 }
 
 .file-selector {
