@@ -436,11 +436,12 @@ async function togglePromptEnabled(identifier: string, enabled: boolean) {
 async function deletePromptItem(identifier: string) {
   if (!presetsStore.currentPreset?.prompt?.prompts) return
   const preset = presetsStore.currentPreset
+  const promptData = preset.prompt!
   // Remove from prompts array
-  preset.prompt.prompts = preset.prompt.prompts.filter((p) => p.identifier !== identifier)
+  promptData.prompts = promptData.prompts!.filter((p) => p.identifier !== identifier)
   // Remove from order array
-  if (preset.prompt.prompt_order?.[0]?.order) {
-    preset.prompt.prompt_order[0].order = preset.prompt.prompt_order[0].order.filter(
+  if (promptData.prompt_order?.[0]?.order) {
+    promptData.prompt_order[0].order = promptData.prompt_order[0].order.filter(
       (o) => o.identifier !== identifier
     )
   }

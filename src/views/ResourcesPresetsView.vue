@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   NButton,
   NCard,
@@ -8,7 +8,6 @@ import {
   NFormItem,
   NInput,
   NModal,
-  NPopconfirm,
   NSpace,
   NSelect,
   NTag,
@@ -50,10 +49,8 @@ const sectionDescriptions: Record<PresetSectionKey, string> = {
   prompt: 'Prompt 条目、排序和世界书/角色字段格式化模板。',
 }
 
-const currentTitle = computed(() => store.currentPreset?.name || '预设')
 const currentSectionLabel = computed(() => sectionLabels[store.currentSection])
 const currentSectionDescription = computed(() => sectionDescriptions[store.currentSection])
-const isDefaultPreset = computed(() => store.currentPreset?.name === 'Default')
 const isActivePreset = computed(
   () => !!store.currentPreset && runtimeStore.globalState.active_preset === store.currentPreset.name,
 )
