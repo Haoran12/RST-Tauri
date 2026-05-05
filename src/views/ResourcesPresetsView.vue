@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
@@ -76,7 +76,12 @@ function openMetaModal() {
   showMetaModal.value = true
 }
 
+function openCreateModal() {
+  showCreateModal.value = true
+}
+
 onMounted(async () => {
+  window.addEventListener('open-preset-create', openCreateModal)
   await Promise.all([store.loadPresetList(), runtimeStore.loadGlobalState()])
   if (!store.currentPreset && store.presetList[0]) {
     const activeName = runtimeStore.globalState.active_preset
@@ -84,6 +89,10 @@ onMounted(async () => {
     await store.loadPreset((preferred ?? store.presetList[0]).name)
   }
   syncEditorText()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('open-preset-create', openCreateModal)
 })
 
 watch(

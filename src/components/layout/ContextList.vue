@@ -14,19 +14,48 @@ import {
   NTag,
 } from 'naive-ui'
 import { computed, ref, watch, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { SearchOutline, AddOutline, TrashOutline, SettingsOutline } from '@vicons/ionicons5'
+import { useAgentStore } from '@/stores/agent'
+import { useAppShellStore } from '@/stores/appShell'
+import { useCharactersStore } from '@/stores/characters'
+import { useChatStore } from '@/stores/chat'
+import { usePresetsStore, type PresetSectionKey } from '@/stores/presets'
 import { useWorldbooksStore } from '@/stores/worldbooks'
 import type { WorldInfoEntry } from '@/types/st'
 import { WorldInfoPosition } from '@/types/st'
 
 const route = useRoute()
+const router = useRouter()
+const agentStore = useAgentStore()
+const appShellStore = useAppShellStore()
+const charactersStore = useCharactersStore()
+const chatStore = useChatStore()
+const presetsStore = usePresetsStore()
 const worldbooksStore = useWorldbooksStore()
 const searchQuery = ref('')
-const loading = ref(false)
+
+type ContextItem = {
+  id: string
+  name: string
+  type: string
+  meta?: string
+  active?: boolean
+  action: () => unknown
+}
+
+const presetSectionLabels: Record<PresetSectionKey, string> = {
+  sampler: 'Sampler',
+  instruct: 'Instruct',
+  context: 'Context',
+  sysprompt: 'System Prompt',
+  reasoning: 'Reasoning',
+  prompt: 'Prompt',
+}
 
 // Computed page type
 const isWorldbooksPage = computed(() => route.name === 'resources-worldbooks')
+const currentWorldId = computed(() => String(route.params.worldId || 'default'))
 
 // Worldbook file options for selector
 const worldbookOptions = computed(() => {
@@ -64,16 +93,162 @@ const pageTitle = computed(() => {
   return titles[route.name as string] || '列表'
 })
 
-// Placeholder data for non-worldbook pages
-const items = ref<Array<{ id: string; name: string; type: string }>>([])
+const contextItems = computed<ContextItem[]>(() => {
+  switch (route.name) {
+    case 'library':
+      return [
+        ...appShellStore.recentSessions.map((item) => ({
+          id: `session:${item.type}:${item.id}`,
+          name: item.name,
+          type: item.type === 'st' ? 'ST 会话' : 'Agent 会话',
+          meta: formatShortTime(item.updatedAt),
+          action: () => router.push(item.type === 'st'
+            ? { name: 'st-chat', params: { sessionId: item.id } }
+            : { name: 'agent-chat', params: { worldId: currentWorldId.value, sessionId: item.id } }),
+        })),
+        ...appShellStore.recentResources.map((item) => ({
+          id: `resource:${item.type}:${item.id}`,
+          name: item.name,
+          type: item.type,
+          meta: formatShortTime(item.updatedAt),
+          action: () => undefined,
+        })),
+      ]
+    case 'st-chat':
+      return chatStore.sessions
+        .slice()
+        .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+        .map((session) => ({
+          id: session.id,
+          name: session.name || '未命名会话',
+          type: 'ST 会话',
+          meta: formatShortTime(session.updated_at),
+          active: route.params.sessionId === session.id,
+          action: () => router.push({ name: 'st-chat', params: { sessionId: session.id } }),
+        }))
+    case 'agent-worlds':
+      return agentStore.sessions
+        .slice()
+        .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+        .map((session) => ({
+          id: session.session_id,
+          name: session.title,
+          type: session.session_kind,
+          meta: session.period_anchor.display_text,
+          active: route.params.sessionId === session.session_id,
+          action: () => router.push({
+            name: 'agent-chat',
+            params: {
+              worldId: session.world_id,
+              sessionId: session.session_id,
+            },
+          }),
+        }))
+    case 'resources-characters':
+      return charactersStore.characters.map((item) => ({
+        id: item.id,
+        name: item.character.data.name || '未命名角色',
+        type: '角色卡',
+        meta: item.character.data.creator_notes || item.character.data.description || undefined,
+        active: route.query.character === item.id,
+        action: () => router.replace({
+          name: 'resources-characters',
+          query: { character: item.id },
+        }),
+      }))
+    case 'resources-presets':
+      return [
+        ...presetsStore.presetList.map((preset) => ({
+          id: `preset:${preset.name}`,
+          name: preset.name,
+          type: '预设',
+          active: presetsStore.currentPreset?.name === preset.name,
+          action: () => presetsStore.loadPreset(preset.name),
+        })),
+        ...Object.entries(presetSectionLabels).map(([key, label]) => ({
+          id: `section:${key}`,
+          name: label,
+          type: '分区',
+          active: presetsStore.currentSection === key,
+          action: () => presetsStore.selectSection(key as PresetSectionKey),
+        })),
+      ]
+    default:
+      return []
+  }
+})
 
 const filteredItems = computed(() => {
-  if (!searchQuery.value) return items.value
+  if (!searchQuery.value) return contextItems.value
   const query = searchQuery.value.toLowerCase()
-  return items.value.filter(item =>
-    item.name.toLowerCase().includes(query)
+  return contextItems.value.filter(item =>
+    item.name.toLowerCase().includes(query) ||
+    item.type.toLowerCase().includes(query) ||
+    item.meta?.toLowerCase().includes(query)
   )
 })
+
+const isDefaultLoading = computed(() => {
+  switch (route.name) {
+    case 'agent-worlds':
+      return agentStore.isLoading
+    case 'resources-characters':
+      return charactersStore.isLoading
+    case 'resources-presets':
+      return presetsStore.isLoading
+    default:
+      return false
+  }
+})
+
+const showDefaultAddButton = computed(() => {
+  return ['st-chat', 'agent-worlds', 'resources-characters', 'resources-presets'].includes(route.name as string)
+})
+
+const defaultEmptyDescription = computed(() => {
+  switch (route.name) {
+    case 'st-chat':
+      return '暂无会话，点击上方按钮创建'
+    case 'agent-worlds':
+      return '暂无 Agent 会话'
+    case 'resources-characters':
+      return '暂无角色卡，请导入'
+    case 'resources-presets':
+      return '暂无预设'
+    case 'resources-regex':
+      return 'Regex 管理待实现'
+    default:
+      return '暂无数据'
+  }
+})
+
+async function handleDefaultAdd() {
+  switch (route.name) {
+    case 'st-chat': {
+      const name = `新会话 ${new Date().toLocaleString()}`
+      await chatStore.createSession(name)
+      if (chatStore.currentSession) {
+        await router.push({ name: 'st-chat', params: { sessionId: chatStore.currentSession.id } })
+      }
+      break
+    }
+    case 'agent-worlds':
+      window.dispatchEvent(new CustomEvent('open-agent-session-create'))
+      break
+    case 'resources-characters':
+      window.dispatchEvent(new CustomEvent('open-character-import'))
+      break
+    case 'resources-presets':
+      window.dispatchEvent(new CustomEvent('open-preset-create'))
+      break
+  }
+}
+
+function formatShortTime(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString()
+}
 
 // Handle worldbook selection
 async function handleWorldbookSelect(id: string | null) {
@@ -166,12 +341,29 @@ function getActivationModeType(entry: WorldInfoEntry): 'default' | 'success' | '
 watch(() => route.name, async (newName) => {
   if (newName === 'resources-worldbooks') {
     await worldbooksStore.loadWorldbooks()
+  } else if (newName === 'st-chat') {
+    await chatStore.loadSessions()
+  } else if (newName === 'resources-characters') {
+    await charactersStore.loadCharacters()
+  } else if (newName === 'resources-presets') {
+    await presetsStore.loadPresetList()
+    if (!presetsStore.currentPreset && presetsStore.presetList[0]) {
+      await presetsStore.loadPreset(presetsStore.presetList[0].name)
+    }
+  } else if (newName === 'agent-worlds') {
+    await agentStore.loadWorld(currentWorldId.value)
   }
 }, { immediate: true })
 
 onMounted(async () => {
   if (isWorldbooksPage.value) {
     await worldbooksStore.loadWorldbooks()
+  }
+})
+
+watch(currentWorldId, async (worldId) => {
+  if (route.name === 'agent-worlds') {
+    await agentStore.loadWorld(worldId)
   }
 })
 </script>
@@ -329,7 +521,7 @@ onMounted(async () => {
     <template v-else>
       <div class="list-header">
         <span class="list-title">{{ pageTitle }}</span>
-        <NButton quaternary size="small">
+        <NButton v-if="showDefaultAddButton" quaternary size="small" @click="handleDefaultAdd">
           <template #icon>
             <NIcon><AddOutline /></NIcon>
           </template>
@@ -350,13 +542,25 @@ onMounted(async () => {
       </div>
 
       <div class="list-content">
-        <NSpin :show="loading">
+        <NSpin :show="isDefaultLoading">
           <NList v-if="filteredItems.length > 0" hoverable clickable>
-            <NListItem v-for="item in filteredItems" :key="item.id">
-              {{ item.name }}
+            <NListItem
+              v-for="item in filteredItems"
+              :key="item.id"
+              class="context-item"
+              :class="{ 'context-item-active': item.active }"
+              @click="item.action"
+            >
+              <div class="context-item-main">
+                <span class="context-item-name">{{ item.name }}</span>
+                <NTag size="tiny" :bordered="false">{{ item.type }}</NTag>
+              </div>
+              <NText v-if="item.meta" depth="3" class="context-item-meta">
+                {{ item.meta }}
+              </NText>
             </NListItem>
           </NList>
-          <NEmpty v-else description="暂无数据" />
+          <NEmpty v-else :description="defaultEmptyDescription" />
         </NSpin>
       </div>
     </template>
@@ -427,6 +631,44 @@ onMounted(async () => {
   min-height: 0;
   overflow-y: auto;
   padding: 0 4px;
+}
+
+.context-item {
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.context-item:hover {
+  background-color: rgba(0, 0, 0, 0.04);
+}
+
+.context-item-active {
+  background-color: rgba(24, 160, 88, 0.1);
+}
+
+.context-item-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.context-item-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.context-item-meta {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
 }
 
 .empty-state {

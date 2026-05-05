@@ -12,6 +12,7 @@ import {
   KeyOutline,
   MapOutline,
   PersonOutline,
+  CodeSlashOutline,
 } from '@vicons/ionicons5'
 
 const router = useRouter()
@@ -52,6 +53,11 @@ const menuOptions = [
     label: '预设',
     key: 'resources-presets',
     icon: () => h(NIcon, null, { default: () => h(SettingsOutline) }),
+  },
+  {
+    label: 'Regex',
+    key: 'resources-regex',
+    icon: () => h(NIcon, null, { default: () => h(CodeSlashOutline) }),
   },
   {
     type: 'divider',

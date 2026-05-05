@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton,
@@ -22,7 +22,12 @@ const router = useRouter()
 const showImportModal = ref(false)
 
 onMounted(async () => {
+  window.addEventListener('open-character-import', openImportModal)
   await store.loadCharacters()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('open-character-import', openImportModal)
 })
 
 const selectedCharacterId = computed(() => {
@@ -43,6 +48,10 @@ async function selectCharacter(id: string | null) {
     name: 'resources-characters',
     query: id ? { character: id } : {},
   })
+}
+
+function openImportModal() {
+  showImportModal.value = true
 }
 
 function handleImportPng(options: { file: UploadFileInfo }) {

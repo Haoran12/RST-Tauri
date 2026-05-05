@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, watch } from 'vue'
+import { computed, ref, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton,
@@ -181,7 +181,12 @@ watch(worldId, (newWorldId) => {
 }, { immediate: true })
 
 onMounted(() => {
+  window.addEventListener('open-agent-session-create', openSessionModal)
   loadLlmProfile()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('open-agent-session-create', openSessionModal)
 })
 </script>
 

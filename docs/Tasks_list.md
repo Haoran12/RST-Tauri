@@ -223,7 +223,7 @@
 |---|------|------|----------|------|
 | 8.1 | 性能优化 - 缓存 | ✅ | 2026-05-05 | TurnScopedCache/KnowledgeAccessCache/DerivedAttributeCache/SceneDerivedCache；补充 WorldInfoManager 世界书池容量与失效接口 |
 | 8.2 | 性能优化 - 事件批处理 | ✅ | 2026-05-05 | BatchStateWriter 已提供单 SQLite 写事务批量落库入口与事务测试 |
-| 8.3 | UI / UX 改进 | 🔄 | | 资源工作台与 API 配置页已接入；世界书 / 预设改为左侧文件选择器 + 条目/分区列表，右侧只保留编辑区，减少多级导航；Agent 会话聊天闭环与日志管理 UI 已开放，资源页细节和整体交互仍需继续打磨 |
+| 8.3 | UI / UX 改进 | 🔄 | | 资源工作台与 API 配置页已接入；世界书 / 预设改为左侧文件选择器 + 条目/分区列表，主导航补齐 Regex，左侧上下文栏已接 ST 会话 / Agent 会话 / 角色卡 / 预设真实列表与点击动作；资源页细节和整体交互仍需继续打磨 |
 | 8.4 | 高级 Trace 可视化 | ✅ | 2026-05-06 | `/logs` 已支持 Agent Trace 列表、Trace 详情 step 展示、step linked_request_id 跳转与 request 反查 |
 | 8.5 | 测试覆盖 | 🔄 | | 已补 GodOnly 揭示、StateCommitter 非正史边界、附件脱敏、Provider 能力 fail-fast、附件 magic bytes 与缓存/批量事务测试；测试矩阵仍需继续扩大 |
 | 8.6 | 插件系统 | ⏳ | | |
@@ -255,6 +255,7 @@
 
 | 日期 | 更新内容 |
 |------|----------|
+| 2026-05-06 | 修复左侧边栏多处点击无响应：上下文栏不再使用空占位列表，接入 ST 会话、Agent 会话、角色卡、预设文件/分区的真实数据与选择动作；侧栏新建/导入按钮转发到对应页面弹窗，并补齐 Regex 主导航入口 |
 | 2026-05-06 | 修复预设默认值与运行时选择：存储层自动补齐 `./data/presets/Default.json`，全局状态收敛为单个 `active_preset`，聊天请求只传 `preset_name`；预设页按世界书页面布局调整为左侧文件/分区选择、右侧当前 section 编辑，并保留 API 连接与预设解耦 |
 | 2026-05-06 | 完成日志页面开发：新增日志查询 / 详情 / stream chunk / Trace / 容量摘要 / 导出 / 清理预览确认命令，`/logs` 替换占位规划页并移除左侧“规划中”上下文项 |
 | 2026-05-06 | 优化 Structured Text Editor 初始模式体验：未显式传入 mode 时按内容低开销推断 JSON / YAML / Plain，并将推断结果同步给父组件 |
