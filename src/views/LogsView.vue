@@ -503,12 +503,21 @@ onMounted(refreshAll)
               >
                 <div class="record-row-top">
                   <div class="record-title">
-                    <NTag size="small" :bordered="false">{{ kindLabel(record) }}</NTag>
+                    <NTag
+                      v-if="record.record_ref.record_kind === 'llm'"
+                      size="small"
+                      :bordered="false"
+                      :type="statusType(record.status)"
+                      class="kind-tag"
+                    >
+                      LLM
+                    </NTag>
+                    <NTag v-else size="small" :bordered="false">{{ kindLabel(record) }}</NTag>
                     <span>{{ record.title }}</span>
                   </div>
                   <div class="record-tags">
                     <NTag
-                      v-if="record.status || record.level"
+                      v-if="(record.record_ref.record_kind !== 'llm') && (record.status || record.level)"
                       size="small"
                       :type="statusType(record.status || record.level)"
                     >
