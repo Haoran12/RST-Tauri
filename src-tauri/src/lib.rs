@@ -206,6 +206,7 @@ pub fn run() {
             commands::load_preset,
             commands::assemble_st_request,
             commands::send_assembled_st_chat_message,
+            commands::start_st_chat_stream,
             commands::run_world_info_injection,
             commands::map_request_to_provider,
             // Agent session commands

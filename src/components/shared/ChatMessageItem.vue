@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch, onUnmounted } from 'vue'
 import { NButton, NIcon, NTooltip } from 'naive-ui'
 import { CopyOutline, CreateOutline, TrashOutline } from '@vicons/ionicons5'
 
@@ -26,7 +26,46 @@ const emit = defineEmits<{
 }>()
 
 const tokenEstimate = computed(() => estimateTokens(props.content))
-const markdownHtml = computed(() => renderMarkdown(props.content))
+
+// Throttled markdown rendering for streaming content
+const renderedHtml = ref<string>('')
+let renderScheduled = false
+let lastRenderedContent = ''
+
+function scheduleMarkdownRender() {
+  if (renderScheduled) return
+  renderScheduled = true
+
+  // Use requestAnimationFrame for smooth updates
+  requestAnimationFrame(() => {
+    renderScheduled = false
+    if (props.content !== lastRenderedContent) {
+      lastRenderedContent = props.content
+      renderedHtml.value = renderMarkdown(props.content)
+    }
+  })
+}
+
+// For non-streaming content, use computed directly
+const markdownHtml = computed(() => {
+  if (props.pending) {
+    // For pending/streaming content, use the throttled version
+    scheduleMarkdownRender()
+    return renderedHtml.value || renderMarkdown(props.content)
+  }
+  return renderMarkdown(props.content)
+})
+
+// Watch for content changes in streaming mode
+watch(() => props.content, (newContent) => {
+  if (props.pending && newContent !== lastRenderedContent) {
+    scheduleMarkdownRender()
+  }
+}, { immediate: true })
+
+onUnmounted(() => {
+  renderScheduled = false
+})
 
 const dateLabel = computed(() => {
   if (!props.createdAt) return ''

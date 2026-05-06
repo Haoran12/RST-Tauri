@@ -2,6 +2,7 @@
 // 运行时组装服务：调用 Tauri 命令
 
 import { invoke } from '@tauri-apps/api/core';
+import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import type {
   GlobalAppState,
   STWorldInfoSettings,
@@ -20,6 +21,38 @@ import type {
   ReasoningTemplate,
   PromptPreset,
 } from '@/types/preset';
+
+// ============================================================================
+// 流式传输事件类型
+// ============================================================================
+
+export interface StreamStartEvent {
+  stream_id: string;
+  request_id: string;
+}
+
+export interface StreamChunkEvent {
+  stream_id: string;
+  delta: string;
+  finish_reason: string | null;
+}
+
+export interface StreamErrorEvent {
+  stream_id: string;
+  error: string;
+}
+
+export interface StreamCallbacks {
+  onStart?: (event: StreamStartEvent) => void;
+  onChunk?: (event: StreamChunkEvent) => void;
+  onError?: (event: StreamErrorEvent) => void;
+  onEnd?: (streamId: string) => void;
+}
+
+export interface StreamController {
+  streamId: string;
+  abort: () => void;
+}
 
 // ============================================================================
 // 全局应用状态
@@ -115,6 +148,72 @@ export async function assembleSTRequest(input: AssembleRequestInput): Promise<As
  */
 export async function sendAssembledSTChatMessage(input: AssembleRequestInput): Promise<ChatResponse> {
   return await invoke<ChatResponse>('send_assembled_st_chat_message', { input });
+}
+
+/**
+ * 启动流式聊天请求
+ *
+ * 返回流控制器，通过 callbacks 接收流事件：
+ * - onStart: 流开始，包含 stream_id 和 request_id
+ * - onChunk: 收到内容块，包含 delta 增量文本
+ * - onError: 发生错误
+ * - onEnd: 流结束
+ */
+export async function startSTChatStream(
+  input: AssembleRequestInput,
+  callbacks: StreamCallbacks
+): Promise<StreamController> {
+  // 注册事件监听器
+  const unlisteners: UnlistenFn[] = [];
+  let currentStreamId: string | null = null;
+  let aborted = false;
+
+  // 监听开始事件
+  unlisteners.push(
+    await listen<StreamStartEvent>('st-stream-start', (event) => {
+      if (aborted) return;
+      currentStreamId = event.payload.stream_id;
+      callbacks.onStart?.(event.payload);
+    })
+  );
+
+  // 监听内容块事件
+  unlisteners.push(
+    await listen<StreamChunkEvent>('st-stream-chunk', (event) => {
+      if (aborted || event.payload.stream_id !== currentStreamId) return;
+      callbacks.onChunk?.(event.payload);
+    })
+  );
+
+  // 监听错误事件
+  unlisteners.push(
+    await listen<StreamErrorEvent>('st-stream-error', (event) => {
+      if (aborted || event.payload.stream_id !== currentStreamId) return;
+      callbacks.onError?.(event.payload);
+    })
+  );
+
+  // 监听结束事件
+  unlisteners.push(
+    await listen<string>('st-stream-end', (streamId) => {
+      if (aborted || streamId.payload !== currentStreamId) return;
+      // 清理所有监听器
+      unlisteners.forEach((unlisten) => unlisten());
+      callbacks.onEnd?.(streamId.payload);
+    })
+  );
+
+  // 启动流
+  const streamId = await invoke<string>('start_st_chat_stream', { input });
+
+  return {
+    streamId,
+    abort: () => {
+      aborted = true;
+      unlisteners.forEach((unlisten) => unlisten());
+      callbacks.onEnd?.(streamId);
+    },
+  };
 }
 
 /**

@@ -32,8 +32,31 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
+use futures::StreamExt;
+
+/// Stream event payload sent to frontend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamChunkEvent {
+    pub stream_id: String,
+    pub delta: String,
+    pub finish_reason: Option<String>,
+}
+
+/// Stream error event payload sent to frontend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamErrorEvent {
+    pub stream_id: String,
+    pub error: String,
+}
+
+/// Stream start event payload sent to frontend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamStartEvent {
+    pub stream_id: String,
+    pub request_id: String,
+}
 
 async fn get_compiled_contract_view(
     state: &Arc<AppState>,
@@ -1966,4 +1989,171 @@ async fn build_provider_request_preview(
         }
         _ => Err(format!("Unknown provider protocol: {}", protocol_kind)),
     }
+}
+
+/// Start a streaming chat request for ST mode.
+/// Returns a stream_id immediately, then emits events:
+/// - "st-stream-start" with StreamStartEvent
+/// - "st-stream-chunk" with StreamChunkEvent for each chunk
+/// - "st-stream-error" with StreamErrorEvent on error
+/// - "st-stream-end" with stream_id when done
+#[tauri::command]
+pub async fn start_st_chat_stream(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    input: AssembleRequestInput,
+) -> Result<String, String> {
+    let stream_id = Uuid::new_v4().to_string();
+
+    // Prepare everything needed for the stream
+    let assembled = assemble_st_request(app.clone(), input.clone()).await?;
+    let data_dir = get_data_dir(&app)?;
+    let store = JsonStore::new(data_dir.clone());
+
+    let api_config: ApiConfig = {
+        let value = store.read(&format!("api_configs/{}.json", input.api_config_id))?;
+        serde_json::from_value(value).map_err(|e| format!("Failed to parse API config: {}", e))?
+    };
+    let compiled_contract = get_compiled_contract_view(state.inner(), &api_config).await?;
+    let provider = create_provider(&api_config, Some(data_dir.clone()))?;
+
+    let request_id = Uuid::new_v4().to_string();
+    let request = assembled_to_chat_request(
+        &data_dir,
+        &compiled_contract,
+        request_id.clone(),
+        input.api_config_id.clone(),
+        assembled.request,
+    )
+    .await?;
+
+    // Enable streaming on the request
+    let mut stream_request = request.clone();
+    stream_request.stream = true;
+
+    // Build request URL for logging
+    let request_url = build_request_url(&api_config);
+
+    let log_context = LogContext {
+        mode: LogMode::St,
+        world_id: None,
+        session_id: Some(input.session_id.clone()),
+        scene_turn_id: None,
+        character_id: input.character_id.clone(),
+        trace_id: None,
+        llm_node: LlmNode::STChat,
+        api_config_id: input.api_config_id,
+        request_id: request_id.clone(),
+    };
+
+    // Log start before spawning
+    {
+        let store_guard = state.sqlite_store.read().await;
+        if let Some(sqlite_store) = store_guard.as_ref() {
+            let request_json = serde_json::to_value(&stream_request).unwrap_or(serde_json::Value::Null);
+            sqlite_store
+                .llm_logger()
+                .log_start(
+                    &log_context,
+                    &request_json,
+                    request_url.as_deref(),
+                    &api_config.provider,
+                    &api_config.model,
+                    "chat_stream",
+                    None,
+                )
+                .await;
+        }
+    }
+
+    // Get Arc clone for use in spawned task
+    let sqlite_store_arc = state.sqlite_store.clone();
+
+    // Emit start event
+    app.emit("st-stream-start", StreamStartEvent {
+        stream_id: stream_id.clone(),
+        request_id: request_id.clone(),
+    }).map_err(|e| format!("Failed to emit start event: {}", e))?;
+
+    // Spawn background task to process stream
+    let app_clone = app.clone();
+    let request_id_clone = request_id.clone();
+    let stream_id_for_task = stream_id.clone();
+
+    tokio::spawn(async move {
+        match provider.chat_stream(stream_request).await {
+            Ok(mut stream) => {
+                let mut full_content = String::new();
+
+                while let Some(chunk_result) = stream.next().await {
+                    match chunk_result {
+                        Ok(chunk) => {
+                            if !chunk.delta.is_empty() {
+                                full_content.push_str(&chunk.delta);
+                            }
+
+                            // Emit chunk event
+                            let _ = app_clone.emit("st-stream-chunk", StreamChunkEvent {
+                                stream_id: stream_id_for_task.clone(),
+                                delta: chunk.delta,
+                                finish_reason: chunk.finish_reason,
+                            });
+                        }
+                        Err(e) => {
+                            // Emit error event
+                            let _ = app_clone.emit("st-stream-error", StreamErrorEvent {
+                                stream_id: stream_id_for_task.clone(),
+                                error: e.clone(),
+                            });
+                            // Log failure
+                            {
+                                let store_guard = sqlite_store_arc.read().await;
+                                if let Some(ref store) = store_guard.as_ref() {
+                                    store.llm_logger().log_failure(&request_id_clone, &e).await;
+                                }
+                            }
+                            let _ = app_clone.emit("st-stream-end", &stream_id_for_task);
+                            return;
+                        }
+                    }
+                }
+
+                // Log success
+                {
+                    let store_guard = sqlite_store_arc.read().await;
+                    if let Some(ref store) = store_guard.as_ref() {
+                        store
+                            .llm_logger()
+                            .log_success(
+                                &request_id_clone,
+                                &serde_json::json!({"content": &full_content}),
+                                None,
+                                None,
+                            )
+                            .await;
+                    }
+                }
+
+                // Emit end event
+                let _ = app_clone.emit("st-stream-end", &stream_id_for_task);
+            }
+            Err(e) => {
+                // Failed to create stream
+                let _ = app_clone.emit("st-stream-error", StreamErrorEvent {
+                    stream_id: stream_id_for_task.clone(),
+                    error: e.clone(),
+                });
+                // Log failure
+                {
+                    let store_guard = sqlite_store_arc.read().await;
+                    if let Some(ref store) = store_guard.as_ref() {
+                        store.llm_logger().log_failure(&request_id_clone, &e).await;
+                    }
+                }
+                let _ = app_clone.emit("st-stream-end", &stream_id_for_task);
+            }
+        }
+    });
+
+    Ok(stream_id)
 }

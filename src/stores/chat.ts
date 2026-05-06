@@ -10,7 +10,7 @@ import type {
   STUserPersona,
 } from '@/types/st'
 import * as storage from '@/services/storage'
-import { sendAssembledSTChatMessage } from '@/services/runtime'
+import { sendAssembledSTChatMessage, startSTChatStream, type StreamController } from '@/services/runtime'
 import { useRuntimeStore } from '@/stores/runtime'
 
 const MAX_CHAT_ATTACHMENT_BYTES = 10 * 1024 * 1024
@@ -29,6 +29,9 @@ export const useChatStore = defineStore('chat', () => {
   const pendingAttachments = ref<ChatAttachmentRef[]>([])
   const isGenerating = ref(false)
   const streamingContent = ref<string>('')
+
+  // Stream controller for abort
+  let currentStreamController: StreamController | null = null
 
   // Error state
   const error = ref<string | null>(null)
@@ -238,7 +241,7 @@ export const useChatStore = defineStore('chat', () => {
       const runtimeStore = useRuntimeStore()
       await runtimeStore.loadGlobalState()
 
-      // Add placeholder only after persisting the user message used by runtime assembly.
+      // Add placeholder for assistant message
       const assistantMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
@@ -248,20 +251,41 @@ export const useChatStore = defineStore('chat', () => {
       }
       messages.value.push(assistantMessage)
 
-      const response = await sendAssembledSTChatMessage({
-        api_config_id: apiConfig.id,
-        character_id: currentSession.value.character_id ?? null,
-        session_id: currentSession.value.id,
-        preset_name: runtimeStore.globalState.active_preset || 'Default',
-        world_info_settings: runtimeStore.globalState.world_info_settings,
-        chat_lore_id: null,
-        global_lore_ids: [],
-        max_context: 8192,
-      })
-
-      streamingContent.value = response.content
-      assistantMessage.content = response.content
-      await saveCurrentSession()
+      // Start streaming
+      currentStreamController = await startSTChatStream(
+        {
+          api_config_id: apiConfig.id,
+          character_id: currentSession.value.character_id ?? null,
+          session_id: currentSession.value.id,
+          preset_name: runtimeStore.globalState.active_preset || 'Default',
+          world_info_settings: runtimeStore.globalState.world_info_settings,
+          chat_lore_id: null,
+          global_lore_ids: [],
+          max_context: 8192,
+        },
+        {
+          onStart: (event) => {
+            // Stream started, we already have the placeholder
+          },
+          onChunk: (event) => {
+            // Update streaming content incrementally
+            assistantMessage.content += event.delta
+            streamingContent.value = assistantMessage.content
+          },
+          onError: (event) => {
+            error.value = event.error
+            // Remove the assistant placeholder on error
+            if (messages.value[messages.value.length - 1]?.id === assistantMessage.id) {
+              messages.value.pop()
+            }
+          },
+          onEnd: async () => {
+            // Stream ended, save the session
+            currentStreamController = null
+            await saveCurrentSession()
+          },
+        }
+      )
     } catch (e) {
       error.value = String(e)
       // Keep the user message persisted; only remove the assistant placeholder.
@@ -275,8 +299,12 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  // Stop only affects the local pending indicator until provider streaming is implemented.
+  // Stop generation
   function stopGeneration() {
+    if (currentStreamController) {
+      currentStreamController.abort()
+      currentStreamController = null
+    }
     isGenerating.value = false
     streamingContent.value = ''
   }
