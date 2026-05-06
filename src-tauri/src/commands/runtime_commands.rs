@@ -352,14 +352,55 @@ fn load_combined_preset(store: &JsonStore, name: &str) -> Result<PresetFile, Str
 }
 
 /// 合并内置提示词条目到预设
+///
+/// 合并逻辑：
+/// 1. 如果 prompts 为空，使用默认 prompts
+/// 2. 如果 prompt_order 为空，使用默认 prompt_order
+/// 3. 如果 prompt_order 存在但缺少内置条目，补充缺失的内置条目
+/// 4. 保留用户自定义的 enabled 和 position 字段
 fn merge_builtin_prompt_items(preset: &mut PresetFile) {
     let defaults = create_default_preset_file(&preset.name);
+
+    // 合并 prompts
     if preset.prompts.is_empty() {
         preset.prompts = defaults.prompts;
+    } else {
+        // 补充缺失的内置 prompts 条目
+        let existing_ids: std::collections::HashSet<String> =
+            preset.prompts.iter().map(|p| p.identifier.clone()).collect();
+        for default_prompt in defaults.prompts {
+            if !existing_ids.contains(&default_prompt.identifier) {
+                preset.prompts.push(default_prompt);
+            }
+        }
     }
+
+    // 合并 prompt_order
     if preset.prompt_order.is_empty() {
         preset.prompt_order = defaults.prompt_order;
+    } else {
+        // 对每个 prompt_order 条目，补充缺失的内置条目
+        for order_entry in &mut preset.prompt_order {
+            let existing_ids: std::collections::HashSet<String> =
+                order_entry.order.iter().map(|o| o.identifier.clone()).collect();
+
+            // 从默认 prompt_order 中获取对应 character_id 的条目
+            let default_order = defaults
+                .prompt_order
+                .iter()
+                .find(|d| d.character_id == order_entry.character_id)
+                .or_else(|| defaults.prompt_order.first());
+
+            if let Some(default_order_entry) = default_order {
+                for default_item in &default_order_entry.order {
+                    if !existing_ids.contains(&default_item.identifier) {
+                        order_entry.order.push(default_item.clone());
+                    }
+                }
+            }
+        }
     }
+
     if preset.wi_format.trim().is_empty() {
         preset.wi_format = defaults.wi_format;
     }

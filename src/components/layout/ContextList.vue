@@ -482,25 +482,6 @@ async function deleteCurrentPreset() {
   await presetsStore.deletePreset(presetsStore.currentPreset.name)
 }
 
-// Get role label and color
-function getRoleLabel(role: string): string {
-  switch (role) {
-    case 'system': return 'System'
-    case 'user': return 'User'
-    case 'assistant': return 'Assistant'
-    default: return role
-  }
-}
-
-function getRoleType(role: string): 'default' | 'success' | 'info' | 'warning' | 'error' {
-  switch (role) {
-    case 'system': return 'warning'
-    case 'user': return 'info'
-    case 'assistant': return 'success'
-    default: return 'default'
-  }
-}
-
 function isFixedPromptItem(identifier: string): boolean {
   return fixedPromptIdentifiers.has(identifier)
 }
@@ -621,24 +602,42 @@ async function onDrop(event: DragEvent, targetItem: PromptItem) {
 
   if (draggedIndex === -1 || targetIndex === -1) return
 
-  // Reorder the prompts array
-  const [removed] = prompts.splice(draggedIndex, 1)
-  prompts.splice(targetIndex, 0, removed)
-
-  // Update positions in prompt_order
+  // 确保 prompt_order 存在
   if (!preset.prompt_order || preset.prompt_order.length === 0) {
-    preset.prompt_order = [{ order: [] }]
+    preset.prompt_order = [{ character_id: 100000, order: [] }]
   }
 
   const order = preset.prompt_order[0].order ?? []
   preset.prompt_order[0].order = order
-  prompts.forEach((p, index) => {
-    const existingOrder = order.find(o => o.identifier === p.identifier)
-    if (existingOrder) {
-      existingOrder.position = index
-    } else {
-      order.push({ identifier: p.identifier, enabled: true, position: index })
+
+  // 获取 dragged 和 target 在 order 中的索引
+  const draggedOrderIndex = order.findIndex(o => o.identifier === draggedItem.value!.identifier)
+  const targetOrderIndex = order.findIndex(o => o.identifier === targetItem.identifier)
+
+  // 如果两个都在 order 中，直接重新排序 order 数组
+  if (draggedOrderIndex >= 0 && targetOrderIndex >= 0) {
+    const [removed] = order.splice(draggedOrderIndex, 1)
+    order.splice(targetOrderIndex, 0, removed)
+  } else {
+    // 如果其中一个不在 order 中，需要添加到 order 中
+    // 先确保所有 prompts 都在 order 中
+    prompts.forEach((p) => {
+      if (!order.some(o => o.identifier === p.identifier)) {
+        order.push({ identifier: p.identifier, enabled: true })
+      }
+    })
+    // 然后重新排序
+    const newDraggedIndex = order.findIndex(o => o.identifier === draggedItem.value!.identifier)
+    const newTargetIndex = order.findIndex(o => o.identifier === targetItem.identifier)
+    if (newDraggedIndex >= 0 && newTargetIndex >= 0) {
+      const [removed] = order.splice(newDraggedIndex, 1)
+      order.splice(newTargetIndex, 0, removed)
     }
+  }
+
+  // 清除所有 position 字段，使用数组顺序
+  order.forEach(item => {
+    delete item.position
   })
 
   await presetsStore.savePreset(preset)
@@ -653,15 +652,28 @@ const sortedPromptItems = computed(() => {
   if (!prompts) return []
 
   const order = presetsStore.currentPreset?.prompt_order?.[0]?.order
+  if (!order) return [...prompts]
+
+  // 构建 identifier -> 排序位置的映射
+  // ST 格式：order 数组的顺序就是排序顺序，position 字段用于用户自定义覆盖
   const positionMap = new Map<string, number>()
-  order?.forEach(item => {
-    if (item.position !== undefined) {
-      positionMap.set(item.identifier, item.position)
+  order.forEach((item, index) => {
+    // 优先使用 position 字段，否则使用数组索引
+    const pos = item.position ?? index
+    positionMap.set(item.identifier, pos)
+  })
+
+  // 对于不在 order 中的 prompts，使用 prompts 数组中的原始索引加上一个偏移量
+  const maxPosition = Math.max(...Array.from(positionMap.values()), -1)
+  prompts.forEach((p, index) => {
+    if (!positionMap.has(p.identifier)) {
+      positionMap.set(p.identifier, maxPosition + 1 + index)
     }
   })
-  const sorted = !order ? [...prompts] : [...prompts].sort((a, b) => {
-    const posA = positionMap.get(a.identifier) ?? prompts.indexOf(a)
-    const posB = positionMap.get(b.identifier) ?? prompts.indexOf(b)
+
+  const sorted = [...prompts].sort((a, b) => {
+    const posA = positionMap.get(a.identifier) ?? 0
+    const posB = positionMap.get(b.identifier) ?? 0
     return posA - posB
   })
 
