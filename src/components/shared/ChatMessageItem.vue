@@ -303,7 +303,7 @@ function escapeHtml(raw: string) {
   flex-direction: column;
   align-items: flex-start;
   max-width: min(760px, 82%);
-  min-width: 180px;
+  width: 100%;
 }
 
 .chat-message-item.user .message-shell {
@@ -347,7 +347,7 @@ function escapeHtml(raw: string) {
 
 .message-bubble {
   max-width: 100%;
-  min-width: 120px;
+  width: 100%;
   padding: 12px 15px;
   border: 1px solid var(--n-border-color);
   border-radius: 8px;
