@@ -27,6 +27,15 @@ pub fn app_data_root(_app: &AppHandle) -> Result<PathBuf, String> {
     Ok(root)
 }
 
+/// Return the bundled config directory root.
+///
+/// In development, this is `<project-root>/config`.
+/// In production, this is `<exe-dir>/config`.
+pub fn app_config_root() -> Result<PathBuf, String> {
+    let app_root = app_install_root()?;
+    Ok(app_root.join("config"))
+}
+
 fn app_install_root() -> Result<PathBuf, String> {
     if cfg!(debug_assertions) {
         let cwd = std::env::current_dir()

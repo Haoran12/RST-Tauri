@@ -19,7 +19,7 @@ use config::llm_contracts::{
     load_llm_api_contracts_snapshot, load_llm_api_contracts_snapshot_from_str,
     LlmApiContractsSnapshot, ProviderContractCache,
 };
-use storage::paths::app_data_root;
+use storage::paths::{app_config_root, app_data_root};
 use storage::sqlite_store::SqliteStore;
 use tauri::webview::WebviewWindowBuilder;
 
@@ -73,7 +73,11 @@ pub fn run() {
             }
 
             // Load bundled LLM API contracts once at startup.
-            let contracts_path = std::path::PathBuf::from("config").join("llm_api_contracts.json");
+            let contracts_path = app_config_root()
+                .map(|p| p.join("llm_api_contracts.json"))
+                .unwrap_or_else(|_| {
+                    std::path::PathBuf::from("config").join("llm_api_contracts.json")
+                });
             let contracts_result = load_llm_api_contracts_snapshot(&contracts_path).or_else(|e| {
                 tracing::warn!(
                     "Failed to load runtime llm_api_contracts.json from {}: {}; using embedded snapshot",
