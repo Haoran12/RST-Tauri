@@ -7,7 +7,6 @@ import {
   NEmpty,
   NIcon,
   NInput,
-  NInputGroup,
   NModal,
   NScrollbar,
   NSpin,
@@ -242,7 +241,7 @@ onMounted(loadSession)
         </div>
 
         <div class="input-area">
-          <NInputGroup>
+          <div class="input-row">
             <NInput
               v-model:value="inputText"
               type="textarea"
@@ -256,7 +255,7 @@ onMounted(loadSession)
                 <NIcon :component="SendOutline" />
               </template>
             </NButton>
-          </NInputGroup>
+          </div>
         </div>
       </template>
     </NSpin>
@@ -357,6 +356,28 @@ onMounted(loadSession)
   padding: 14px 16px;
   border-top: 1px solid var(--n-border-color);
   flex-shrink: 0;
+  min-width: 0;
+}
+
+.input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.input-row :deep(.n-input) {
+  flex: 1;
+  min-width: 0;
+}
+
+.input-row :deep(.n-button) {
+  flex: 0 0 auto;
+}
+
+.input-row :deep(.n-input-wrapper) {
+  min-width: 0;
 }
 
 .empty-state {

@@ -417,16 +417,21 @@ onBeforeUnmount(() => {
 <style scoped>
 .st-chat {
   height: 100%;
+  min-height: 0;
+  min-width: 0;
   display: flex;
   background: var(--n-color);
+  overflow: hidden;
 }
 
 /* Main */
 .chat-main {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .chat-empty {
@@ -529,6 +534,7 @@ onBeforeUnmount(() => {
   padding: 12px 14px;
   border-top: 1px solid var(--n-border-color);
   flex-shrink: 0;
+  min-width: 0;
 }
 
 .pending-atts {
@@ -579,10 +585,21 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 8px;
   align-items: flex-end;
+  min-width: 0;
+  overflow: hidden;
 }
 
-.input-row .n-input {
+.input-row :deep(.n-input) {
   flex: 1;
+  min-width: 0;
+}
+
+.input-row :deep(.n-button) {
+  flex: 0 0 auto;
+}
+
+.input-row :deep(.n-input-wrapper) {
+  min-width: 0;
 }
 
 .message-edit-modal {

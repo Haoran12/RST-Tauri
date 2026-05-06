@@ -4,6 +4,8 @@ import { resolve } from 'path'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Use relative paths for Tauri WebView compatibility
+  base: './',
   plugins: [vue()],
   resolve: {
     alias: {
@@ -20,8 +22,13 @@ export default defineConfig({
     target: 'esnext',
     minify: !process.env.TAURI_DEBUG ? 'esbuild' : false,
     sourcemap: !!process.env.TAURI_DEBUG,
+    // Use relative paths for Tauri WebView compatibility
+    cssCodeSplit: true,
     rollupOptions: {
       output: {
+        assetFileNames: 'assets/[name]-[hash].[ext]',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        entryFileNames: 'assets/[name]-[hash].js',
         manualChunks(id) {
           if (!id.includes('node_modules')) {
             return
