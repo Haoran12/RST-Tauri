@@ -21,7 +21,7 @@ import {
 } from 'naive-ui'
 import { computed, ref, watch, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { SearchOutline, AddOutline, TrashOutline, SettingsOutline, ReorderFourOutline, EllipsisHorizontalOutline, SwapHorizontalOutline, PinSharp } from '@vicons/ionicons5'
+import { SearchOutline, AddOutline, TrashOutline, SettingsOutline, ReorderFourOutline, EllipsisHorizontalOutline, SwapHorizontalOutline } from '@vicons/ionicons5'
 import { useAppShellStore } from '@/stores/appShell'
 import { useCharactersStore } from '@/stores/characters'
 import { useChatStore } from '@/stores/chat'
@@ -966,13 +966,6 @@ watch(() => route.name, async (newName) => {
                 <div class="entry-info" @click="selectPromptItem(item.identifier)">
                   <div class="entry-header">
                     <span class="entry-name">{{ item.name }}</span>
-                    <NIcon
-                      v-if="isFixedPromptItem(item.identifier)"
-                      :size="14"
-                      class="builtin-icon"
-                    >
-                      <PinSharp />
-                    </NIcon>
                   </div>
                 </div>
 
@@ -1369,11 +1362,6 @@ watch(() => route.name, async (newName) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.builtin-icon {
-  flex-shrink: 0;
-  color: var(--color-primary, #18a058);
 }
 
 .entry-meta {
