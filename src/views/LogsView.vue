@@ -516,12 +516,17 @@ onMounted(refreshAll)
                     >
                       {{ record.status || record.level }}
                     </NTag>
-                    <NTag v-if="record.protected === true" size="small" type="success">
+                    <NButton
+                      v-if="record.record_ref.record_kind === 'llm' || record.record_ref.record_kind === 'event'"
+                      size="tiny"
+                      :type="record.protected ? 'success' : 'default'"
+                      :loading="isTogglingProtection"
+                      @click.stop="toggleProtection(record)"
+                    >
                       <template #icon>
-                        <NIcon :component="LockClosedOutline" />
+                        <NIcon :component="record.protected ? LockClosedOutline : LockOpenOutline" />
                       </template>
-                      已保护
-                    </NTag>
+                    </NButton>
                   </div>
                 </div>
                 <div class="record-summary">{{ record.summary || primaryContext(record) }}</div>
@@ -531,19 +536,6 @@ onMounted(refreshAll)
                   <span v-if="record.latency_ms">{{ record.latency_ms }}ms</span>
                   <span v-if="record.stream_chunk_count">{{ record.stream_chunk_count }} chunks</span>
                   <span v-if="record.step_count">{{ record.step_count }} steps</span>
-                </div>
-                <div v-if="record.record_ref.record_kind === 'llm' || record.record_ref.record_kind === 'event'" class="record-actions">
-                  <NButton
-                    size="tiny"
-                    :type="record.protected ? 'success' : 'default'"
-                    :loading="isTogglingProtection"
-                    @click.stop="toggleProtection(record)"
-                  >
-                    <template #icon>
-                      <NIcon :component="record.protected ? LockClosedOutline : LockOpenOutline" />
-                    </template>
-                    {{ record.protected ? '取消保护' : '保护' }}
-                  </NButton>
                 </div>
               </button>
             </div>
@@ -966,12 +958,6 @@ onMounted(refreshAll)
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
-}
-
-.record-actions {
-  margin-top: 8px;
-  display: flex;
-  gap: 6px;
 }
 
 .empty-area {
