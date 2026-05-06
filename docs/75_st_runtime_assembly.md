@@ -68,7 +68,7 @@ interface SessionData {
 
   // 不存储 API 配置或预设引用。
   // API 配置和预设由全局状态管理，用户随时可切换。
-  // chat_metadata.enabled_world_info / world_info 是会话自己的世界书绑定，不随 API 配置切换。
+  // character_id 与 chat_metadata.enabled_world_info / world_info 是会话自己的资源绑定，不随 API 配置切换。
 }
 
 type ChatMessagePart =
@@ -129,7 +129,7 @@ interface STChatMetadata {
        ↓
 ┌──────────────────────────────────────┐
 │ 3. 加载会话内容                       │
-│    - 角色卡 → 角色信息                │
+│    - session.character_id → 角色卡 → 角色信息 │
 │    - chat_metadata.enabled_world_info / world_info → Chat lore │
 │    - 角色卡 extensions.world → Character lore │
 │    - world_info.globalSelect → Global lore │

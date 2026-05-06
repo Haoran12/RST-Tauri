@@ -44,6 +44,7 @@ const worldbooksStore = useWorldbooksStore()
 const searchQuery = ref('')
 const editingStSessionId = ref<string | null>(null)
 const editSessionName = ref('')
+const editSessionCharacterId = ref<string | null>(null)
 const editSessionWorldbooks = ref<string[]>([])
 const editPersonaName = ref('')
 const editPersonaDescription = ref('')
@@ -82,6 +83,13 @@ const worldbookOptions = computed(() => {
   return worldbooksStore.worldbookList.map((wb) => ({
     label: wb.name || '未命名世界书',
     value: wb.id,
+  }))
+})
+
+const characterOptions = computed(() => {
+  return charactersStore.characters.map((item) => ({
+    label: item.character.data.name || '未命名角色',
+    value: item.id,
   }))
 })
 
@@ -277,6 +285,7 @@ function openSessionSettings(session: ChatSession) {
   const metadata = session.chat_metadata ?? {}
   editingStSessionId.value = session.id
   editSessionName.value = session.name || '未命名会话'
+  editSessionCharacterId.value = session.character_id ?? null
   editSessionWorldbooks.value = metadata.enabled_world_info ?? (metadata.world_info ? [metadata.world_info] : [])
   editPersonaName.value = metadata.user_persona?.name ?? ''
   editPersonaDescription.value = metadata.user_persona?.description ?? ''
@@ -288,6 +297,7 @@ async function saveSessionSettings() {
   try {
     await chatStore.updateSessionSettings(editingStSessionId.value, {
       name: editSessionName.value,
+      character_id: editSessionCharacterId.value,
       enabled_world_info: editSessionWorldbooks.value,
       user_persona: {
         name: editPersonaName.value,
@@ -626,6 +636,7 @@ watch(() => route.name, async (newName) => {
     await Promise.all([
       chatStore.loadSessions(),
       worldbooksStore.loadWorldbooks(),
+      charactersStore.loadCharacters(),
     ])
   } else if (newName === 'resources-characters') {
     await charactersStore.loadCharacters()
@@ -713,7 +724,7 @@ watch(currentWorldId, async (worldId) => {
             <template #icon>
               <NIcon><AddOutline /></NIcon>
             </template>
-            新建
+            添加
           </NButton>
         </div>
 
@@ -1036,6 +1047,15 @@ watch(currentWorldId, async (worldId) => {
       <NForm label-placement="top">
         <NFormItem label="会话名称">
           <NInput v-model:value="editSessionName" placeholder="会话名称" />
+        </NFormItem>
+        <NFormItem label="绑定角色卡">
+          <NSelect
+            v-model:value="editSessionCharacterId"
+            :options="characterOptions"
+            filterable
+            clearable
+            placeholder="选择角色卡"
+          />
         </NFormItem>
         <NFormItem label="选用的世界书">
           <NSelect

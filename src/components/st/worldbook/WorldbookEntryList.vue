@@ -123,7 +123,7 @@ function deleteEntry(uid: number, event: Event) {
     <div class="entry-list-header">
       <NText depth="3">条目数: {{ entries.length }}</NText>
       <NButton size="small" type="primary" @click="createEntry">
-        + 新建条目
+        + 添加条目
       </NButton>
     </div>
 

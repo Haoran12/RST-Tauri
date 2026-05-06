@@ -344,6 +344,7 @@ export const useChatStore = defineStore('chat', () => {
     id: string,
     settings: {
       name: string
+      character_id: string | null
       enabled_world_info: string[]
       user_persona: STUserPersona
     }
@@ -356,6 +357,7 @@ export const useChatStore = defineStore('chat', () => {
       const enabledWorldInfo = Array.from(new Set(settings.enabled_world_info))
 
       session.name = settings.name.trim() || '未命名会话'
+      session.character_id = settings.character_id ?? undefined
       session.chat_metadata = {
         ...metadata,
         world_info: enabledWorldInfo[0] ?? null,
@@ -375,6 +377,9 @@ export const useChatStore = defineStore('chat', () => {
       }
       if (currentSession.value?.id === id) {
         currentSession.value = session
+        currentCharacter.value = session.character_id
+          ? await storage.getCharacter(session.character_id)
+          : null
       }
     } catch (e) {
       error.value = String(e)
