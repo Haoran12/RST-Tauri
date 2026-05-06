@@ -94,6 +94,18 @@ onBeforeUnmount(() => {
   void persistCurrentCharacter({ silent: true, closeAfterSave: false })
 })
 
+/**
+ * 安全深拷贝，处理 structuredClone 无法克隆的对象
+ * 使用 JSON 序列化/反序列化作为 fallback
+ */
+function safeDeepClone<T>(obj: T): T {
+  try {
+    return structuredClone(obj)
+  } catch {
+    return JSON.parse(JSON.stringify(obj))
+  }
+}
+
 async function loadCharacterForEditor() {
   isLoading.value = true
   loadError.value = null
@@ -101,7 +113,7 @@ async function loadCharacterForEditor() {
   try {
     const character = await getCharacter(props.characterId)
     store.currentCharacter = character
-    form.value = structuredClone(character)
+    form.value = safeDeepClone(character)
     avatarUrl.value = await store.getAvatarUrl(props.characterId)
     textModes.value = Object.fromEntries(
       textFieldConfigs.map(field => [field.key, 'plain' as StructuredTextLanguageId]),
@@ -198,7 +210,7 @@ async function persistCurrentCharacter(options: {
       return
     }
 
-    const character = structuredClone(form.value)
+    const character = safeDeepClone(form.value)
     store.currentCharacter = character
     syncCharacterListItem(id, character)
     await saveCharacter(id, character)
