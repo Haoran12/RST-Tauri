@@ -137,22 +137,22 @@ function deleteEntry(uid: number, event: Event) {
       >
         <div class="entry-badges">
           <NBadge v-if="entry.disable" :value="''" type="error">
-            <NIcon :size="16" color="#999">
+            <NIcon :size="16" class="icon-disabled">
               <EyeOffOutline />
             </NIcon>
           </NBadge>
           <NBadge v-else-if="entry.constant" :value="''" type="success">
-            <NIcon :size="16" color="#63e2b7">
+            <NIcon :size="16" class="icon-success">
               <PinOutline />
             </NIcon>
           </NBadge>
           <NBadge v-else-if="entry.vectorized" :value="''" type="info">
-            <NIcon :size="16" color="#70c0e8">
+            <NIcon :size="16" class="icon-info">
               <SearchOutline />
             </NIcon>
           </NBadge>
           <NBadge v-else-if="(entry.probability ?? 100) < 100" :value="''" type="warning">
-            <NIcon :size="16" color="#f2c97d">
+            <NIcon :size="16" class="icon-warning">
               <FlashOutline />
             </NIcon>
           </NBadge>
@@ -192,7 +192,7 @@ function deleteEntry(uid: number, event: Event) {
             @click="(e: Event) => deleteEntry(uid, e)"
           >
             <template #icon>
-              <NIcon :size="16" color="#d03050">
+              <NIcon :size="16" class="icon-error">
                 <TrashOutline />
               </NIcon>
             </template>
@@ -264,7 +264,7 @@ function deleteEntry(uid: number, event: Event) {
 }
 
 .entry-item:hover {
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: var(--n-color-hover);
 }
 
 .entry-selected {
@@ -316,5 +316,25 @@ function deleteEntry(uid: number, event: Event) {
 
 .entry-item:hover .entry-actions {
   opacity: 1;
+}
+
+.icon-disabled {
+  color: var(--n-text-color-disabled);
+}
+
+.icon-success {
+  color: var(--n-success-color);
+}
+
+.icon-info {
+  color: var(--n-info-color);
+}
+
+.icon-warning {
+  color: var(--n-warning-color);
+}
+
+.icon-error {
+  color: var(--n-error-color);
 }
 </style>

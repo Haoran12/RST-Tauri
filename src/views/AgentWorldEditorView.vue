@@ -449,8 +449,9 @@ pre {
   overflow: auto;
   margin: 0;
   padding: 12px;
-  background: #101828;
-  color: #e6edf3;
+  background: var(--n-color-modal);
+  color: var(--n-text-color);
+  border: 1px solid var(--n-border-color);
   border-radius: 6px;
   font-size: 12px;
   line-height: 1.45;

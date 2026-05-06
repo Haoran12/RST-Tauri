@@ -53,7 +53,7 @@
   place-items: center;
   font-weight: 700;
   color: #fff;
-  background: #18a058;
+  background: var(--n-success-color, #18a058);
 }
 
 .startup-nav-dot {

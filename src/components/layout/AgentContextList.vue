@@ -192,7 +192,7 @@ watch(currentWorldId, async (worldId) => {
 }
 
 .context-item:hover {
-  background-color: rgba(0, 0, 0, 0.04);
+  background-color: var(--n-color-hover);
 }
 
 .context-item-row {

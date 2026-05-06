@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import { NConfigProvider, NMessageProvider, NDialogProvider, darkTheme, lightTheme } from 'naive-ui'
-import { computed, watch } from 'vue'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAppShellStore } from '@/stores/appShell'
 import AppLayout from '@/components/layout/AppLayout.vue'
 
 const appShell = useAppShellStore()
+
+// 检测系统主题偏好
+function getSystemPrefersDark(): boolean {
+  return window.matchMedia('(prefers-color-scheme: dark)').matches
+}
 
 const theme = computed(() => {
   if (appShell.theme === 'dark') {
@@ -13,21 +18,52 @@ const theme = computed(() => {
   if (appShell.theme === 'light') {
     return lightTheme
   }
-  return lightTheme
+  // system: 检测系统偏好
+  return getSystemPrefersDark() ? darkTheme : lightTheme
+})
+
+// 更新 HTML class
+function updateHtmlClass() {
+  const html = document.documentElement
+  const themeValue = appShell.theme
+  html.classList.remove('dark', 'light')
+  if (themeValue === 'dark') {
+    html.classList.add('dark')
+  } else if (themeValue === 'light') {
+    html.classList.add('light')
+  } else {
+    // system: 根据系统偏好设置 class
+    if (getSystemPrefersDark()) {
+      html.classList.add('dark')
+    }
+  }
+}
+
+// 监听系统主题变化
+let mediaQuery: MediaQueryList | null = null
+function handleSystemThemeChange() {
+  if (appShell.theme === 'system') {
+    updateHtmlClass()
+  }
+}
+
+onMounted(() => {
+  updateHtmlClass()
+  mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+  mediaQuery.addEventListener('change', handleSystemThemeChange)
+})
+
+onUnmounted(() => {
+  if (mediaQuery) {
+    mediaQuery.removeEventListener('change', handleSystemThemeChange)
+  }
 })
 
 watch(
   () => appShell.theme,
-  (themeValue) => {
-    const html = document.documentElement
-    html.classList.remove('dark', 'light')
-    if (themeValue === 'dark') {
-      html.classList.add('dark')
-    } else if (themeValue === 'light') {
-      html.classList.add('light')
-    }
-  },
-  { immediate: true }
+  () => {
+    updateHtmlClass()
+  }
 )
 
 watch(

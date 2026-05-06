@@ -1238,7 +1238,7 @@ onMounted(async () => {
 }
 
 .context-item:hover {
-  background-color: rgba(0, 0, 0, 0.04);
+  background-color: var(--n-color-hover);
 }
 
 .context-item-active {
@@ -1318,7 +1318,7 @@ onMounted(async () => {
 }
 
 .entry-item:hover {
-  background-color: rgba(0, 0, 0, 0.04);
+  background-color: var(--n-color-hover);
 }
 
 .entry-item-dragging {
