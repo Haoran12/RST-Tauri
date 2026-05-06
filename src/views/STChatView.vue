@@ -275,6 +275,14 @@ onMounted(async () => {
 
 watch(() => route.params.sessionId, syncRouteSession)
 watch(() => chatStore.currentSession?.id, scrollToBottom)
+watch(
+  () => [
+    chatStore.messages.length,
+    chatStore.messages[chatStore.messages.length - 1]?.content ?? '',
+    chatStore.streamingContent,
+  ],
+  scrollToBottom
+)
 
 watch(
   () => [

@@ -251,6 +251,14 @@ export const useChatStore = defineStore('chat', () => {
       }
       messages.value.push(assistantMessage)
 
+      let accumulatedContent = ''
+      let resolveStream: () => void = () => {}
+      let rejectStream: (error: Error) => void = () => {}
+      const streamDone = new Promise<void>((resolve, reject) => {
+        resolveStream = resolve
+        rejectStream = reject
+      })
+
       // Start streaming
       currentStreamController = await startSTChatStream(
         {
@@ -268,9 +276,15 @@ export const useChatStore = defineStore('chat', () => {
             // Stream started, we already have the placeholder
           },
           onChunk: (event) => {
-            // Update streaming content incrementally
-            assistantMessage.content += event.delta
-            streamingContent.value = assistantMessage.content
+            accumulatedContent += event.delta
+            streamingContent.value = accumulatedContent
+            const index = messages.value.findIndex(msg => msg.id === assistantMessage.id)
+            if (index !== -1) {
+              messages.value[index] = {
+                ...messages.value[index],
+                content: accumulatedContent,
+              }
+            }
           },
           onError: (event) => {
             error.value = event.error
@@ -278,20 +292,24 @@ export const useChatStore = defineStore('chat', () => {
             if (messages.value[messages.value.length - 1]?.id === assistantMessage.id) {
               messages.value.pop()
             }
+            rejectStream(new Error(event.error))
           },
           onEnd: async () => {
-            // Stream ended, save the session
             currentStreamController = null
-            await saveCurrentSession()
+            resolveStream()
           },
         }
       )
+
+      await streamDone
+      await saveCurrentSession()
     } catch (e) {
       error.value = String(e)
       // Keep the user message persisted; only remove the assistant placeholder.
       if (messages.value[messages.value.length - 1]?.role === 'assistant') {
         messages.value.pop()
       }
+      currentStreamController = null
       await saveCurrentSession()
     } finally {
       isGenerating.value = false

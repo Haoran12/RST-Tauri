@@ -169,52 +169,56 @@ export async function startSTChatStream(
   let currentStreamId: string | null = null;
   let aborted = false;
 
-  // 监听开始事件
-  unlisteners.push(
-    await listen<StreamStartEvent>('st-stream-start', (event) => {
-      if (aborted) return;
-      currentStreamId = event.payload.stream_id;
-      callbacks.onStart?.(event.payload);
-    })
-  );
+  try {
+    // 监听开始事件
+    unlisteners.push(
+      await listen<StreamStartEvent>('st-stream-start', (event) => {
+        if (aborted) return;
+        currentStreamId = event.payload.stream_id;
+        callbacks.onStart?.(event.payload);
+      })
+    );
 
-  // 监听内容块事件
-  unlisteners.push(
-    await listen<StreamChunkEvent>('st-stream-chunk', (event) => {
-      if (aborted || event.payload.stream_id !== currentStreamId) return;
-      callbacks.onChunk?.(event.payload);
-    })
-  );
+    // 监听内容块事件
+    unlisteners.push(
+      await listen<StreamChunkEvent>('st-stream-chunk', (event) => {
+        if (aborted || event.payload.stream_id !== currentStreamId) return;
+        callbacks.onChunk?.(event.payload);
+      })
+    );
 
-  // 监听错误事件
-  unlisteners.push(
-    await listen<StreamErrorEvent>('st-stream-error', (event) => {
-      if (aborted || event.payload.stream_id !== currentStreamId) return;
-      callbacks.onError?.(event.payload);
-    })
-  );
+    // 监听错误事件
+    unlisteners.push(
+      await listen<StreamErrorEvent>('st-stream-error', (event) => {
+        if (aborted || event.payload.stream_id !== currentStreamId) return;
+        callbacks.onError?.(event.payload);
+      })
+    );
 
-  // 监听结束事件
-  unlisteners.push(
-    await listen<string>('st-stream-end', (streamId) => {
-      if (aborted || streamId.payload !== currentStreamId) return;
-      // 清理所有监听器
-      unlisteners.forEach((unlisten) => unlisten());
-      callbacks.onEnd?.(streamId.payload);
-    })
-  );
+    // 监听结束事件
+    unlisteners.push(
+      await listen<string>('st-stream-end', (streamId) => {
+        if (aborted || streamId.payload !== currentStreamId) return;
+        unlisteners.forEach((unlisten) => unlisten());
+        callbacks.onEnd?.(streamId.payload);
+      })
+    );
 
-  // 启动流
-  const streamId = await invoke<string>('start_st_chat_stream', { input });
+    // 启动流
+    const streamId = await invoke<string>('start_st_chat_stream', { input });
 
-  return {
-    streamId,
-    abort: () => {
-      aborted = true;
-      unlisteners.forEach((unlisten) => unlisten());
-      callbacks.onEnd?.(streamId);
-    },
-  };
+    return {
+      streamId,
+      abort: () => {
+        aborted = true;
+        unlisteners.forEach((unlisten) => unlisten());
+        callbacks.onEnd?.(streamId);
+      },
+    };
+  } catch (error) {
+    unlisteners.forEach((unlisten) => unlisten());
+    throw error;
+  }
 }
 
 /**
