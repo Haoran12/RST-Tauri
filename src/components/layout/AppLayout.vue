@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { NLayout, NLayoutSider, NLayoutContent } from 'naive-ui'
-import { computed, defineAsyncComponent } from 'vue'
-import { useRoute } from 'vue-router'
+import { NButton, NIcon, NLayout, NLayoutSider, NLayoutContent } from 'naive-ui'
+import { ChatbubbleOutline, AlbumsOutline } from '@vicons/ionicons5'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAppShellStore } from '@/stores/appShell'
+import { useChatStore } from '@/stores/chat'
 import AppNav from './AppNav.vue'
 import PanelLoading from './PanelLoading.vue'
 
 const route = useRoute()
+const router = useRouter()
 const appShell = useAppShellStore()
+const chatStore = useChatStore()
 const STContextList = defineAsyncComponent({
   loader: () => import('./ContextList.vue'),
   loadingComponent: PanelLoading,
@@ -45,11 +49,25 @@ const stWorkspaceRouteNames = new Set([
   'resources-regex',
 ])
 const sharedToolRouteNames = new Set(['api-configs', 'logs'])
-const isStSplitWorkspace = computed(() => {
+const isStTabbedWorkspace = computed(() => {
   const routeName = route.name as string
   return stWorkspaceRouteNames.has(routeName)
     || (appShell.currentMode === 'st' && sharedToolRouteNames.has(routeName))
 })
+const activeStTab = computed<'chat' | 'tools'>(() => isStChatRoute.value ? 'chat' : 'tools')
+const stToolLabel = computed(() => {
+  const labels: Record<string, string> = {
+    'st-home': 'ST 首页',
+    'resources-characters': '角色卡',
+    'resources-worldbooks': '世界书',
+    'resources-presets': '预设',
+    'resources-regex': 'Regex',
+    'api-configs': 'API 配置',
+    logs: '日志',
+  }
+  return labels[route.name as string] ?? '工具'
+})
+const lastStToolPath = ref('/st')
 
 const showContextList = computed(() => {
   const contextPages = [
@@ -70,6 +88,29 @@ const showInspectPanel = computed(() => {
   const inspectPages = ['st-chat', 'agent-worlds', 'agent-world-editor']
   return inspectPages.includes(route.name as string) && appShell.inspectPanelOpen
 })
+
+watch(
+  () => route.fullPath,
+  () => {
+    if (isStTabbedWorkspace.value && !isStChatRoute.value) {
+      lastStToolPath.value = route.fullPath
+    }
+  },
+  { immediate: true }
+)
+
+function openPinnedChat() {
+  const sessionId = chatStore.currentSession?.id
+  if (sessionId) {
+    router.push({ name: 'st-chat', params: { sessionId } })
+    return
+  }
+  router.push({ name: 'st-chat' })
+}
+
+function openStTools() {
+  router.push(lastStToolPath.value || '/st')
+}
 
 const contextSiderContentStyle = {
   height: '100%',
@@ -132,34 +173,55 @@ const mainContentStyle = {
         :content-style="mainContentStyle"
       >
         <div class="route-host">
-          <template v-if="isStSplitWorkspace">
-            <div class="st-split-workspace" :class="{ 'st-split-workspace-tools': !isStChatRoute }">
-              <section class="st-chat-pane" aria-label="ST 聊天">
-                <Suspense>
-                  <STPinnedChatView />
-                  <template #fallback>
-                    <PanelLoading />
-                  </template>
-                </Suspense>
-              </section>
+          <template v-if="isStTabbedWorkspace">
+            <div class="st-tabbed-workspace">
+              <div class="st-tabbar" role="tablist" aria-label="ST 工作区页签">
+                <NButton
+                  size="small"
+                  :type="activeStTab === 'chat' ? 'primary' : 'default'"
+                  @click="openPinnedChat"
+                >
+                  <template #icon><NIcon :component="ChatbubbleOutline" /></template>
+                  聊天
+                </NButton>
+                <NButton
+                  size="small"
+                  :type="activeStTab === 'tools' ? 'primary' : 'default'"
+                  @click="openStTools"
+                >
+                  <template #icon><NIcon :component="AlbumsOutline" /></template>
+                  {{ stToolLabel }}
+                </NButton>
+              </div>
 
-              <section v-if="!isStChatRoute" class="st-tool-pane" aria-label="ST 工具">
-                <router-view v-slot="{ Component }">
+              <div class="st-tab-panels">
+                <div v-show="activeStTab === 'chat'" class="st-tab-panel">
                   <Suspense>
-                    <component :is="Component" />
+                    <STPinnedChatView />
                     <template #fallback>
-                      <div class="route-loading">
-                        <div class="route-loading-header" />
-                        <div class="route-loading-grid">
-                          <div class="route-loading-card route-loading-card-wide" />
-                          <div class="route-loading-card" />
-                          <div class="route-loading-card" />
-                        </div>
-                      </div>
+                      <PanelLoading />
                     </template>
                   </Suspense>
-                </router-view>
-              </section>
+                </div>
+
+                <div v-show="activeStTab === 'tools'" class="st-tab-panel">
+                  <router-view v-if="!isStChatRoute" v-slot="{ Component }">
+                    <Suspense>
+                      <component :is="Component" />
+                      <template #fallback>
+                        <div class="route-loading">
+                          <div class="route-loading-header" />
+                          <div class="route-loading-grid">
+                            <div class="route-loading-card route-loading-card-wide" />
+                            <div class="route-loading-card" />
+                            <div class="route-loading-card" />
+                          </div>
+                        </div>
+                      </template>
+                    </Suspense>
+                  </router-view>
+                </div>
+              </div>
             </div>
           </template>
 
@@ -261,7 +323,7 @@ const mainContentStyle = {
   min-height: 0;
 }
 
-.st-split-workspace {
+.st-tabbed-workspace {
   flex: 1 1 0;
   width: 100%;
   height: 100%;
@@ -272,32 +334,31 @@ const mainContentStyle = {
   overflow: hidden;
 }
 
-.st-split-workspace-tools {
-  flex-direction: row;
+.st-tabbar {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--color-border-subtle, #e0e0e6);
+  background: var(--color-bg-surface, #fff);
 }
 
-.st-chat-pane,
-.st-tool-pane {
+.st-tabbar :deep(.n-button) {
+  max-width: 180px;
+}
+
+.st-tab-panels,
+.st-tab-panel {
+  flex: 1 1 0;
+  width: 100%;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-.st-chat-pane {
-  flex: 1 1 0;
-}
-
-.st-split-workspace-tools .st-chat-pane {
-  flex: 0 1 42%;
-  min-width: 360px;
-  border-right: 1px solid var(--color-border-subtle, #e0e0e6);
-}
-
-.st-tool-pane {
-  flex: 1 1 58%;
-  background: var(--color-bg-app, #f0f2f5);
 }
 
 .route-loading {
@@ -352,23 +413,5 @@ const mainContentStyle = {
   flex-shrink: 0;
   min-height: 0;
   background-color: var(--color-bg-surface, #f5f7fa);
-}
-
-@media (max-width: 1180px) {
-  .st-split-workspace-tools {
-    flex-direction: column;
-  }
-
-  .st-split-workspace-tools .st-chat-pane {
-    flex: 0 0 44%;
-    min-width: 0;
-    min-height: 280px;
-    border-right: 0;
-    border-bottom: 1px solid var(--color-border-subtle, #e0e0e6);
-  }
-
-  .st-tool-pane {
-    flex: 1 1 56%;
-  }
 }
 </style>
