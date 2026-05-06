@@ -68,16 +68,17 @@ fn get_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 /// Build request URL for logging based on provider type
 fn build_request_url(api_config: &ApiConfig) -> Option<String> {
-    let base_url = api_config.base_url.clone().unwrap_or_else(|| {
-        match api_config.provider.as_str() {
+    let base_url = match api_config.base_url.clone() {
+        Some(url) => url,
+        None => match api_config.provider.as_str() {
             "openai_chat" | "openai_responses" => "https://api.openai.com/v1".to_string(),
             "anthropic" => "https://api.anthropic.com/v1".to_string(),
             "gemini" => "https://generativelanguage.googleapis.com/v1beta".to_string(),
             "deepseek" => "https://api.deepseek.com".to_string(),
             "claude_code" => "http://localhost:8080".to_string(),
             _ => return None,
-        }
-    });
+        },
+    };
 
     let endpoint = match api_config.provider.as_str() {
         "openai_chat" => "/chat/completions",
