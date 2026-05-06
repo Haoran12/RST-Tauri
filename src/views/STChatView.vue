@@ -247,8 +247,12 @@ function routeSessionId() {
 async function syncRouteSession() {
   const id = routeSessionId()
   if (!id || chatStore.currentSession?.id === id) return
-  await chatStore.loadSession(id)
-  scrollToBottom()
+  try {
+    await chatStore.loadSession(id)
+    scrollToBottom()
+  } catch (e) {
+    console.error('Failed to load session:', e)
+  }
 }
 
 onMounted(async () => {
@@ -262,6 +266,8 @@ onMounted(async () => {
     ])
     settingsStore.setActiveApiConfig(runtimeStore.activeApiConfigId)
     await syncRouteSession()
+  } catch (e) {
+    console.error('Failed to load ST chat:', e)
   } finally {
     isInitialLoading.value = false
   }

@@ -248,11 +248,15 @@ async function togglePromptEnabled(identifier: string, enabled: boolean) {
 onMounted(async () => {
   window.addEventListener('open-preset-create', openCreateModal)
   window.addEventListener('edit-prompt-item', handleEditPromptItem as EventListener)
-  await Promise.all([store.loadPresetList(), runtimeStore.loadGlobalState()])
-  if (!store.currentPreset && store.presetList[0]) {
-    const activeName = runtimeStore.globalState.active_preset
-    const preferred = store.presetList.find((preset) => preset.name === activeName)
-    await store.loadPreset((preferred ?? store.presetList[0]).name)
+  try {
+    await Promise.all([store.loadPresetList(), runtimeStore.loadGlobalState()])
+    if (!store.currentPreset && store.presetList[0]) {
+      const activeName = runtimeStore.globalState.active_preset
+      const preferred = store.presetList.find((preset) => preset.name === activeName)
+      await store.loadPreset((preferred ?? store.presetList[0]).name)
+    }
+  } catch (e) {
+    console.error('Failed to load presets:', e)
   }
 })
 

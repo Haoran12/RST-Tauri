@@ -23,7 +23,11 @@ const showImportModal = ref(false)
 
 onMounted(async () => {
   window.addEventListener('open-character-import', openImportModal)
-  await store.loadCharacters()
+  try {
+    await store.loadCharacters()
+  } catch (e) {
+    console.error('Failed to load characters:', e)
+  }
 })
 
 onBeforeUnmount(() => {
