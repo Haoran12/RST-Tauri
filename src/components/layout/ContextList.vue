@@ -305,8 +305,6 @@ async function saveSessionSettings() {
 const isCurrentSessionBusy = computed(() => {
   // LLM 正在生成
   if (chatStore.isGenerating) return true
-  // 正在编辑会话设置
-  if (editingStSessionId.value) return true
   // TODO: 添加其他未完成操作的判断
   // - 正则解析中
   // - 日志记录中
