@@ -499,7 +499,7 @@ async function togglePromptEnabled(identifier: string, enabled: boolean) {
   if (!presetsStore.currentPreset) return
   const preset = presetsStore.currentPreset
   if (!preset.prompt_order || preset.prompt_order.length === 0) {
-    preset.prompt_order = [{ order: [] }]
+    preset.prompt_order = [{ character_id: 100000, order: [] }]
   }
   const order = preset.prompt_order[0].order || []
   const existingIndex = order.findIndex((o) => o.identifier === identifier)
@@ -638,17 +638,20 @@ async function onDrop(event: DragEvent, targetItem: PromptItem) {
   })
 
   // 更新所有 prompt_order 条目（保持一致性）
-  preset.prompt_order = preset.prompt_order.map((orderEntry) => ({
-    ...orderEntry,
-    order: newOrder.map((item) => {
-      // 保留原有的 enabled 状态
-      const existing = orderEntry.order?.find((o) => o.identifier === item.identifier)
-      return {
-        identifier: item.identifier,
-        enabled: existing?.enabled ?? true,
-      }
-    }),
-  }))
+  preset.prompt_order = preset.prompt_order.map((orderEntry) => {
+    const existingOrder = orderEntry.order ?? []
+    return {
+      ...orderEntry,
+      order: newOrder.map((item) => {
+        // 保留原有的 enabled 状态
+        const existing = existingOrder.find((o) => o.identifier === item.identifier)
+        return {
+          identifier: item.identifier,
+          enabled: existing?.enabled ?? true,
+        }
+      }),
+    }
+  })
 
   await presetsStore.savePreset(preset)
 
