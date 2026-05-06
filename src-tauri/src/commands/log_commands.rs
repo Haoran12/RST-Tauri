@@ -708,15 +708,35 @@ async fn query_llm_summaries(
     filter: &LogRecordFilter,
     limit: i64,
 ) -> Result<Vec<LogRecordSummary>, String> {
-    let mut builder: QueryBuilder<Sqlite> = QueryBuilder::new(
+    use sqlx::Row;
+
+    // Check if 'protected' column exists
+    let has_protected = sqlx::query(
+        "SELECT COUNT(*) AS count FROM pragma_table_info('llm_call_logs') WHERE name = 'protected'",
+    )
+    .fetch_one(pool)
+    .await
+    .map(|row| row.get::<i64, _>("count") > 0)
+    .unwrap_or(false);
+
+    let protected_select = if has_protected {
+        "protected"
+    } else {
+        "0 AS protected"
+    };
+
+    let sql = format!(
         r#"
         SELECT request_id, mode, world_id, session_id, scene_turn_id, trace_id,
                character_id, llm_node, provider, model, call_type, status,
-               latency_ms, token_usage, error_summary, created_at, protected,
+               latency_ms, token_usage, error_summary, created_at, {},
                (SELECT COUNT(*) FROM llm_stream_chunks c WHERE c.request_id = l.request_id) AS stream_chunk_count
         FROM llm_call_logs l
         "#,
+        protected_select
     );
+
+    let mut builder: QueryBuilder<Sqlite> = QueryBuilder::new(sql);
     append_llm_where(&mut builder, filter);
     builder.push(" ORDER BY created_at DESC LIMIT ");
     builder.push_bind(limit);
@@ -772,13 +792,33 @@ async fn query_event_summaries(
     filter: &LogRecordFilter,
     limit: i64,
 ) -> Result<Vec<LogRecordSummary>, String> {
-    let mut builder: QueryBuilder<Sqlite> = QueryBuilder::new(
+    use sqlx::Row;
+
+    // Check if 'protected' column exists
+    let has_protected = sqlx::query(
+        "SELECT COUNT(*) AS count FROM pragma_table_info('app_event_logs') WHERE name = 'protected'",
+    )
+    .fetch_one(pool)
+    .await
+    .map(|row| row.get::<i64, _>("count") > 0)
+    .unwrap_or(false);
+
+    let protected_select = if has_protected {
+        "protected"
+    } else {
+        "0 AS protected"
+    };
+
+    let sql = format!(
         r#"
         SELECT event_id, level, event_type, message, source_module, request_id,
-               world_id, session_id, scene_turn_id, trace_id, character_id, created_at, protected
+               world_id, session_id, scene_turn_id, trace_id, character_id, created_at, {}
         FROM app_event_logs e
         "#,
+        protected_select
     );
+
+    let mut builder: QueryBuilder<Sqlite> = QueryBuilder::new(sql);
     append_event_where(&mut builder, filter);
     builder.push(" ORDER BY created_at DESC LIMIT ");
     builder.push_bind(limit);
