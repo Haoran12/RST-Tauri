@@ -166,8 +166,12 @@ async function hydrate() {
   )
 }
 
-onMounted(() => {
-  void hydrate()
+onMounted(async () => {
+  try {
+    await hydrate()
+  } catch (e) {
+    console.error('Failed to hydrate library:', e)
+  }
 })
 </script>
 

@@ -19,7 +19,7 @@ import {
   useMessage,
   useDialog,
 } from 'naive-ui'
-import { computed, ref, watch, onMounted, h } from 'vue'
+import { computed, ref, watch, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { SearchOutline, AddOutline, TrashOutline, SettingsOutline, ReorderFourOutline, EllipsisHorizontalOutline, SwapHorizontalOutline } from '@vicons/ionicons5'
 import { useAppShellStore } from '@/stores/appShell'
@@ -703,12 +703,6 @@ watch(() => route.name, async (newName) => {
     }
   }
 }, { immediate: true })
-
-onMounted(async () => {
-  if (isWorldbooksPage.value) {
-    await worldbooksStore.loadWorldbooks()
-  }
-})
 </script>
 
 <template>

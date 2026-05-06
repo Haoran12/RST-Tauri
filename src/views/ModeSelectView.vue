@@ -64,8 +64,12 @@ function enterMode(mode: AppMode) {
   router.push(target)
 }
 
-onMounted(() => {
-  void hydrate()
+onMounted(async () => {
+  try {
+    await hydrate()
+  } catch (e) {
+    console.error('Failed to hydrate mode select:', e)
+  }
 })
 </script>
 

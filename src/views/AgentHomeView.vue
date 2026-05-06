@@ -125,8 +125,12 @@ function formatTime(value: string | null | undefined) {
   return date.toLocaleString()
 }
 
-onMounted(() => {
-  void hydrate()
+onMounted(async () => {
+  try {
+    await hydrate()
+  } catch (e) {
+    console.error('Failed to hydrate agent home:', e)
+  }
 })
 </script>
 

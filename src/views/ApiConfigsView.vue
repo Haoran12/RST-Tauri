@@ -405,8 +405,12 @@ watch(
   },
 )
 
-onMounted(() => {
-  void hydrate()
+onMounted(async () => {
+  try {
+    await hydrate()
+  } catch (e) {
+    console.error('Failed to hydrate API configs:', e)
+  }
 })
 </script>
 
