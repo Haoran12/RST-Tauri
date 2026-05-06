@@ -256,6 +256,7 @@
 
 | 日期 | 更新内容 |
 |------|----------|
+| 2026-05-06 | 继续修复生产构建页面布局异常：App Shell 新增 `route-host` 统一承载路由页面，补齐 `NLayout` / `NLayoutContent` 宽度与 flex 链路，并增加低优先级 Naive UI 按钮 / 卡片 / 输入控件结构兜底，避免内容区和按钮在 build 产物中按内容收缩 |
 | 2026-05-06 | 修复 Tauri 生产构建导航与聊天输入布局：Vite build 明确 `base: './'`，左侧主导航改为固定尺寸图标按钮 + absolute hover tooltip，ST / Agent 聊天输入改为稳定 flex composer，并补齐根节点与滚动链路的 `min-width` / `min-height` / `overflow` 约束 |
 | 2026-05-06 | 修复打包安装后资源工作台布局 / 图标尺寸异常：主导航默认进入折叠图标栏状态，并为 Naive UI `NIcon` / `BaseIcon` 增加静态 SVG 尺寸兜底，避免生产 WebView 启动阶段图标按 512 viewBox 撑开布局 |
 | 2026-05-06 | 改造 ST / Agent 通用聊天消息展示：新增共享气泡组件，恢复 User/Assistant/System 全角色逐条渲染；支持安全 Markdown 子集、楼层/日期/时间/估算 token 元数据、单条删除/修改/复制；新增气泡颜色透明度与 Markdown 段落/标题/斜体/粗体/双引号内容字体样式配置 |

@@ -56,6 +56,13 @@ html.dark {
   padding: 0;
 }
 
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
 /* Naive UI injects icon sizing at runtime. Keep a static fallback for
    production WebView startup so SVG icons never expand to their viewBox size. */
 .n-icon,
@@ -75,6 +82,50 @@ html.dark {
   width: 1em;
   height: 1em;
   flex-shrink: 0;
+}
+
+/* Low-specificity structural fallbacks for Naive UI controls. These keep
+   production WebView layout stable even before runtime CSS variables/styles
+   finish mounting, while normal Naive UI selectors still override them. */
+:where(.n-button) {
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+:where(.n-button--block) {
+  width: 100%;
+}
+
+:where(.n-button__content) {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:where(.n-button__icon) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+:where(.n-card),
+:where(.n-form),
+:where(.n-input),
+:where(.n-tabs),
+:where(.n-data-table) {
+  max-width: 100%;
+  min-width: 0;
 }
 
 html,

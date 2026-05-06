@@ -34,7 +34,9 @@ const showInspectPanel = computed(() => {
 
 const contextSiderContentStyle = {
   height: '100%',
+  width: '100%',
   minHeight: '0',
+  minWidth: '0',
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden',
@@ -42,13 +44,18 @@ const contextSiderContentStyle = {
 
 const mainLayoutContentStyle = {
   height: '100%',
+  width: '100%',
   minHeight: '0',
+  minWidth: '0',
+  display: 'flex',
   overflow: 'hidden',
 } as const
 
 const mainContentStyle = {
   height: '100%',
+  width: '100%',
   minHeight: '0',
+  minWidth: '0',
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden',
@@ -85,21 +92,23 @@ const mainContentStyle = {
         :native-scrollbar="true"
         :content-style="mainContentStyle"
       >
-        <router-view v-slot="{ Component }">
-          <Suspense>
-            <component :is="Component" />
-            <template #fallback>
-              <div class="route-loading">
-                <div class="route-loading-header" />
-                <div class="route-loading-grid">
-                  <div class="route-loading-card route-loading-card-wide" />
-                  <div class="route-loading-card" />
-                  <div class="route-loading-card" />
+        <div class="route-host">
+          <router-view v-slot="{ Component }">
+            <Suspense>
+              <component :is="Component" />
+              <template #fallback>
+                <div class="route-loading">
+                  <div class="route-loading-header" />
+                  <div class="route-loading-grid">
+                    <div class="route-loading-card route-loading-card-wide" />
+                    <div class="route-loading-card" />
+                    <div class="route-loading-card" />
+                  </div>
                 </div>
-              </div>
-            </template>
-          </Suspense>
-        </router-view>
+              </template>
+            </Suspense>
+          </router-view>
+        </div>
       </NLayoutContent>
 
       <!-- Inspect Panel -->
@@ -119,6 +128,8 @@ const mainContentStyle = {
 .app-shell {
   height: 100vh;
   width: 100vw;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   overflow: hidden;
 }
@@ -127,10 +138,14 @@ const mainContentStyle = {
   flex: 1;
   min-width: 0;
   min-height: 0;
+  width: 100%;
   height: 100%;
+  overflow: hidden;
 }
 
 .context-sider {
+  flex-shrink: 0;
+  min-height: 0;
   background-color: var(--color-bg-surface, #f5f7fa);
 }
 
@@ -139,7 +154,9 @@ const mainContentStyle = {
 }
 
 .main-content {
+  flex: 1;
   height: 100%;
+  width: 100%;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -147,10 +164,31 @@ const mainContentStyle = {
 
 .main-content :deep(.n-layout-scroll-container) {
   height: 100%;
+  width: 100%;
+  flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.route-host {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.route-host > :deep(*) {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
 }
 
 .route-loading {
@@ -202,6 +240,8 @@ const mainContentStyle = {
 }
 
 .inspect-sider {
+  flex-shrink: 0;
+  min-height: 0;
   background-color: var(--color-bg-surface, #f5f7fa);
 }
 </style>
