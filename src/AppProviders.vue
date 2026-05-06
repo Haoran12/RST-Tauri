@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import { NConfigProvider, NMessageProvider, NDialogProvider, darkTheme, lightTheme } from 'naive-ui'
-import { computed, onMounted, onUnmounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAppShellStore } from '@/stores/appShell'
 import AppLayout from '@/components/layout/AppLayout.vue'
 
 const appShell = useAppShellStore()
 
-// 检测系统主题偏好
-function getSystemPrefersDark(): boolean {
-  return window.matchMedia('(prefers-color-scheme: dark)').matches
-}
+// 响应式的系统主题偏好 - 立即检测，不在 onMounted 中
+const systemPrefersDark = ref(
+  typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
+)
 
+// NaiveUI 主题
 const theme = computed(() => {
   if (appShell.theme === 'dark') {
     return darkTheme
@@ -18,8 +19,8 @@ const theme = computed(() => {
   if (appShell.theme === 'light') {
     return lightTheme
   }
-  // system: 检测系统偏好
-  return getSystemPrefersDark() ? darkTheme : lightTheme
+  // system: 使用响应式的系统偏好
+  return systemPrefersDark.value ? darkTheme : lightTheme
 })
 
 // 更新 HTML class
@@ -33,7 +34,7 @@ function updateHtmlClass() {
     html.classList.add('light')
   } else {
     // system: 根据系统偏好设置 class
-    if (getSystemPrefersDark()) {
+    if (systemPrefersDark.value) {
       html.classList.add('dark')
     }
   }
@@ -41,7 +42,8 @@ function updateHtmlClass() {
 
 // 监听系统主题变化
 let mediaQuery: MediaQueryList | null = null
-function handleSystemThemeChange() {
+function handleSystemThemeChange(e: MediaQueryListEvent) {
+  systemPrefersDark.value = e.matches
   if (appShell.theme === 'system') {
     updateHtmlClass()
   }
@@ -63,7 +65,8 @@ watch(
   () => appShell.theme,
   () => {
     updateHtmlClass()
-  }
+  },
+  { immediate: true }
 )
 
 watch(
