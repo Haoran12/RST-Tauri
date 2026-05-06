@@ -20,9 +20,16 @@ const InspectPanel = defineAsyncComponent({
 })
 
 const showContextList = computed(() => {
-  // Pages that show context list
-  // Note: 'api-configs' has its own list layout, so excluded here
-  const contextPages = ['library', 'st-chat', 'agent-worlds', 'resources-characters', 'resources-worldbooks', 'resources-presets', 'resources-regex']
+  const contextPages = [
+    'st-home',
+    'st-chat',
+    'agent-home',
+    'agent-worlds',
+    'resources-characters',
+    'resources-worldbooks',
+    'resources-presets',
+    'resources-regex',
+  ]
   return contextPages.includes(route.name as string)
 })
 

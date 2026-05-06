@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
+export type AppMode = 'st' | 'agent'
+
 export interface ChatBubbleRoleAppearance {
   color: string
   opacity: number
@@ -46,6 +48,9 @@ export const useAppShellStore = defineStore('appShell', () => {
   type RecentResourceItem = { id: string; type: string; name: string; updatedAt: string }
 
   // Navigation state
+  const currentMode = ref<AppMode>(loadAppMode())
+  const lastStRoute = ref(loadStoredRoute('rst.lastStRoute', '/st'))
+  const lastAgentRoute = ref(loadStoredRoute('rst.lastAgentRoute', '/agent'))
   const navCollapsed = ref(true)
   const contextListWidth = ref(280)
   const inspectPanelWidth = ref(340)
@@ -67,6 +72,22 @@ export const useAppShellStore = defineStore('appShell', () => {
   // Actions
   function toggleNav() {
     navCollapsed.value = !navCollapsed.value
+  }
+
+  function setCurrentMode(mode: AppMode) {
+    currentMode.value = mode
+    persistAppMode(mode)
+  }
+
+  function rememberModeRoute(mode: AppMode, route: string) {
+    if (!route) return
+    if (mode === 'st') {
+      lastStRoute.value = route
+      persistStoredRoute('rst.lastStRoute', route)
+      return
+    }
+    lastAgentRoute.value = route
+    persistStoredRoute('rst.lastAgentRoute', route)
   }
 
   function toggleInspectPanel() {
@@ -115,6 +136,9 @@ export const useAppShellStore = defineStore('appShell', () => {
 
   return {
     // State
+    currentMode,
+    lastStRoute,
+    lastAgentRoute,
     navCollapsed,
     contextListWidth,
     inspectPanelWidth,
@@ -128,6 +152,8 @@ export const useAppShellStore = defineStore('appShell', () => {
     globalMessage,
 
     // Actions
+    setCurrentMode,
+    rememberModeRoute,
     toggleNav,
     toggleInspectPanel,
     setTheme,
@@ -141,6 +167,34 @@ export const useAppShellStore = defineStore('appShell', () => {
     clearGlobalMessage,
   }
 })
+
+function loadAppMode(): AppMode {
+  if (typeof localStorage === 'undefined') {
+    return 'st'
+  }
+
+  const raw = localStorage.getItem('rst.currentMode')
+  return raw === 'agent' ? 'agent' : 'st'
+}
+
+function persistAppMode(mode: AppMode) {
+  if (typeof localStorage === 'undefined') return
+  localStorage.setItem('rst.currentMode', mode)
+}
+
+function loadStoredRoute(key: string, fallback: string) {
+  if (typeof localStorage === 'undefined') {
+    return fallback
+  }
+
+  const raw = localStorage.getItem(key)
+  return raw?.trim() ? raw : fallback
+}
+
+function persistStoredRoute(key: string, route: string) {
+  if (typeof localStorage === 'undefined') return
+  localStorage.setItem(key, route)
+}
 
 function loadChatBubbleAppearance(): ChatBubbleAppearance {
   if (typeof localStorage === 'undefined') {

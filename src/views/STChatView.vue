@@ -297,7 +297,7 @@ onBeforeUnmount(() => {
       <template v-else>
         <!-- Header -->
         <header class="chat-header">
-          <NButton quaternary circle @click="router.push({ name: 'library' })">
+          <NButton quaternary circle @click="router.push({ name: 'st-home' })">
             <template #icon><NIcon :component="ChevronBackOutline" /></template>
           </NButton>
           <div class="chat-title">

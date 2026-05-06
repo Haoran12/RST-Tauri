@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NIcon } from 'naive-ui'
+import { NButton, NButtonGroup, NIcon } from 'naive-ui'
 import { computed, type Component } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
@@ -13,6 +13,7 @@ import {
   PersonOutline,
   CodeSlashOutline,
 } from '@vicons/ionicons5'
+import { useAppShellStore, type AppMode } from '@/stores/appShell'
 
 interface NavItem {
   label: string
@@ -22,12 +23,12 @@ interface NavItem {
 
 const router = useRouter()
 const route = useRoute()
+const appShell = useAppShellStore()
 
-const navSections: NavItem[][] = [
+const stSections: NavItem[][] = [
   [
-    { label: '资源工作台', key: 'library', icon: HomeOutline },
+    { label: 'ST 首页', key: 'st-home', icon: HomeOutline },
     { label: 'ST 聊天', key: 'st-chat', icon: ChatbubbleOutline },
-    { label: 'Agent', key: 'agent-worlds', icon: MapOutline },
   ],
   [
     { label: '角色卡', key: 'resources-characters', icon: PersonOutline },
@@ -41,19 +42,58 @@ const navSections: NavItem[][] = [
   ],
 ]
 
+const agentSections: NavItem[][] = [
+  [
+    { label: 'Agent 首页', key: 'agent-home', icon: HomeOutline },
+    { label: 'Agent World', key: 'agent-worlds', icon: MapOutline },
+  ],
+  [
+    { label: 'API 配置', key: 'api-configs', icon: KeyOutline },
+    { label: '日志', key: 'logs', icon: TerminalOutline },
+  ],
+]
+
+const navSections = computed(() => appShell.currentMode === 'agent' ? agentSections : stSections)
+
 const activeKey = computed(() => {
   const name = route.name as string
   if (name === 'agent-chat' || name === 'agent-world-editor') return 'agent-worlds'
+  if (name === 'mode-select') return ''
   return name
 })
 
 function navigate(key: string) {
   router.push({ name: key })
 }
+
+function switchMode(mode: AppMode) {
+  appShell.setCurrentMode(mode)
+  const target = mode === 'st' ? appShell.lastStRoute || '/st' : appShell.lastAgentRoute || '/agent'
+  router.push(target)
+}
 </script>
 
 <template>
   <div class="app-nav">
+    <div class="nav-mode-switcher">
+      <NButtonGroup vertical>
+        <NButton
+          size="small"
+          :type="appShell.currentMode === 'st' ? 'primary' : 'default'"
+          @click="switchMode('st')"
+        >
+          ST
+        </NButton>
+        <NButton
+          size="small"
+          :type="appShell.currentMode === 'agent' ? 'primary' : 'default'"
+          @click="switchMode('agent')"
+        >
+          AG
+        </NButton>
+      </NButtonGroup>
+    </div>
+
     <nav class="nav-menu" aria-label="主导航">
       <div
         v-for="(section, sectionIndex) in navSections"
@@ -116,6 +156,20 @@ function navigate(key: string) {
   flex-direction: column;
   gap: 8px;
   overflow: visible;
+}
+
+.nav-mode-switcher {
+  width: 100%;
+  padding: 10px 8px 0;
+  box-sizing: border-box;
+}
+
+.nav-mode-switcher :deep(.n-button-group) {
+  width: 100%;
+}
+
+.nav-mode-switcher :deep(.n-button) {
+  width: 100%;
 }
 
 .nav-section {

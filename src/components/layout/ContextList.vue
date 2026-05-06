@@ -131,8 +131,9 @@ const filteredEntries = computed(() => {
 // Page title
 const pageTitle = computed(() => {
   const titles: Record<string, string> = {
-    'library': '最近',
+    'st-home': 'ST',
     'st-chat': '会话',
+    'agent-home': 'Agent',
     'agent-worlds': 'Worlds',
     'resources-characters': '角色卡',
     'resources-worldbooks': '世界书',
@@ -146,16 +147,16 @@ const pageTitle = computed(() => {
 
 const contextItems = computed<ContextItem[]>(() => {
   switch (route.name) {
-    case 'library':
+    case 'st-home':
       return [
-        ...appShellStore.recentSessions.map((item) => ({
+        ...appShellStore.recentSessions
+          .filter(item => item.type === 'st')
+          .map((item) => ({
           id: `session:${item.type}:${item.id}`,
           name: item.name,
-          type: item.type === 'st' ? 'ST 会话' : 'Agent 会话',
+          type: 'ST 会话',
           meta: formatShortTime(item.updatedAt),
-          action: () => router.push(item.type === 'st'
-            ? { name: 'st-chat', params: { sessionId: item.id } }
-            : { name: 'agent-chat', params: { worldId: currentWorldId.value, sessionId: item.id } }),
+          action: () => router.push({ name: 'st-chat', params: { sessionId: item.id } }),
         })),
         ...appShellStore.recentResources.map((item) => ({
           id: `resource:${item.type}:${item.id}`,
@@ -165,6 +166,23 @@ const contextItems = computed<ContextItem[]>(() => {
           action: () => undefined,
         })),
       ]
+    case 'agent-home':
+      return agentStore.sessions
+        .slice()
+        .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+        .map((session) => ({
+          id: session.session_id,
+          name: session.title,
+          type: session.session_kind,
+          meta: session.period_anchor.display_text,
+          action: () => router.push({
+            name: 'agent-chat',
+            params: {
+              worldId: session.world_id,
+              sessionId: session.session_id,
+            },
+          }),
+        }))
     case 'st-chat':
       return chatStore.sessions
         .slice()
@@ -242,6 +260,8 @@ const filteredItems = computed(() => {
 
 const isDefaultLoading = computed(() => {
   switch (route.name) {
+    case 'agent-home':
+      return agentStore.isLoading
     case 'agent-worlds':
       return agentStore.isLoading
     case 'resources-characters':
@@ -254,13 +274,15 @@ const isDefaultLoading = computed(() => {
 })
 
 const showDefaultAddButton = computed(() => {
-  return ['st-chat', 'agent-worlds', 'resources-characters', 'resources-presets'].includes(route.name as string)
+  return ['st-chat', 'agent-home', 'agent-worlds', 'resources-characters', 'resources-presets'].includes(route.name as string)
 })
 
 const defaultEmptyDescription = computed(() => {
   switch (route.name) {
     case 'st-chat':
       return '暂无会话，点击上方按钮创建'
+    case 'agent-home':
+      return '暂无 Agent 会话'
     case 'agent-worlds':
       return '暂无 Agent 会话'
     case 'resources-characters':
@@ -284,6 +306,7 @@ async function handleDefaultAdd() {
       }
       break
     }
+    case 'agent-home':
     case 'agent-worlds':
       window.dispatchEvent(new CustomEvent('open-agent-session-create'))
       break
@@ -657,6 +680,15 @@ watch(() => route.name, async (newName) => {
       worldbooksStore.loadWorldbooks(),
       charactersStore.loadCharacters(),
     ])
+  } else if (newName === 'st-home') {
+    await Promise.all([
+      chatStore.loadSessions(),
+      worldbooksStore.loadWorldbooks(),
+      charactersStore.loadCharacters(),
+      presetsStore.loadPresetList(),
+    ])
+  } else if (newName === 'agent-home') {
+    await agentStore.loadWorld(currentWorldId.value)
   } else if (newName === 'resources-characters') {
     await charactersStore.loadCharacters()
   } else if (newName === 'resources-presets') {
