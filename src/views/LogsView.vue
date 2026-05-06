@@ -10,6 +10,8 @@ import {
   NEmpty,
   NIcon,
   NInput,
+  NInputNumber,
+  NPagination,
   NSelect,
   NScrollbar,
   NSpin,
@@ -59,8 +61,8 @@ const selectedRecord = ref<LogRecordSummary | null>(null)
 const detail = ref<LogRecordDetail | null>(null)
 const storageSummary = ref<LogStorageSummary | null>(null)
 const streamChunks = ref<StreamChunkDetail[]>([])
-const offset = ref(0)
-const hasMore = ref(false)
+const currentPage = ref(1)
+const totalCount = ref(0)
 const isLoading = ref(false)
 const isDetailLoading = ref(false)
 const isSummaryLoading = ref(false)
@@ -148,7 +150,7 @@ const selectedLlm = computed(() => detail.value?.llm ?? null)
 const selectedEvent = computed(() => detail.value?.event ?? null)
 const selectedTrace = computed(() => detail.value?.trace ?? null)
 
-const totalVisibleCount = computed(() => records.value.length)
+const pageCount = computed(() => Math.ceil(totalCount.value / PAGE_SIZE) || 1)
 const globalSummary = computed(() => storageSummary.value?.global ?? null)
 
 function compactFilter(value: LogRecordFilter): LogRecordFilter {
@@ -205,7 +207,7 @@ function selectRecord(record: LogRecordSummary) {
 
 async function loadRecords(reset = true) {
   if (reset) {
-    offset.value = 0
+    currentPage.value = 1
     records.value = []
     selectedRecord.value = null
     detail.value = null
@@ -215,13 +217,13 @@ async function loadRecords(reset = true) {
   isLoading.value = true
   error.value = null
   try {
+    const offset = (currentPage.value - 1) * PAGE_SIZE
     const page = await queryLogRecords(filter.value, {
-      offset: offset.value,
+      offset,
       limit: PAGE_SIZE,
     })
-    records.value = reset ? page.records : [...records.value, ...page.records]
-    hasMore.value = page.has_more
-    offset.value = page.offset + page.records.length
+    records.value = page.records
+    totalCount.value = page.total_count ?? page.records.length
     if (reset && page.records[0]) {
       selectRecord(page.records[0])
     }
@@ -266,8 +268,9 @@ async function refreshAll() {
   await Promise.all([loadRecords(true), loadStorageSummary()])
 }
 
-async function loadMore() {
-  await loadRecords(false)
+function handlePageChange(page: number) {
+  currentPage.value = page
+  void loadRecords(false)
 }
 
 async function runRetention() {
@@ -407,8 +410,8 @@ onMounted(refreshAll)
       </NCard>
       <NCard size="small" embedded>
         <div class="summary-title">当前结果</div>
-        <div class="summary-value">{{ totalVisibleCount }}</div>
-        <div class="summary-meta">{{ hasMore ? '还有更多记录' : '已加载当前页' }}</div>
+        <div class="summary-value">{{ totalCount }}</div>
+        <div class="summary-meta">第 {{ currentPage }} / {{ pageCount }} 页</div>
       </NCard>
     </div>
 
@@ -436,6 +439,15 @@ onMounted(refreshAll)
             <NInput v-model:value="llmNode" clearable placeholder="llm_node / source_module" />
           </div>
         </NScrollbar>
+        <div class="pagination-area">
+          <NPagination
+            v-model:page="currentPage"
+            :page-count="pageCount"
+            :page-slot="5"
+            size="small"
+            @update:page="handlePageChange"
+          />
+        </div>
       </aside>
 
       <section class="record-list">
@@ -475,9 +487,6 @@ onMounted(refreshAll)
                   <span v-if="record.step_count">{{ record.step_count }} steps</span>
                 </div>
               </button>
-            </div>
-            <div v-if="hasMore" class="load-more">
-              <NButton size="small" @click="loadMore">加载更多</NButton>
             </div>
           </NScrollbar>
         </NSpin>
@@ -716,6 +725,13 @@ onMounted(refreshAll)
   padding: 12px;
 }
 
+.pagination-area {
+  padding: 12px;
+  border-top: 1px solid var(--n-border-color);
+  display: flex;
+  justify-content: center;
+}
+
 /* filter-panel NScrollbar 高度 - NScrollbar 默认 height:100%，需要父级有明确高度 */
 .filter-panel > :deep(.n-scrollbar) {
   flex: 1;
@@ -841,7 +857,6 @@ onMounted(refreshAll)
   margin-top: 8px;
 }
 
-.load-more,
 .empty-area {
   padding: 20px;
   display: flex;
