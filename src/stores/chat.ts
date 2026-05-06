@@ -169,7 +169,7 @@ export const useChatStore = defineStore('chat', () => {
         session_id: currentSession.value.id,
         preset_name: runtimeStore.globalState.active_preset || 'Default',
         world_info_settings: runtimeStore.globalState.world_info_settings,
-        chat_lore_id: null,
+        chat_lore_id: currentSession.value.chat_metadata?.world_info ?? null,
         global_lore_ids: [],
         max_context: 8192,
       })
@@ -243,7 +243,7 @@ export const useChatStore = defineStore('chat', () => {
         session_id: currentSession.value.id,
         preset_name: runtimeStore.globalState.active_preset || 'Default',
         world_info_settings: runtimeStore.globalState.world_info_settings,
-        chat_lore_id: null,
+        chat_lore_id: currentSession.value.chat_metadata?.world_info ?? null,
         global_lore_ids: [],
         max_context: 8192,
       })

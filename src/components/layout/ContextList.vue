@@ -91,13 +91,6 @@ const filteredEntries = computed(() => {
   })
 })
 
-// Prompt items from current preset
-const promptItems = computed(() => {
-  const prompts = presetsStore.currentPreset?.prompt?.prompts
-  if (!prompts) return []
-  return prompts
-})
-
 // Page title
 const pageTitle = computed(() => {
   const titles: Record<string, string> = {
@@ -532,7 +525,8 @@ async function onDrop(event: DragEvent, targetItem: PromptItem) {
     preset.prompt.prompt_order = [{ order: [] }]
   }
 
-  const order = preset.prompt.prompt_order[0].order
+  const order = preset.prompt.prompt_order[0].order ?? []
+  preset.prompt.prompt_order[0].order = order
   prompts.forEach((p, index) => {
     const existingOrder = order.find(o => o.identifier === p.identifier)
     if (existingOrder) {

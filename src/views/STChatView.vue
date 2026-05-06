@@ -54,6 +54,9 @@ async function handleSend() {
     return
   }
   await chatStore.sendMessageStream(content, settingsStore.activeApiConfig)
+  if (chatStore.error) {
+    message.error(chatStore.error)
+  }
   scrollToBottom()
 }
 
@@ -124,6 +127,8 @@ function worldbookName(loreId: string) {
 }
 
 function getCharacterWorldLoreId(character: CharacterCard | null) {
+  const stableLoreId = character?.data.extensions?.rst_world_lore_id
+  if (typeof stableLoreId === 'string') return stableLoreId
   const worldName = character?.data.extensions?.world
   if (typeof worldName !== 'string') return null
   return worldbooksStore.worldbookList.find(w => w.name === worldName)?.id ?? null

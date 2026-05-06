@@ -350,32 +350,9 @@ impl OpenAIChatProvider {
                     ChatRole::Assistant => "assistant",
                     ChatRole::Tool => "tool",
                 };
-                let content: Vec<_> = m.content.iter().map(|c| match c {
-                    ContentPart::Text { text } => serde_json::json!({
-                        "type": "text",
-                        "text": text
-                    }),
-                    ContentPart::ImageRef { image_url } => serde_json::json!({
-                        "type": "image_url",
-                        "image_url": { "url": image_url.url }
-                    }),
-                    ContentPart::FileRef { file } => serde_json::json!({
-                        "type": "file",
-                        "file": {
-                            "file_id": file.file_id,
-                            "file_data": file.file_data,
-                            "filename": file.filename
-                        }
-                    }),
-                    ContentPart::ToolResult { tool_call_id, content } => serde_json::json!({
-                        "type": "tool_result",
-                        "tool_call_id": tool_call_id,
-                        "content": content
-                    }),
-                }).collect();
                 serde_json::json!({
                     "role": role,
-                    "content": content
+                    "content": openai_chat_message_content(&m.content)
                 })
             }).collect::<Vec<_>>(),
         });
@@ -408,9 +385,57 @@ impl OpenAIChatProvider {
     }
 }
 
+fn openai_chat_message_content(content: &[ContentPart]) -> serde_json::Value {
+    if content.iter().all(|part| matches!(part, ContentPart::Text { .. })) {
+        let text = content
+            .iter()
+            .map(|part| match part {
+                ContentPart::Text { text } => text.as_str(),
+                _ => "",
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        return serde_json::Value::String(text);
+    }
+
+    serde_json::Value::Array(
+        content
+            .iter()
+            .map(|part| match part {
+                ContentPart::Text { text } => serde_json::json!({
+                    "type": "text",
+                    "text": text
+                }),
+                ContentPart::ImageRef { image_url } => serde_json::json!({
+                    "type": "image_url",
+                    "image_url": { "url": image_url.url }
+                }),
+                ContentPart::FileRef { file } => serde_json::json!({
+                    "type": "file",
+                    "file": {
+                        "file_id": file.file_id,
+                        "file_data": file.file_data,
+                        "filename": file.filename
+                    }
+                }),
+                ContentPart::ToolResult {
+                    tool_call_id,
+                    content,
+                } => serde_json::json!({
+                    "type": "tool_result",
+                    "tool_call_id": tool_call_id,
+                    "content": content
+                }),
+            })
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::OpenAIChatProvider;
+    use super::{openai_chat_message_content, OpenAIChatProvider};
+    use crate::api::provider::{ContentPart, ImageUrl};
+    use serde_json::json;
 
     #[test]
     fn retry_missing_file_detects_expected_errors() {
@@ -423,6 +448,36 @@ mod tests {
         assert!(!OpenAIChatProvider::should_retry_missing_file(
             "API error: context length exceeded"
         ));
+    }
+
+    #[test]
+    fn pure_text_messages_use_string_content_for_compatible_chat_apis() {
+        let content = openai_chat_message_content(&[
+            ContentPart::Text {
+                text: "hello".to_string(),
+            },
+            ContentPart::Text {
+                text: "world".to_string(),
+            },
+        ]);
+
+        assert_eq!(content, json!("hello\nworld"));
+    }
+
+    #[test]
+    fn multimodal_messages_keep_content_parts() {
+        let content = openai_chat_message_content(&[
+            ContentPart::Text {
+                text: "look".to_string(),
+            },
+            ContentPart::ImageRef {
+                image_url: ImageUrl {
+                    url: "data:image/png;base64,abc".to_string(),
+                },
+            },
+        ]);
+
+        assert!(content.is_array());
     }
 }
 
