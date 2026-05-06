@@ -835,7 +835,6 @@ watch(currentWorldId, async (worldId) => {
                 :key="item.identifier"
                 class="entry-item"
                 :class="{
-                  'entry-item-builtin': item.builtin,
                   'entry-item-dragging': draggedItem?.identifier === item.identifier,
                   'entry-item-drag-over': dragOverItem?.identifier === item.identifier
                 }"
@@ -866,14 +865,6 @@ watch(currentWorldId, async (worldId) => {
                 <div class="entry-info">
                   <div class="entry-header">
                     <span class="entry-name">{{ item.name }}</span>
-                    <NTag
-                      v-if="item.builtin"
-                      size="tiny"
-                      type="warning"
-                      :bordered="false"
-                    >
-                      内置
-                    </NTag>
                     <NTag
                       size="tiny"
                       :type="getRoleType(item.role)"
@@ -1105,14 +1096,6 @@ watch(currentWorldId, async (worldId) => {
 
 .entry-item:hover {
   background-color: rgba(0, 0, 0, 0.04);
-}
-
-.entry-item-builtin {
-  background-color: rgba(250, 173, 20, 0.05);
-}
-
-.entry-item-builtin:hover {
-  background-color: rgba(250, 173, 20, 0.1);
 }
 
 .entry-item-dragging {

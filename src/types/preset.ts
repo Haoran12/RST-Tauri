@@ -347,8 +347,8 @@ export interface PromptPreset {
  */
 export const BUILTIN_PROMPT_DEFINITIONS: BuiltinPromptItemDefinition[] = [
   {
-    identifier: 'builtin:system_prompt',
-    name: 'System Prompt',
+    identifier: 'builtin:main_prompt',
+    name: 'Main Prompt',
     role: 'system',
     source: 'static',
     content: '',

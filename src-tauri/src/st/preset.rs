@@ -419,8 +419,8 @@ fn default_true() -> bool {
 pub fn get_builtin_prompt_definitions() -> Vec<BuiltinPromptItemDefinition> {
     vec![
         BuiltinPromptItemDefinition {
-            identifier: "builtin:system_prompt".to_string(),
-            name: "System Prompt".to_string(),
+            identifier: "builtin:main_prompt".to_string(),
+            name: "Main Prompt".to_string(),
             role: "system".to_string(),
             source: BuiltinPromptSource::Static,
             content: String::new(),
@@ -429,7 +429,7 @@ pub fn get_builtin_prompt_definitions() -> Vec<BuiltinPromptItemDefinition> {
             default_position: 0,
             system_prompt: true,
             marker: false,
-            description: "预设级系统提示词，定义 AI 的基本行为模式".to_string(),
+            description: "预设级主提示词，定义 AI 的基本行为模式".to_string(),
         },
         BuiltinPromptItemDefinition {
             identifier: "builtin:character_description".to_string(),
