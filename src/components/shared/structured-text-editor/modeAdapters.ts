@@ -155,7 +155,10 @@ function analyzeJson(text: string, binding: StructuredTextBinding): AnalyzeResul
       parsedValue: parsed,
     }
   } catch (error) {
-    diagnostics.push(jsonParseDiagnostic(error, text))
+    // storageKind 为 string 时，格式错误不阻止保存（用户可能随时保存避免丢失）
+    // storageKind 为 json_value/yaml_file 时，必须阻止保存
+    const severity = binding.storageKind === 'string' ? WARNING : BLOCKER
+    diagnostics.push(jsonParseDiagnostic(error, text, severity))
 
     const normalized = normalizeJsonCandidate(text)
     if (normalized !== text) {
@@ -208,7 +211,10 @@ function formatJson(text: string, binding: StructuredTextBinding): FormatResult 
 
 function analyzeYaml(text: string, binding: StructuredTextBinding): AnalyzeResult {
   const diagnostics: StructuredTextDiagnostic[] = []
-  diagnostics.push(...collectYamlIndentDiagnostics(text))
+  // storageKind 为 string 时，格式错误不阻止保存
+  const parseErrorSeverity = binding.storageKind === 'string' ? WARNING : BLOCKER
+
+  diagnostics.push(...collectYamlIndentDiagnostics(text, parseErrorSeverity))
 
   const featureDiagnostic = collectYamlFeatureDiagnostic(text, binding)
   if (featureDiagnostic) {
@@ -221,7 +227,7 @@ function analyzeYaml(text: string, binding: StructuredTextBinding): AnalyzeResul
   })
 
   for (const error of document.errors) {
-    diagnostics.push(yamlMessageDiagnostic(error.message, text))
+    diagnostics.push(yamlMessageDiagnostic(error.message, text, parseErrorSeverity))
   }
 
   for (const warning of document.warnings) {
@@ -614,14 +620,18 @@ function escapeJsonKey(key: string) {
   return key.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 }
 
-function jsonParseDiagnostic(error: unknown, text: string): StructuredTextDiagnostic {
+function jsonParseDiagnostic(
+  error: unknown,
+  text: string,
+  severity: StructuredTextDiagnostic['severity'] = BLOCKER,
+): StructuredTextDiagnostic {
   const message = error instanceof Error ? error.message : 'Invalid JSON'
   const match = message.match(/position\s+(\d+)/i)
   const offset = match ? Number(match[1]) : 0
   const position = offsetToPosition(text, Number.isFinite(offset) ? offset : 0)
 
   return {
-    severity: BLOCKER,
+    severity,
     code: 'parse_error',
     message,
     line: position.line,
@@ -630,7 +640,10 @@ function jsonParseDiagnostic(error: unknown, text: string): StructuredTextDiagno
   }
 }
 
-function collectYamlIndentDiagnostics(text: string): StructuredTextDiagnostic[] {
+function collectYamlIndentDiagnostics(
+  text: string,
+  parseErrorSeverity: StructuredTextDiagnostic['severity'] = BLOCKER,
+): StructuredTextDiagnostic[] {
   const diagnostics: StructuredTextDiagnostic[] = []
   const lines = text.split(/\r?\n/)
 
@@ -638,7 +651,7 @@ function collectYamlIndentDiagnostics(text: string): StructuredTextDiagnostic[] 
     const leadingTabs = line.match(/^\t+/)
     if (leadingTabs) {
       diagnostics.push({
-        severity: BLOCKER,
+        severity: parseErrorSeverity,
         code: 'parse_error',
         message: 'YAML 缩进不能使用 tab。',
         line: index + 1,
