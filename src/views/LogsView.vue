@@ -5,8 +5,6 @@ import {
   NButton,
   NButtonGroup,
   NCard,
-  NDescriptions,
-  NDescriptionsItem,
   NEmpty,
   NIcon,
   NInput,
@@ -564,34 +562,83 @@ onMounted(refreshAll)
               <NTabs type="line" animated class="detail-tabs">
                 <NTabPane name="summary" tab="摘要">
                   <NScrollbar class="tab-scroll">
-                    <NDescriptions :column="2" size="small" bordered>
-                      <NDescriptionsItem label="来源">{{ selectedSource }}</NDescriptionsItem>
-                      <NDescriptionsItem label="类型">{{ selectedKind }}</NDescriptionsItem>
-                      <NDescriptionsItem label="创建时间">{{ formatDate(selectedRecord.created_at) }}</NDescriptionsItem>
-                      <NDescriptionsItem label="World">{{ selectedRecord.world_id || '-' }}</NDescriptionsItem>
-                      <NDescriptionsItem label="Session">{{ selectedRecord.session_id || '-' }}</NDescriptionsItem>
-                      <NDescriptionsItem label="Turn">{{ selectedRecord.scene_turn_id || '-' }}</NDescriptionsItem>
-                      <NDescriptionsItem label="Trace">{{ selectedRecord.trace_id || '-' }}</NDescriptionsItem>
-                      <NDescriptionsItem label="Request">{{ selectedRecord.request_id || '-' }}</NDescriptionsItem>
-                    </NDescriptions>
-                    <div v-if="selectedLlm" class="llm-summary-section">
-                      <NDescriptions :column="2" size="small" bordered>
-                        <NDescriptionsItem label="Provider">{{ selectedLlm.provider }}</NDescriptionsItem>
-                        <NDescriptionsItem label="Model">{{ selectedLlm.model }}</NDescriptionsItem>
-                        <NDescriptionsItem label="请求 URL">{{ selectedLlm.request_url || '-' }}</NDescriptionsItem>
-                        <NDescriptionsItem label="调用类型">{{ selectedLlm.call_type }}</NDescriptionsItem>
-                        <NDescriptionsItem label="状态">
-                          <NTag size="small" :type="statusType(selectedLlm.status)">{{ selectedLlm.status }}</NTag>
-                        </NDescriptionsItem>
-                        <NDescriptionsItem label="延迟">{{ selectedLlm.latency_ms ? `${selectedLlm.latency_ms}ms` : '-' }}</NDescriptionsItem>
-                        <NDescriptionsItem label="Token 用量">
-                          <template v-if="selectedLlm.token_usage">
-                            {{ formatTokenUsage(selectedLlm.token_usage) }}
-                          </template>
-                          <template v-else>-</template>
-                        </NDescriptionsItem>
-                        <NDescriptionsItem label="节点">{{ selectedLlm.llm_node }}</NDescriptionsItem>
-                      </NDescriptions>
+                    <div class="summary-grid">
+                      <div class="summary-group">
+                        <div class="group-title">基础信息</div>
+                        <div class="field-list">
+                          <div class="field-row">
+                            <span class="field-label">来源</span>
+                            <span class="field-value">{{ selectedSource }}</span>
+                          </div>
+                          <div class="field-row">
+                            <span class="field-label">类型</span>
+                            <span class="field-value">{{ selectedKind }}</span>
+                          </div>
+                          <div class="field-row">
+                            <span class="field-label">创建时间</span>
+                            <span class="field-value">{{ formatDate(selectedRecord.created_at) }}</span>
+                          </div>
+                          <div class="field-row">
+                            <span class="field-label">World</span>
+                            <span class="field-value mono">{{ selectedRecord.world_id || '-' }}</span>
+                          </div>
+                          <div class="field-row">
+                            <span class="field-label">Session</span>
+                            <span class="field-value mono">{{ selectedRecord.session_id || '-' }}</span>
+                          </div>
+                          <div class="field-row">
+                            <span class="field-label">Turn</span>
+                            <span class="field-value mono">{{ selectedRecord.scene_turn_id || '-' }}</span>
+                          </div>
+                          <div class="field-row">
+                            <span class="field-label">Trace</span>
+                            <span class="field-value mono">{{ selectedRecord.trace_id || '-' }}</span>
+                          </div>
+                          <div class="field-row">
+                            <span class="field-label">Request</span>
+                            <span class="field-value mono">{{ selectedRecord.request_id || '-' }}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div v-if="selectedLlm" class="summary-group">
+                        <div class="group-title">LLM 调用</div>
+                        <div class="field-list">
+                          <div class="field-row">
+                            <span class="field-label">Provider</span>
+                            <span class="field-value">{{ selectedLlm.provider }}</span>
+                          </div>
+                          <div class="field-row">
+                            <span class="field-label">Model</span>
+                            <span class="field-value mono">{{ selectedLlm.model }}</span>
+                          </div>
+                          <div class="field-row">
+                            <span class="field-label">节点</span>
+                            <span class="field-value mono">{{ selectedLlm.llm_node }}</span>
+                          </div>
+                          <div class="field-row">
+                            <span class="field-label">调用类型</span>
+                            <span class="field-value mono">{{ selectedLlm.call_type }}</span>
+                          </div>
+                          <div class="field-row">
+                            <span class="field-label">状态</span>
+                            <span class="field-value">
+                              <NTag size="small" :type="statusType(selectedLlm.status)">{{ selectedLlm.status }}</NTag>
+                            </span>
+                          </div>
+                          <div class="field-row">
+                            <span class="field-label">延迟</span>
+                            <span class="field-value">{{ selectedLlm.latency_ms ? `${selectedLlm.latency_ms}ms` : '-' }}</span>
+                          </div>
+                          <div class="field-row">
+                            <span class="field-label">Token</span>
+                            <span class="field-value">{{ selectedLlm.token_usage ? formatTokenUsage(selectedLlm.token_usage) : '-' }}</span>
+                          </div>
+                          <div class="field-row full-width">
+                            <span class="field-label">请求 URL</span>
+                            <span class="field-value mono break-all">{{ selectedLlm.request_url || '-' }}</span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                     <div class="detail-actions">
                       <NButton
@@ -1050,12 +1097,78 @@ onMounted(refreshAll)
   padding-bottom: 4px;
 }
 
-.inline-alert {
-  margin-bottom: 10px;
+/* 摘要网格布局 */
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
 }
 
-.llm-summary-section {
-  margin-top: 16px;
+.summary-group {
+  border: 1px solid var(--n-border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.group-title {
+  padding: 8px 12px;
+  background: var(--n-color-hover);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--n-text-color-1);
+  border-bottom: 1px solid var(--n-border-color);
+}
+
+.field-list {
+  padding: 4px 0;
+}
+
+.field-row {
+  display: flex;
+  align-items: flex-start;
+  padding: 6px 12px;
+  gap: 12px;
+}
+
+.field-row:not(:last-child) {
+  border-bottom: 1px solid var(--n-border-color);
+}
+
+.field-label {
+  flex-shrink: 0;
+  width: 72px;
+  font-size: 12px;
+  color: var(--n-text-color-3);
+}
+
+.field-value {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--n-text-color-1);
+  word-break: break-word;
+}
+
+.field-value.mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.field-value.break-all {
+  word-break: break-all;
+}
+
+.field-row.full-width {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field-row.full-width .field-label {
+  width: auto;
+}
+
+.inline-alert {
+  margin-bottom: 10px;
 }
 
 .section-label {
