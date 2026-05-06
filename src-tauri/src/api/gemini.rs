@@ -170,9 +170,8 @@ impl GeminiProvider {
             return Err(format!("API error: {}", error_text));
         }
 
-        let body: GeminiResponse = response
-            .json()
-            .await
+        let response_text = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
+        let body: GeminiResponse = serde_json::from_str(&response_text)
             .map_err(|e| format!("Failed to parse response: {}", e))?;
 
         let content = body
@@ -181,6 +180,8 @@ impl GeminiProvider {
             .and_then(|c| c.content.parts.first())
             .and_then(|p| p.text.clone())
             .unwrap_or_default();
+
+        let raw_response = serde_json::from_str(&response_text).ok();
 
         Ok(ChatResponse {
             request_id: request.request_id.clone(),
@@ -195,6 +196,7 @@ impl GeminiProvider {
                 .candidates
                 .first()
                 .and_then(|c| c.finish_reason.clone()),
+            raw_response,
         })
     }
 
@@ -242,9 +244,8 @@ impl GeminiProvider {
             return Err(format!("API error: {}", error_text));
         }
 
-        let body: GeminiResponse = response
-            .json()
-            .await
+        let response_text = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
+        let body: GeminiResponse = serde_json::from_str(&response_text)
             .map_err(|e| format!("Failed to parse response: {}", e))?;
 
         let content = body

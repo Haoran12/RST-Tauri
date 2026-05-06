@@ -99,10 +99,11 @@ impl AIProvider for ClaudeCodeProvider {
             return Err(format!("API error: {}", error_text));
         }
 
-        let body: ClaudeCodeResponse = response
-            .json()
-            .await
+        let response_text = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
+        let body: ClaudeCodeResponse = serde_json::from_str(&response_text)
             .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        let raw_response = serde_json::from_str(&response_text).ok();
 
         Ok(ChatResponse {
             request_id: request.request_id,
@@ -114,6 +115,7 @@ impl AIProvider for ClaudeCodeProvider {
                 total_tokens: u.input_tokens + u.output_tokens,
             }),
             finish_reason: body.stop_reason,
+            raw_response,
         })
     }
 
@@ -139,9 +141,8 @@ impl AIProvider for ClaudeCodeProvider {
             return Err(format!("API error: {}", error_text));
         }
 
-        let body: ClaudeCodeResponse = response
-            .json()
-            .await
+        let response_text = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
+        let body: ClaudeCodeResponse = serde_json::from_str(&response_text)
             .map_err(|e| format!("Failed to parse response: {}", e))?;
 
         if let Some(input) = body.tool_input("structured_output") {

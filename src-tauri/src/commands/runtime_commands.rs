@@ -867,7 +867,7 @@ pub async fn send_assembled_st_chat_message(
                     .llm_logger()
                     .log_success(
                         &request_id,
-                        &serde_json::json!({"content": &resp.content}),
+                        resp.raw_response.as_ref().unwrap_or(&serde_json::json!({"content": &resp.content})),
                         resp.reasoning.as_deref(),
                         resp.token_usage.as_ref().map(|u| {
                             serde_json::json!({

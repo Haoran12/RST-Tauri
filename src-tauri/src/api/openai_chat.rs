@@ -152,9 +152,8 @@ impl OpenAIChatProvider {
             return Err(format!("API error: {}", error_text));
         }
 
-        let body: OpenAIResponse = response
-            .json()
-            .await
+        let response_text = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
+        let body: OpenAIResponse = serde_json::from_str(&response_text)
             .map_err(|e| format!("Failed to parse response: {}", e))?;
 
         let content = body
@@ -162,6 +161,8 @@ impl OpenAIChatProvider {
             .first()
             .map(|c| c.message.content.clone())
             .unwrap_or_default();
+
+        let raw_response = serde_json::from_str(&response_text).ok();
 
         Ok(ChatResponse {
             request_id: request.request_id.clone(),
@@ -173,6 +174,7 @@ impl OpenAIChatProvider {
                 total_tokens: u.total_tokens,
             }),
             finish_reason: body.choices.first().and_then(|c| c.finish_reason.clone()),
+            raw_response,
         })
     }
 
@@ -214,9 +216,8 @@ impl OpenAIChatProvider {
             return Err(format!("API error: {}", error_text));
         }
 
-        let body: OpenAIResponse = response
-            .json()
-            .await
+        let response_text = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
+        let body: OpenAIResponse = serde_json::from_str(&response_text)
             .map_err(|e| format!("Failed to parse response: {}", e))?;
 
         let content = body

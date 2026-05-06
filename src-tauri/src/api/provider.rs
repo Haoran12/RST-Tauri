@@ -163,6 +163,9 @@ pub struct ChatResponse {
     pub token_usage: Option<TokenUsage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finish_reason: Option<String>,
+    /// Raw HTTP response body as JSON (for logging)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_response: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
