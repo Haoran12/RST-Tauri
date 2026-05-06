@@ -439,41 +439,43 @@ onMounted(refreshAll)
       </aside>
 
       <section class="record-list">
-        <NSpin :show="isLoading">
-          <NScrollbar>
+        <NSpin :show="isLoading" class="record-list-spin">
+          <NScrollbar class="record-list-scroll">
             <div v-if="records.length === 0 && !isLoading" class="empty-area">
               <NEmpty description="没有匹配的日志记录" />
             </div>
-            <button
-              v-for="record in records"
-              :key="`${record.record_ref.source.source_kind}-${record.record_ref.id}`"
-              type="button"
-              class="record-row"
-              :class="{ active: selectedId === record.record_ref.id && selectedKind === record.record_ref.record_kind }"
-              @click="selectRecord(record)"
-            >
-              <div class="record-row-top">
-                <div class="record-title">
-                  <NTag size="small" :bordered="false">{{ kindLabel(record) }}</NTag>
-                  <span>{{ record.title }}</span>
+            <div class="record-list-content">
+              <button
+                v-for="record in records"
+                :key="`${record.record_ref.source.source_kind}-${record.record_ref.id}`"
+                type="button"
+                class="record-row"
+                :class="{ active: selectedId === record.record_ref.id && selectedKind === record.record_ref.record_kind }"
+                @click="selectRecord(record)"
+              >
+                <div class="record-row-top">
+                  <div class="record-title">
+                    <NTag size="small" :bordered="false">{{ kindLabel(record) }}</NTag>
+                    <span>{{ record.title }}</span>
+                  </div>
+                  <NTag
+                    v-if="record.status || record.level"
+                    size="small"
+                    :type="statusType(record.status || record.level)"
+                  >
+                    {{ record.status || record.level }}
+                  </NTag>
                 </div>
-                <NTag
-                  v-if="record.status || record.level"
-                  size="small"
-                  :type="statusType(record.status || record.level)"
-                >
-                  {{ record.status || record.level }}
-                </NTag>
-              </div>
-              <div class="record-summary">{{ record.summary || primaryContext(record) }}</div>
-              <div class="record-meta">
-                <span>{{ record.record_ref.source.source_kind }}</span>
-                <span>{{ formatDate(record.created_at) }}</span>
-                <span v-if="record.latency_ms">{{ record.latency_ms }}ms</span>
-                <span v-if="record.stream_chunk_count">{{ record.stream_chunk_count }} chunks</span>
-                <span v-if="record.step_count">{{ record.step_count }} steps</span>
-              </div>
-            </button>
+                <div class="record-summary">{{ record.summary || primaryContext(record) }}</div>
+                <div class="record-meta">
+                  <span>{{ record.record_ref.source.source_kind }}</span>
+                  <span>{{ formatDate(record.created_at) }}</span>
+                  <span v-if="record.latency_ms">{{ record.latency_ms }}ms</span>
+                  <span v-if="record.stream_chunk_count">{{ record.stream_chunk_count }} chunks</span>
+                  <span v-if="record.step_count">{{ record.step_count }} steps</span>
+                </div>
+              </button>
+            </div>
             <div v-if="hasMore" class="load-more">
               <NButton size="small" @click="loadMore">加载更多</NButton>
             </div>
@@ -482,7 +484,7 @@ onMounted(refreshAll)
       </section>
 
       <section class="detail-panel">
-        <NSpin :show="isDetailLoading">
+        <NSpin :show="isDetailLoading" class="detail-spin">
           <div v-if="!selectedRecord" class="empty-area">
             <NEmpty description="选择一条日志查看详情" />
           </div>
@@ -498,100 +500,116 @@ onMounted(refreshAll)
               </NTag>
             </div>
 
-            <NTabs type="line" animated>
-              <NTabPane name="summary" tab="摘要">
-                <NDescriptions :column="2" size="small" bordered>
-                  <NDescriptionsItem label="来源">{{ selectedSource }}</NDescriptionsItem>
-                  <NDescriptionsItem label="类型">{{ selectedKind }}</NDescriptionsItem>
-                  <NDescriptionsItem label="创建时间">{{ formatDate(selectedRecord.created_at) }}</NDescriptionsItem>
-                  <NDescriptionsItem label="World">{{ selectedRecord.world_id || '-' }}</NDescriptionsItem>
-                  <NDescriptionsItem label="Session">{{ selectedRecord.session_id || '-' }}</NDescriptionsItem>
-                  <NDescriptionsItem label="Turn">{{ selectedRecord.scene_turn_id || '-' }}</NDescriptionsItem>
-                  <NDescriptionsItem label="Trace">{{ selectedRecord.trace_id || '-' }}</NDescriptionsItem>
-                  <NDescriptionsItem label="Request">{{ selectedRecord.request_id || '-' }}</NDescriptionsItem>
-                </NDescriptions>
-                <div class="detail-actions">
-                  <NButton
-                    v-if="selectedRecord.trace_id"
-                    size="small"
-                    @click="filterByTrace(selectedRecord.trace_id, selectedRecord.world_id)"
-                  >
-                    查看 Trace
-                  </NButton>
-                  <NButton
-                    v-if="selectedRecord.request_id"
-                    size="small"
-                    @click="filterByRequest(selectedRecord.request_id, selectedRecord.world_id)"
-                  >
-                    查看 Request
-                  </NButton>
-                </div>
-              </NTabPane>
-
-              <NTabPane v-if="selectedLlm" name="request" tab="Request">
-                <pre class="json-block">{{ jsonText(selectedLlm.request_json) }}</pre>
-              </NTabPane>
-              <NTabPane v-if="selectedLlm" name="response" tab="Response">
-                <NAlert type="info" class="inline-alert">
-                  原始响应可能包含 prompt、角色卡、世界书或 Agent 私有上下文；数据库写入层已执行凭证脱敏。
-                </NAlert>
-                <pre v-if="selectedLlm.readable_text" class="text-block">{{ selectedLlm.readable_text }}</pre>
-                <pre class="json-block">{{ jsonText(selectedLlm.response_json) }}</pre>
-              </NTabPane>
-              <NTabPane v-if="selectedLlm" name="schema" tab="Schema">
-                <pre class="json-block">{{ jsonText(selectedLlm.schema_json) || '无结构化 schema' }}</pre>
-              </NTabPane>
-              <NTabPane v-if="selectedLlm" name="stream" tab="Stream">
-                <div v-if="streamChunks.length === 0" class="empty-area compact">
-                  <NEmpty description="没有 stream chunk" />
-                </div>
-                <div v-else class="chunk-list">
-                  <div v-for="chunk in streamChunks" :key="chunk.chunk_id" class="chunk-item">
-                    <div class="chunk-meta">#{{ chunk.chunk_index }} · {{ formatDate(chunk.received_at) }}</div>
-                    <pre>{{ chunk.raw_chunk }}</pre>
-                  </div>
-                </div>
-              </NTabPane>
-
-              <NTabPane v-if="selectedEvent" name="event" tab="事件">
-                <NDescriptions :column="1" size="small" bordered>
-                  <NDescriptionsItem label="事件">{{ selectedEvent.event_type }}</NDescriptionsItem>
-                  <NDescriptionsItem label="级别">{{ selectedEvent.level }}</NDescriptionsItem>
-                  <NDescriptionsItem label="模块">{{ selectedEvent.source_module }}</NDescriptionsItem>
-                  <NDescriptionsItem label="消息">{{ selectedEvent.message }}</NDescriptionsItem>
-                </NDescriptions>
-                <pre class="json-block">{{ jsonText(selectedEvent.detail_json) || '无 detail_json' }}</pre>
-              </NTabPane>
-
-              <NTabPane v-if="selectedTrace" name="trace" tab="Trace">
-                <pre class="json-block">{{ jsonText(selectedTrace.summary) }}</pre>
-                <div class="step-list">
-                  <div v-for="step in selectedTrace.steps" :key="step.step_trace_id" class="step-item">
-                    <div class="step-title">
-                      <strong>{{ step.step_name }}</strong>
-                      <NTag size="small" :type="statusType(step.step_status)">{{ step.step_status }}</NTag>
-                    </div>
-                    <div class="record-meta">
-                      <span>{{ formatDate(step.created_at) }}</span>
-                      <button
-                        v-if="step.linked_request_id"
-                        type="button"
-                        class="link-button"
-                        @click="filterByRequest(step.linked_request_id, selectedRecord.world_id)"
+            <div class="detail-tabs-wrapper">
+              <NTabs type="line" animated class="detail-tabs">
+                <NTabPane name="summary" tab="摘要">
+                  <NScrollbar class="tab-scroll">
+                    <NDescriptions :column="2" size="small" bordered>
+                      <NDescriptionsItem label="来源">{{ selectedSource }}</NDescriptionsItem>
+                      <NDescriptionsItem label="类型">{{ selectedKind }}</NDescriptionsItem>
+                      <NDescriptionsItem label="创建时间">{{ formatDate(selectedRecord.created_at) }}</NDescriptionsItem>
+                      <NDescriptionsItem label="World">{{ selectedRecord.world_id || '-' }}</NDescriptionsItem>
+                      <NDescriptionsItem label="Session">{{ selectedRecord.session_id || '-' }}</NDescriptionsItem>
+                      <NDescriptionsItem label="Turn">{{ selectedRecord.scene_turn_id || '-' }}</NDescriptionsItem>
+                      <NDescriptionsItem label="Trace">{{ selectedRecord.trace_id || '-' }}</NDescriptionsItem>
+                      <NDescriptionsItem label="Request">{{ selectedRecord.request_id || '-' }}</NDescriptionsItem>
+                    </NDescriptions>
+                    <div class="detail-actions">
+                      <NButton
+                        v-if="selectedRecord.trace_id"
+                        size="small"
+                        @click="filterByTrace(selectedRecord.trace_id, selectedRecord.world_id)"
                       >
-                        {{ step.linked_request_id }}
-                      </button>
+                        查看 Trace
+                      </NButton>
+                      <NButton
+                        v-if="selectedRecord.request_id"
+                        size="small"
+                        @click="filterByRequest(selectedRecord.request_id, selectedRecord.world_id)"
+                      >
+                        查看 Request
+                      </NButton>
                     </div>
-                    <pre class="json-block small">{{ jsonText({
-                      input_summary: step.input_summary,
-                      output_summary: step.output_summary,
-                      decision_json: step.decision_json,
-                      error_event_id: step.error_event_id,
-                    }) }}</pre>
-                  </div>
-                </div>
-              </NTabPane>
-            </NTabs>
+                  </NScrollbar>
+                </NTabPane>
+
+                <NTabPane v-if="selectedLlm" name="request" tab="Request">
+                  <NScrollbar class="tab-scroll">
+                    <pre class="json-block">{{ jsonText(selectedLlm.request_json) }}</pre>
+                  </NScrollbar>
+                </NTabPane>
+                <NTabPane v-if="selectedLlm" name="response" tab="Response">
+                  <NScrollbar class="tab-scroll">
+                    <NAlert type="info" class="inline-alert">
+                      原始响应可能包含 prompt、角色卡、世界书或 Agent 私有上下文；数据库写入层已执行凭证脱敏。
+                    </NAlert>
+                    <pre v-if="selectedLlm.readable_text" class="text-block">{{ selectedLlm.readable_text }}</pre>
+                    <pre class="json-block">{{ jsonText(selectedLlm.response_json) }}</pre>
+                  </NScrollbar>
+                </NTabPane>
+                <NTabPane v-if="selectedLlm" name="schema" tab="Schema">
+                  <NScrollbar class="tab-scroll">
+                    <pre class="json-block">{{ jsonText(selectedLlm.schema_json) || '无结构化 schema' }}</pre>
+                  </NScrollbar>
+                </NTabPane>
+                <NTabPane v-if="selectedLlm" name="stream" tab="Stream">
+                  <NScrollbar class="tab-scroll">
+                    <div v-if="streamChunks.length === 0" class="empty-area compact">
+                      <NEmpty description="没有 stream chunk" />
+                    </div>
+                    <div v-else class="chunk-list">
+                      <div v-for="chunk in streamChunks" :key="chunk.chunk_id" class="chunk-item">
+                        <div class="chunk-meta">#{{ chunk.chunk_index }} · {{ formatDate(chunk.received_at) }}</div>
+                        <pre>{{ chunk.raw_chunk }}</pre>
+                      </div>
+                    </div>
+                  </NScrollbar>
+                </NTabPane>
+
+                <NTabPane v-if="selectedEvent" name="event" tab="事件">
+                  <NScrollbar class="tab-scroll">
+                    <NDescriptions :column="1" size="small" bordered>
+                      <NDescriptionsItem label="事件">{{ selectedEvent.event_type }}</NDescriptionsItem>
+                      <NDescriptionsItem label="级别">{{ selectedEvent.level }}</NDescriptionsItem>
+                      <NDescriptionsItem label="模块">{{ selectedEvent.source_module }}</NDescriptionsItem>
+                      <NDescriptionsItem label="消息">{{ selectedEvent.message }}</NDescriptionsItem>
+                    </NDescriptions>
+                    <pre class="json-block">{{ jsonText(selectedEvent.detail_json) || '无 detail_json' }}</pre>
+                  </NScrollbar>
+                </NTabPane>
+
+                <NTabPane v-if="selectedTrace" name="trace" tab="Trace">
+                  <NScrollbar class="tab-scroll">
+                    <pre class="json-block">{{ jsonText(selectedTrace.summary) }}</pre>
+                    <div class="step-list">
+                      <div v-for="step in selectedTrace.steps" :key="step.step_trace_id" class="step-item">
+                        <div class="step-title">
+                          <strong>{{ step.step_name }}</strong>
+                          <NTag size="small" :type="statusType(step.step_status)">{{ step.step_status }}</NTag>
+                        </div>
+                        <div class="record-meta">
+                          <span>{{ formatDate(step.created_at) }}</span>
+                          <button
+                            v-if="step.linked_request_id"
+                            type="button"
+                            class="link-button"
+                            @click="filterByRequest(step.linked_request_id, selectedRecord.world_id)"
+                          >
+                            {{ step.linked_request_id }}
+                          </button>
+                        </div>
+                        <pre class="json-block small">{{ jsonText({
+                          input_summary: step.input_summary,
+                          output_summary: step.output_summary,
+                          decision_json: step.decision_json,
+                          error_event_id: step.error_event_id,
+                        }) }}</pre>
+                      </div>
+                    </div>
+                  </NScrollbar>
+                </NTabPane>
+              </NTabs>
+            </div>
           </div>
         </NSpin>
       </section>
@@ -695,10 +713,19 @@ onMounted(refreshAll)
   padding: 12px;
 }
 
-.record-list :deep(.n-spin-container),
-.detail-panel :deep(.n-spin-container) {
+.record-list-spin,
+.detail-spin {
   height: 100%;
   min-height: 0;
+}
+
+.record-list-scroll {
+  height: 100%;
+  min-height: 0;
+}
+
+.record-list-content {
+  min-height: 100%;
 }
 
 .record-row {
@@ -780,13 +807,45 @@ onMounted(refreshAll)
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 14px;
   overflow: hidden;
 }
 
 .detail-heading {
   flex-shrink: 0;
-  margin-bottom: 8px;
+  padding: 14px 14px 0;
+}
+
+.detail-tabs-wrapper {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 14px 14px;
+  overflow: hidden;
+}
+
+.detail-tabs {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.detail-tabs :deep(.n-tabs-nav) {
+  flex-shrink: 0;
+}
+
+.detail-tabs :deep(.n-tabs-pane-wrapper) {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.detail-tabs :deep(.n-tab-pane) {
+  height: 100%;
+  min-height: 0;
+}
+
+.tab-scroll {
+  height: 100%;
 }
 
 .detail-heading h2 {
@@ -797,19 +856,7 @@ onMounted(refreshAll)
 
 .detail-actions {
   margin-top: 12px;
-}
-
-.detail-content :deep(.n-tabs) {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.detail-content :deep(.n-tab-pane) {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
+  padding-bottom: 4px;
 }
 
 .inline-alert {
