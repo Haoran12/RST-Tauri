@@ -56,7 +56,11 @@ watch(
   () => props.entry,
   (newEntry) => {
     if (newEntry) {
-      localEntry.value = { ...newEntry }
+      // 合并默认值，确保所有数组字段都有初始值
+      localEntry.value = {
+        ...createWorldInfoEntry(newEntry.uid),
+        ...newEntry,
+      }
       contentMode.value = DEFAULT_BINDINGS.st_worldbook_content.defaultMode
     } else {
       localEntry.value = createWorldInfoEntry(0)
