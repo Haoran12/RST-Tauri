@@ -221,7 +221,10 @@ impl LlmCallLogger {
             crate::logging::context::LlmNode::SurfaceRealizer => "SurfaceRealizer",
         };
 
-        let (request_json, request_redacted) = redact_sensitive_value(request);
+        // Build request with headers based on provider
+        let request_with_headers = build_request_with_headers(provider, request_url, request);
+
+        let (request_json, request_redacted) = redact_sensitive_value(&request_with_headers);
         let schema_json = schema.map(redact_sensitive_value).map(|(value, _)| value);
 
         let call = InProgressCall {
@@ -761,6 +764,49 @@ fn redact_query_value(text: &str, marker: &str) -> String {
     }
     output.push_str(remaining);
     output
+}
+
+/// Build a request JSON with headers based on provider type
+fn build_request_with_headers(
+    provider: &str,
+    request_url: Option<&str>,
+    request_body: &serde_json::Value,
+) -> serde_json::Value {
+    let mut headers = serde_json::Map::new();
+
+    // Add provider-specific headers (will be redacted later)
+    match provider {
+        "anthropic" => {
+            headers.insert("x-api-key".to_string(), serde_json::json!("[REDACTED]"));
+            headers.insert("anthropic-version".to_string(), serde_json::json!("2023-06-01"));
+            headers.insert("Content-Type".to_string(), serde_json::json!("application/json"));
+        }
+        "openai_chat" | "openai_responses" | "deepseek" => {
+            headers.insert("Authorization".to_string(), serde_json::json!("Bearer [REDACTED]"));
+            headers.insert("Content-Type".to_string(), serde_json::json!("application/json"));
+        }
+        "gemini" => {
+            headers.insert("Content-Type".to_string(), serde_json::json!("application/json"));
+            // API key is in URL query parameter, not header
+        }
+        "claude_code" => {
+            headers.insert("Authorization".to_string(), serde_json::json!("Bearer [REDACTED]"));
+            headers.insert("anthropic-version".to_string(), serde_json::json!("2023-06-01"));
+            headers.insert("Content-Type".to_string(), serde_json::json!("application/json"));
+        }
+        _ => {
+            headers.insert("Content-Type".to_string(), serde_json::json!("application/json"));
+        }
+    }
+
+    let mut result = serde_json::Map::new();
+    if let Some(url) = request_url {
+        result.insert("url".to_string(), serde_json::json!(url));
+    }
+    result.insert("headers".to_string(), serde_json::Value::Object(headers));
+    result.insert("body".to_string(), request_body.clone());
+
+    serde_json::Value::Object(result)
 }
 
 #[cfg(test)]
