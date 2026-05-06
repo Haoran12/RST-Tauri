@@ -6,7 +6,6 @@ import {
   NSpin,
   NInput,
   NButton,
-  NDropdown,
   NForm,
   NFormItem,
   NIcon,
@@ -17,11 +16,10 @@ import {
   NText,
   NTag,
   useMessage,
-  useDialog,
 } from 'naive-ui'
 import { computed, ref, watch, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { SearchOutline, AddOutline, TrashOutline, SettingsOutline, ReorderFourOutline, EllipsisHorizontalOutline, SwapHorizontalOutline } from '@vicons/ionicons5'
+import { SearchOutline, AddOutline, TrashOutline, SettingsOutline, ReorderFourOutline } from '@vicons/ionicons5'
 import { useAppShellStore } from '@/stores/appShell'
 import { useCharactersStore } from '@/stores/characters'
 import { useChatStore } from '@/stores/chat'
@@ -36,7 +34,6 @@ import { modalSizeStyles } from '@/composables/useModalSize'
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
-const dialog = useDialog()
 const appShellStore = useAppShellStore()
 const charactersStore = useCharactersStore()
 const chatStore = useChatStore()
@@ -50,7 +47,7 @@ const editSessionWorldbooks = ref<string[]>([])
 const editPersonaName = ref('')
 const editPersonaDescription = ref('')
 const isSavingSessionSettings = ref(false)
-const switchingSessionId = ref<string | null>(null)
+const deletingSessionId = ref<string | null>(null)
 
 // Drag and drop state for prompt items
 const draggedItem = ref<PromptItem | null>(null)
@@ -303,66 +300,64 @@ async function saveSessionSettings() {
   }
 }
 
-function handleSessionMenuSelect(key: string, session: ChatSession) {
-  if (key === 'switch') {
-    switchingSessionId.value = session.id
-  } else if (key === 'delete') {
-    confirmDeleteSession(session)
-  }
+// 判断当前会话是否有未完成的操作
+// 包括: LLM请求/响应、日志记录、正则解析、其他扩展操作
+const isCurrentSessionBusy = computed(() => {
+  // LLM 正在生成
+  if (chatStore.isGenerating) return true
+  // 正在编辑会话设置
+  if (editingStSessionId.value) return true
+  // TODO: 添加其他未完成操作的判断
+  // - 正则解析中
+  // - 日志记录中
+  // - 其他扩展操作
+  return false
+})
+
+// 判断正在编辑的会话是否可以打开
+const canOpenEditingSession = computed(() => {
+  if (!editingStSessionId.value) return false
+  // 如果是当前已打开的会话，禁用
+  if (route.params.sessionId === editingStSessionId.value) return false
+  // 如果当前会话有未完成的操作，禁用
+  return !isCurrentSessionBusy.value
+})
+
+function canOpenSession(session: ChatSession): boolean {
+  // 如果是当前会话，禁用
+  if (route.params.sessionId === session.id) return false
+  // 如果当前会话有未完成的操作，禁用
+  return !isCurrentSessionBusy.value
 }
 
-function canSwitchSession(session: ChatSession): boolean {
-  // 如果点击的是当前会话，不需要检查
-  if (route.params.sessionId === session.id) return true
-  // 检查当前会话是否有未完成的操作
-  return !chatStore.isGenerating && !editingStSessionId.value
-}
-
-async function confirmSwitchSession() {
-  if (!switchingSessionId.value) return
-  const session = chatStore.sessions.find(s => s.id === switchingSessionId.value)
-  if (!session) {
-    switchingSessionId.value = null
-    return
-  }
-  if (!canSwitchSession(session)) {
+function openCurrentEditingSession() {
+  if (!editingStSessionId.value) return
+  const session = chatStore.sessions.find(s => s.id === editingStSessionId.value)
+  if (!session) return
+  if (!canOpenSession(session)) {
     message.warning('当前会话有未完成的操作，无法切换')
-    switchingSessionId.value = null
     return
   }
-  switchingSessionId.value = null
-  await router.push({ name: 'st-chat', params: { sessionId: session.id } })
+  editingStSessionId.value = null
+  router.push({ name: 'st-chat', params: { sessionId: session.id } })
 }
 
-async function confirmDeleteSession(session: ChatSession) {
-  dialog.warning({
-    title: '删除会话',
-    content: `确定删除会话「${session.name || '未命名会话'}」？此操作不可恢复。`,
-    positiveText: '删除',
-    negativeText: '取消',
-    onPositiveClick: async () => {
-      await chatStore.deleteSession(session.id)
-      message.success('会话已删除')
-    },
-  })
+function confirmDeleteCurrentEditingSession() {
+  if (!editingStSessionId.value) return
+  deletingSessionId.value = editingStSessionId.value
 }
 
-function getSessionMenuOptions(session: ChatSession) {
-  const isCurrentSession = route.params.sessionId === session.id
-  const canSwitch = canSwitchSession(session)
-  return [
-    {
-      label: isCurrentSession ? '当前会话' : '切换会话',
-      key: 'switch',
-      disabled: isCurrentSession || !canSwitch,
-      icon: () => h(NIcon, null, { default: () => h(SwapHorizontalOutline) }),
-    },
-    {
-      label: '删除会话',
-      key: 'delete',
-      icon: () => h(NIcon, null, { default: () => h(TrashOutline) }),
-    },
-  ]
+async function confirmDeleteSessionFromModal() {
+  if (!deletingSessionId.value) return
+  const session = chatStore.sessions.find(s => s.id === deletingSessionId.value)
+  if (!session) {
+    deletingSessionId.value = null
+    return
+  }
+  await chatStore.deleteSession(session.id)
+  editingStSessionId.value = null
+  deletingSessionId.value = null
+  message.success('会话已删除')
 }
 
 function formatShortTime(value: string) {
@@ -1061,25 +1056,6 @@ watch(() => route.name, async (newName) => {
                   <span class="context-item-name">{{ item.name }}</span>
                   <NTag v-if="item.type" size="tiny" :bordered="false">{{ item.type }}</NTag>
                 </div>
-                <div v-if="route.name === 'st-chat' && item.session" class="context-item-actions">
-                  <NDropdown
-                    trigger="click"
-                    :options="getSessionMenuOptions(item.session)"
-                    @select="(key: string) => handleSessionMenuSelect(key, item.session!)"
-                  >
-                    <NButton
-                      quaternary
-                      circle
-                      size="tiny"
-                      class="context-item-menu"
-                      @click.stop
-                    >
-                      <template #icon>
-                        <NIcon><EllipsisHorizontalOutline /></NIcon>
-                      </template>
-                    </NButton>
-                  </NDropdown>
-                </div>
               </div>
               <NText v-if="item.meta" depth="3" class="context-item-meta">
                 {{ item.meta }}
@@ -1094,10 +1070,30 @@ watch(() => route.name, async (newName) => {
     <NModal
       :show="editingStSessionId !== null"
       preset="card"
-      title="编辑 ST 会话"
       :style="modalSizeStyles.editor"
       @update:show="value => { if (!value) editingStSessionId = null }"
     >
+      <template #header>
+        <div class="modal-header">
+          <span>编辑 ST 会话</span>
+          <div class="modal-header-actions">
+            <NButton
+              size="small"
+              :disabled="!canOpenEditingSession"
+              @click="openCurrentEditingSession"
+            >
+              打开该聊天
+            </NButton>
+            <NButton
+              size="small"
+              type="error"
+              @click="confirmDeleteCurrentEditingSession"
+            >
+              删除聊天
+            </NButton>
+          </div>
+        </div>
+      </template>
       <NForm label-placement="top">
         <NFormItem label="会话名称">
           <NInput v-model:value="editSessionName" placeholder="会话名称" />
@@ -1141,22 +1137,19 @@ watch(() => route.name, async (newName) => {
       </div>
     </NModal>
 
-    <!-- 切换会话确认弹窗 -->
+    <!-- 删除会话确认弹窗 -->
     <NModal
-      :show="switchingSessionId !== null"
+      :show="deletingSessionId !== null"
       preset="card"
-      title="切换会话"
+      title="删除会话"
       :style="modalSizeStyles.dialog"
-      @update:show="value => { if (!value) switchingSessionId = null }"
+      @update:show="value => { if (!value) deletingSessionId = null }"
     >
-      <NText>确定切换到该会话？</NText>
-      <NText v-if="chatStore.isGenerating" depth="3" class="switch-warning">
-        当前会话正在生成回复，切换将中断当前操作。
-      </NText>
+      <NText>确定删除该会话？此操作不可恢复。</NText>
       <div class="modal-actions">
-        <NButton @click="switchingSessionId = null">取消</NButton>
-        <NButton type="primary" @click="confirmSwitchSession">
-          切换
+        <NButton @click="deletingSessionId = null">取消</NButton>
+        <NButton type="error" @click="confirmDeleteSessionFromModal">
+          删除
         </NButton>
       </div>
     </NModal>
@@ -1271,16 +1264,6 @@ watch(() => route.name, async (newName) => {
   white-space: nowrap;
   font-size: 13px;
   font-weight: 500;
-}
-
-.context-item-menu {
-  flex: 0 0 auto;
-  opacity: 1;
-}
-
-.context-item-actions {
-  flex: 0 0 auto;
-  margin-left: auto;
 }
 
 .context-item-meta {
@@ -1410,17 +1393,22 @@ watch(() => route.name, async (newName) => {
   opacity: 1;
 }
 
-.switch-warning {
-  display: block;
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--n-warning-color);
-}
-
 .modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 12px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.modal-header-actions {
+  display: flex;
+  gap: 8px;
 }
 </style>
