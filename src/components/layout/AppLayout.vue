@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { NLayout, NLayoutSider, NLayoutContent } from 'naive-ui'
+import { NButton, NIcon, NLayout, NLayoutSider, NLayoutContent } from 'naive-ui'
+import { CloseOutline } from '@vicons/ionicons5'
 import { computed, defineAsyncComponent } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAppShellStore } from '@/stores/appShell'
+import { useChatStore } from '@/stores/chat'
 import AppNav from './AppNav.vue'
 import PanelLoading from './PanelLoading.vue'
 
 const route = useRoute()
+const router = useRouter()
 const appShell = useAppShellStore()
+const chatStore = useChatStore()
 const STContextList = defineAsyncComponent({
   loader: () => import('./ContextList.vue'),
   loadingComponent: PanelLoading,
@@ -45,13 +49,25 @@ const stWorkspaceRouteNames = new Set([
   'resources-regex',
 ])
 const sharedToolRouteNames = new Set(['api-configs', 'logs'])
-const isStSplitWorkspace = computed(() => {
+const isStFloatingWorkspace = computed(() => {
   const routeName = route.name as string
   return stWorkspaceRouteNames.has(routeName)
     || (appShell.currentMode === 'st' && sharedToolRouteNames.has(routeName))
 })
+const isStFloatingToolRoute = computed(() => isStFloatingWorkspace.value && !isStChatRoute.value)
+const showFloatingContextList = computed(() => {
+  return [
+    'st-home',
+    'resources-characters',
+    'resources-worldbooks',
+    'resources-presets',
+    'resources-regex',
+  ].includes(route.name as string)
+})
 
 const showContextList = computed(() => {
+  if (isStFloatingToolRoute.value) return false
+
   const contextPages = [
     'st-home',
     'st-chat',
@@ -70,6 +86,15 @@ const showInspectPanel = computed(() => {
   const inspectPages = ['st-chat', 'agent-worlds', 'agent-world-editor']
   return inspectPages.includes(route.name as string) && appShell.inspectPanelOpen
 })
+
+function closeFloatingTool() {
+  const sessionId = chatStore.currentSession?.id
+  if (sessionId) {
+    router.push({ name: 'st-chat', params: { sessionId } })
+    return
+  }
+  router.push({ name: 'st-chat' })
+}
 
 const contextSiderContentStyle = {
   height: '100%',
@@ -132,8 +157,8 @@ const mainContentStyle = {
         :content-style="mainContentStyle"
       >
         <div class="route-host">
-          <template v-if="isStSplitWorkspace">
-            <div class="st-split-workspace" :class="{ 'st-split-workspace-tools': !isStChatRoute }">
+          <template v-if="isStFloatingWorkspace">
+            <div class="st-floating-workspace">
               <section class="st-chat-pane" aria-label="ST 聊天">
                 <Suspense>
                   <STPinnedChatView />
@@ -143,24 +168,43 @@ const mainContentStyle = {
                 </Suspense>
               </section>
 
-              <section v-if="!isStChatRoute" class="st-tool-pane" aria-label="ST 工具">
-                <router-view v-slot="{ Component }">
-                  <Suspense>
-                    <component :is="Component" />
-                    <template #fallback>
-                      <div class="route-loading">
-                        <div class="route-loading-header" />
-                        <div class="route-loading-grid">
-                          <div class="route-loading-card route-loading-card-wide" />
-                          <div class="route-loading-card" />
-                          <div class="route-loading-card" />
-                        </div>
-                      </div>
-                    </template>
-                  </Suspense>
-                </router-view>
+              <section v-if="isStFloatingToolRoute" class="st-floating-tool" aria-label="ST 工具">
+                <header class="st-floating-tool-header">
+                  <span class="st-floating-tool-title">工具</span>
+                  <NButton quaternary circle size="small" aria-label="关闭工具" @click="closeFloatingTool">
+                    <template #icon><NIcon :component="CloseOutline" /></template>
+                  </NButton>
+                </header>
+                <div class="st-floating-tool-body">
+                  <aside v-if="showFloatingContextList" class="st-floating-context">
+                    <Suspense>
+                      <STContextList />
+                      <template #fallback>
+                        <PanelLoading />
+                      </template>
+                    </Suspense>
+                  </aside>
+
+                  <div class="st-floating-route">
+                    <router-view v-slot="{ Component }">
+                      <Suspense>
+                        <component :is="Component" />
+                        <template #fallback>
+                          <div class="route-loading">
+                            <div class="route-loading-header" />
+                            <div class="route-loading-grid">
+                              <div class="route-loading-card route-loading-card-wide" />
+                              <div class="route-loading-card" />
+                              <div class="route-loading-card" />
+                            </div>
+                          </div>
+                        </template>
+                      </Suspense>
+                    </router-view>
+                  </div>
+                </div>
               </section>
-            </div>
+                        </div>
           </template>
 
           <router-view v-else v-slot="{ Component }">
@@ -261,7 +305,8 @@ const mainContentStyle = {
   min-height: 0;
 }
 
-.st-split-workspace {
+.st-floating-workspace {
+  position: relative;
   flex: 1 1 0;
   width: 100%;
   height: 100%;
@@ -272,12 +317,8 @@ const mainContentStyle = {
   overflow: hidden;
 }
 
-.st-split-workspace-tools {
-  flex-direction: row;
-}
-
-.st-chat-pane,
-.st-tool-pane {
+.st-chat-pane {
+  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -285,18 +326,70 @@ const mainContentStyle = {
   overflow: hidden;
 }
 
-.st-chat-pane {
+.st-floating-tool {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  bottom: 14px;
+  z-index: 20;
+  width: min(980px, calc(100% - 28px));
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-border-subtle, #d6dbe3);
+  border-radius: 8px;
+  background: var(--color-bg-surface, #fff);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+}
+
+.st-floating-tool-header {
+  flex: 0 0 auto;
+  height: 44px;
+  padding: 0 10px 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--color-border-subtle, #e0e0e6);
+  background: var(--color-bg-surface, #fff);
+}
+
+.st-floating-tool-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.st-floating-tool-body {
   flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
 }
 
-.st-split-workspace-tools .st-chat-pane {
-  flex: 0 1 42%;
-  min-width: 360px;
+.st-floating-context {
+  flex: 0 0 280px;
+  width: 280px;
+  min-height: 0;
+  min-width: 0;
   border-right: 1px solid var(--color-border-subtle, #e0e0e6);
+  background: var(--color-bg-surface, #f5f7fa);
+  overflow: hidden;
 }
 
-.st-tool-pane {
-  flex: 1 1 58%;
+.st-floating-route {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--color-bg-app, #f0f2f5);
 }
 
@@ -355,20 +448,39 @@ const mainContentStyle = {
 }
 
 @media (max-width: 1180px) {
-  .st-split-workspace-tools {
+  .st-floating-tool {
+    top: auto;
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    width: auto;
+    height: min(72%, 760px);
+  }
+
+  .st-floating-context {
+    flex-basis: 240px;
+    width: 240px;
+  }
+}
+
+@media (max-width: 760px) {
+  .st-floating-tool {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    height: auto;
+  }
+
+  .st-floating-tool-body {
     flex-direction: column;
   }
 
-  .st-split-workspace-tools .st-chat-pane {
-    flex: 0 0 44%;
-    min-width: 0;
-    min-height: 280px;
+  .st-floating-context {
+    flex: 0 0 180px;
+    width: 100%;
     border-right: 0;
     border-bottom: 1px solid var(--color-border-subtle, #e0e0e6);
-  }
-
-  .st-tool-pane {
-    flex: 1 1 56%;
   }
 }
 </style>
