@@ -435,21 +435,10 @@ onBeforeUnmount(() => {
                   </div>
                 </template>
               </ChatMessageItem>
-              <ChatMessageItem
-                v-if="shouldShowGenerating"
-                role="assistant"
-                :name="characterName"
-                :content="chatStore.streamingContent || '...'"
-                :floor="chatStore.messages.length + 1"
-                pending
-                :editable="false"
-                :deletable="false"
-                @copy="copyMessage(chatStore.streamingContent)"
-              >
-                <template v-if="!chatStore.streamingContent" #attachments>
-                  <NSpin size="small" />
-                </template>
-              </ChatMessageItem>
+              <div v-if="shouldShowGenerating" class="generating-indicator">
+                <NSpin size="small" />
+                <span>正在生成...</span>
+              </div>
             </div>
           </NScrollbar>
         </div>
@@ -646,6 +635,16 @@ onBeforeUnmount(() => {
   object-fit: cover;
   border-radius: 12px;
   border: 1px solid var(--n-border-color);
+}
+
+.generating-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  color: var(--n-text-color-3);
+  font-size: 13px;
 }
 
 /* Input */

@@ -347,6 +347,7 @@ function escapeHtml(raw: string) {
 
 .message-bubble {
   max-width: 100%;
+  min-width: 120px;
   padding: 12px 15px;
   border: 1px solid var(--n-border-color);
   border-radius: 8px;
