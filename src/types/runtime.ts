@@ -215,7 +215,6 @@ export interface AssembleRequestInput {
   api_config_id: string;
   character_id: string | null;
   session_id: string;
-  assistant_message_id?: string | null;
   preset_name: string | null;
   world_info_settings: STWorldInfoSettings;
   chat_lore_id?: string | null;
