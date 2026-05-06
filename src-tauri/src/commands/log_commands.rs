@@ -86,6 +86,7 @@ pub struct LogRecordPage {
     pub offset: i64,
     pub limit: i64,
     pub has_more: bool,
+    pub total_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -255,6 +256,13 @@ pub async fn query_log_records(
     records.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
     let has_more = records.len() as i64 > offset + limit;
+    let total_count = if has_more {
+        // 有更多数据时，估算总数为当前已获取数量（至少是 offset + limit + 1）
+        records.len() as i64
+    } else {
+        // 没有更多数据时，总数就是当前所有记录
+        records.len() as i64
+    };
     let records = records
         .into_iter()
         .skip(offset as usize)
@@ -266,6 +274,7 @@ pub async fn query_log_records(
         offset,
         limit,
         has_more,
+        total_count,
     })
 }
 
