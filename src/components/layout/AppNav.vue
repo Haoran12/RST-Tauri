@@ -261,7 +261,8 @@ function switchMode(mode: AppMode) {
   font-size: 12px;
   line-height: 1.2;
   white-space: nowrap;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
   opacity: 0;
   transform: translate(4px, -50%);
   visibility: hidden;
