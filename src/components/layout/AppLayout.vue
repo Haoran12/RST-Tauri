@@ -29,7 +29,7 @@ const AgentInspectPanel = defineAsyncComponent({
   delay: 80,
 })
 
-const isAgentMode = computed(() => appShell.currentMode === 'agent')
+const isAgentMode = computed(() => route.path.startsWith('/agent'))
 
 const showContextList = computed(() => {
   const contextPages = [

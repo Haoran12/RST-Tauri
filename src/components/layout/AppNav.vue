@@ -53,7 +53,13 @@ const agentSections: NavItem[][] = [
   ],
 ]
 
-const navSections = computed(() => appShell.currentMode === 'agent' ? agentSections : stSections)
+const displayMode = computed<AppMode>(() => {
+  if (route.path.startsWith('/agent')) return 'agent'
+  if (route.path.startsWith('/st')) return 'st'
+  return appShell.currentMode
+})
+
+const navSections = computed(() => displayMode.value === 'agent' ? agentSections : stSections)
 
 const activeKey = computed(() => {
   const name = route.name as string
