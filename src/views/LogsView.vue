@@ -21,6 +21,8 @@ import {
 } from 'naive-ui'
 import {
   DownloadOutline,
+  LockClosedOutline,
+  LockOpenOutline,
   RefreshOutline,
   SearchOutline,
   TrashOutline,
@@ -33,6 +35,7 @@ import {
   getStreamChunks,
   previewLogCleanup,
   queryLogRecords,
+  setLogProtection,
   type LogRecordDetail,
   type LogRecordFilter,
   type LogRecordSummary,
@@ -67,6 +70,7 @@ const isDetailLoading = ref(false)
 const isSummaryLoading = ref(false)
 const isExporting = ref(false)
 const isRetentionRunning = ref(false)
+const isTogglingProtection = ref(false)
 const error = ref<string | null>(null)
 
 const sourceOptions = [
@@ -318,6 +322,31 @@ async function handleExport(format: 'json' | 'jsonl' | 'csv') {
   }
 }
 
+async function toggleProtection(record: LogRecordSummary) {
+  const kind = record.record_ref.record_kind
+  if (kind !== 'llm' && kind !== 'event') {
+    message.warning('仅支持保护 LLM 调用和应用事件日志')
+    return
+  }
+
+  isTogglingProtection.value = true
+  try {
+    const newProtected = !record.protected
+    await setLogProtection({
+      record_kind: kind as 'llm' | 'event',
+      record_id: record.record_ref.id,
+      protected: newProtected,
+    })
+    // 更新本地状态
+    record.protected = newProtected
+    message.success(newProtected ? '已保护此日志' : '已取消保护')
+  } catch (e) {
+    message.error(String(e))
+  } finally {
+    isTogglingProtection.value = false
+  }
+}
+
 function filterByTrace(traceId?: string | null, world?: string | null) {
   if (!traceId) return
   sourceScope.value = 'trace'
@@ -484,6 +513,20 @@ onMounted(refreshAll)
                   <span v-if="record.latency_ms">{{ record.latency_ms }}ms</span>
                   <span v-if="record.stream_chunk_count">{{ record.stream_chunk_count }} chunks</span>
                   <span v-if="record.step_count">{{ record.step_count }} steps</span>
+                  <span v-if="record.protected === true" class="protected-badge">已保护</span>
+                </div>
+                <div v-if="record.record_ref.record_kind === 'llm' || record.record_ref.record_kind === 'event'" class="record-actions">
+                  <NButton
+                    size="tiny"
+                    :type="record.protected ? 'success' : 'default'"
+                    :loading="isTogglingProtection"
+                    @click.stop="toggleProtection(record)"
+                  >
+                    <template #icon>
+                      <NIcon :component="record.protected ? LockClosedOutline : LockOpenOutline" />
+                    </template>
+                    {{ record.protected ? '取消保护' : '保护' }}
+                  </NButton>
                 </div>
               </button>
             </div>
@@ -523,6 +566,18 @@ onMounted(refreshAll)
                       <NDescriptionsItem label="Request">{{ selectedRecord.request_id || '-' }}</NDescriptionsItem>
                     </NDescriptions>
                     <div class="detail-actions">
+                      <NButton
+                        v-if="selectedKind === 'llm' || selectedKind === 'event'"
+                        size="small"
+                        :type="selectedRecord.protected ? 'success' : 'default'"
+                        :loading="isTogglingProtection"
+                        @click="toggleProtection(selectedRecord)"
+                      >
+                        <template #icon>
+                          <NIcon :component="selectedRecord.protected ? LockClosedOutline : LockOpenOutline" />
+                        </template>
+                        {{ selectedRecord.protected ? '取消保护' : '保护日志' }}
+                      </NButton>
                       <NButton
                         v-if="selectedRecord.trace_id"
                         size="small"
@@ -854,6 +909,17 @@ onMounted(refreshAll)
 .record-meta {
   flex-wrap: wrap;
   margin-top: 8px;
+}
+
+.protected-badge {
+  color: var(--n-success-color);
+  font-weight: 500;
+}
+
+.record-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
 }
 
 .empty-area {

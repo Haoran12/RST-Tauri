@@ -78,6 +78,7 @@ pub struct LogRecordSummary {
     pub token_usage: Option<serde_json::Value>,
     pub stream_chunk_count: Option<i64>,
     pub step_count: Option<i64>,
+    pub protected: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -533,6 +534,109 @@ pub async fn confirm_log_cleanup(
     run_log_retention_now(state, scope).await
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetLogProtectionInput {
+    pub record_kind: String,
+    pub record_id: String,
+    pub protected: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetLogProtectionResult {
+    pub record_kind: String,
+    pub record_id: String,
+    pub protected: bool,
+}
+
+#[tauri::command]
+pub async fn set_log_protection(
+    state: State<'_, Arc<AppState>>,
+    input: SetLogProtectionInput,
+) -> Result<SetLogProtectionResult, String> {
+    let store_guard = state.sqlite_store.read().await;
+    let store = store_guard
+        .as_ref()
+        .ok_or_else(|| "Database not initialized".to_string())?;
+
+    let protected_value = if input.protected { 1 } else { 0 };
+
+    match input.record_kind.as_str() {
+        "llm" => {
+            let result = sqlx::query("UPDATE llm_call_logs SET protected = ? WHERE request_id = ?")
+                .bind(protected_value)
+                .bind(&input.record_id)
+                .execute(store.pool())
+                .await
+                .map_err(|e| format!("Failed to update LLM log protection: {}", e))?;
+
+            if result.rows_affected() == 0 {
+                return Err(format!("LLM log not found: {}", input.record_id));
+            }
+        }
+        "event" => {
+            let result = sqlx::query("UPDATE app_event_logs SET protected = ? WHERE event_id = ?")
+                .bind(protected_value)
+                .bind(&input.record_id)
+                .execute(store.pool())
+                .await
+                .map_err(|e| format!("Failed to update event log protection: {}", e))?;
+
+            if result.rows_affected() == 0 {
+                return Err(format!("Event log not found: {}", input.record_id));
+            }
+        }
+        other => return Err(format!("Unsupported log kind for protection: {}", other)),
+    }
+
+    Ok(SetLogProtectionResult {
+        record_kind: input.record_kind,
+        record_id: input.record_id,
+        protected: input.protected,
+    })
+}
+
+#[tauri::command]
+pub async fn get_log_protection(
+    state: State<'_, Arc<AppState>>,
+    record_kind: String,
+    record_id: String,
+) -> Result<bool, String> {
+    let store_guard = state.sqlite_store.read().await;
+    let store = store_guard
+        .as_ref()
+        .ok_or_else(|| "Database not initialized".to_string())?;
+
+    use sqlx::Row;
+
+    match record_kind.as_str() {
+        "llm" => {
+            let row = sqlx::query("SELECT protected FROM llm_call_logs WHERE request_id = ?")
+                .bind(&record_id)
+                .fetch_optional(store.pool())
+                .await
+                .map_err(|e| format!("Failed to get LLM log protection: {}", e))?;
+
+            match row {
+                Some(r) => Ok(r.get::<i64, _>("protected") != 0),
+                None => Err(format!("LLM log not found: {}", record_id)),
+            }
+        }
+        "event" => {
+            let row = sqlx::query("SELECT protected FROM app_event_logs WHERE event_id = ?")
+                .bind(&record_id)
+                .fetch_optional(store.pool())
+                .await
+                .map_err(|e| format!("Failed to get event log protection: {}", e))?;
+
+            match row {
+                Some(r) => Ok(r.get::<i64, _>("protected") != 0),
+                None => Err(format!("Event log not found: {}", record_id)),
+            }
+        }
+        other => Err(format!("Unsupported log kind for protection: {}", other)),
+    }
+}
+
 async fn collect_log_records(
     app: &AppHandle,
     state: &Arc<AppState>,
@@ -608,7 +712,7 @@ async fn query_llm_summaries(
         r#"
         SELECT request_id, mode, world_id, session_id, scene_turn_id, trace_id,
                character_id, llm_node, provider, model, call_type, status,
-               latency_ms, token_usage, error_summary, created_at,
+               latency_ms, token_usage, error_summary, created_at, protected,
                (SELECT COUNT(*) FROM llm_stream_chunks c WHERE c.request_id = l.request_id) AS stream_chunk_count
         FROM llm_call_logs l
         "#,
@@ -630,6 +734,7 @@ async fn query_llm_summaries(
             let provider: String = row.get("provider");
             let model: String = row.get("model");
             let llm_node: String = row.get("llm_node");
+            let protected: Option<i64> = row.get("protected");
             LogRecordSummary {
                 record_ref: LogRecordRef {
                     record_kind: "llm".to_string(),
@@ -655,6 +760,7 @@ async fn query_llm_summaries(
                 token_usage: parse_optional_json(row.get::<Option<String>, _>("token_usage")),
                 stream_chunk_count: Some(row.get("stream_chunk_count")),
                 step_count: None,
+                protected: protected.map(|p| p != 0),
             }
         })
         .collect())
@@ -669,7 +775,7 @@ async fn query_event_summaries(
     let mut builder: QueryBuilder<Sqlite> = QueryBuilder::new(
         r#"
         SELECT event_id, level, event_type, message, source_module, request_id,
-               world_id, session_id, scene_turn_id, trace_id, character_id, created_at
+               world_id, session_id, scene_turn_id, trace_id, character_id, created_at, protected
         FROM app_event_logs e
         "#,
     );
@@ -687,6 +793,7 @@ async fn query_event_summaries(
         .into_iter()
         .map(|row| {
             let event_id: String = row.get("event_id");
+            let protected: Option<i64> = row.get("protected");
             LogRecordSummary {
                 record_ref: LogRecordRef {
                     record_kind: "event".to_string(),
@@ -712,6 +819,7 @@ async fn query_event_summaries(
                 token_usage: None,
                 stream_chunk_count: None,
                 step_count: None,
+                protected: protected.map(|p| p != 0),
             }
         })
         .collect())
@@ -777,6 +885,7 @@ async fn collect_trace_records(
             token_usage: None,
             stream_chunk_count: None,
             step_count: Some(row.get("step_count")),
+            protected: None,
         }
     }));
 

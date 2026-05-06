@@ -101,7 +101,7 @@ impl LogRetentionManager {
     /// Delete old LLM logs based on retention policy
     async fn delete_old_llm_logs(&self) -> Result<u64, String> {
         let cutoff = Utc::now() - chrono::Duration::days(self.default_retention_days);
-        let result = sqlx::query("DELETE FROM llm_call_logs WHERE created_at < ?")
+        let result = sqlx::query("DELETE FROM llm_call_logs WHERE created_at < ? AND protected = 0")
             .bind(cutoff.to_rfc3339())
             .execute(&self.pool)
             .await
@@ -113,7 +113,7 @@ impl LogRetentionManager {
     /// Delete old event logs based on retention policy
     async fn delete_old_event_logs(&self) -> Result<u64, String> {
         let cutoff = Utc::now() - chrono::Duration::days(self.default_retention_days);
-        let result = sqlx::query("DELETE FROM app_event_logs WHERE created_at < ?")
+        let result = sqlx::query("DELETE FROM app_event_logs WHERE created_at < ? AND protected = 0")
             .bind(cutoff.to_rfc3339())
             .execute(&self.pool)
             .await
@@ -159,12 +159,12 @@ impl LogRetentionManager {
             return Ok(0);
         }
 
-        // Delete oldest logs first until under limit
+        // Delete oldest unprotected logs first until under limit
         let mut total_deleted = 0u64;
         while self.get_database_size().await? > target_size_bytes {
-            // Delete in batches of 1000
+            // Delete in batches of 1000, excluding protected logs
             let result = sqlx::query(
-                "DELETE FROM llm_call_logs WHERE id IN (SELECT id FROM llm_call_logs ORDER BY created_at ASC LIMIT 1000)",
+                "DELETE FROM llm_call_logs WHERE id IN (SELECT id FROM llm_call_logs WHERE protected = 0 ORDER BY created_at ASC LIMIT 1000)",
             )
             .execute(&self.pool)
             .await
@@ -174,6 +174,7 @@ impl LogRetentionManager {
             total_deleted += deleted;
 
             if deleted == 0 {
+                // No more unprotected logs to delete
                 break;
             }
         }

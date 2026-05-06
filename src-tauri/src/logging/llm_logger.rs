@@ -119,6 +119,7 @@ impl LlmCallLogger {
                 retry_count INTEGER DEFAULT 0,
                 error_summary TEXT,
                 redaction_applied INTEGER DEFAULT 0,
+                protected INTEGER DEFAULT 0,
                 created_at TEXT NOT NULL,
                 completed_at TEXT
             );
@@ -126,6 +127,7 @@ impl LlmCallLogger {
             CREATE INDEX IF NOT EXISTS idx_llm_logs_world_id ON llm_call_logs(world_id);
             CREATE INDEX IF NOT EXISTS idx_llm_logs_trace_id ON llm_call_logs(trace_id);
             CREATE INDEX IF NOT EXISTS idx_llm_logs_created_at ON llm_call_logs(created_at);
+            CREATE INDEX IF NOT EXISTS idx_llm_logs_protected ON llm_call_logs(protected);
 
             CREATE TABLE IF NOT EXISTS llm_stream_chunks (
                 chunk_id TEXT PRIMARY KEY,

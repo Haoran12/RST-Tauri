@@ -184,6 +184,8 @@ pub fn run() {
             commands::run_log_retention_now,
             commands::preview_log_cleanup,
             commands::confirm_log_cleanup,
+            commands::set_log_protection,
+            commands::get_log_protection,
             commands::validate_structured_text,
             commands::format_structured_text,
             // Runtime assembly commands

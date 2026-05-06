@@ -57,6 +57,7 @@ export interface LogRecordSummary {
   token_usage?: unknown
   stream_chunk_count?: number | null
   step_count?: number | null
+  protected?: boolean | null
 }
 
 export interface LogRecordPage {
@@ -248,5 +249,28 @@ export async function confirmLogCleanup(planId: string) {
   return await invoke<LogRetentionResult>('confirm_log_cleanup', {
     planId,
     scope: 'global',
+  })
+}
+
+export interface SetLogProtectionInput {
+  record_kind: 'llm' | 'event'
+  record_id: string
+  protected: boolean
+}
+
+export interface SetLogProtectionResult {
+  record_kind: string
+  record_id: string
+  protected: boolean
+}
+
+export async function setLogProtection(input: SetLogProtectionInput) {
+  return await invoke<SetLogProtectionResult>('set_log_protection', { input })
+}
+
+export async function getLogProtection(recordKind: 'llm' | 'event', recordId: string) {
+  return await invoke<boolean>('get_log_protection', {
+    record_kind: recordKind,
+    record_id: recordId,
   })
 }

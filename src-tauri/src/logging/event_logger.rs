@@ -76,12 +76,14 @@ impl EventLogger {
                 runtime_config_snapshot_id TEXT,
                 world_rules_snapshot_id TEXT,
                 detail_json TEXT,
+                protected INTEGER DEFAULT 0,
                 created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_event_logs_event_id ON app_event_logs(event_id);
             CREATE INDEX IF NOT EXISTS idx_event_logs_level ON app_event_logs(level);
             CREATE INDEX IF NOT EXISTS idx_event_logs_event_type ON app_event_logs(event_type);
             CREATE INDEX IF NOT EXISTS idx_event_logs_created_at ON app_event_logs(created_at);
+            CREATE INDEX IF NOT EXISTS idx_event_logs_protected ON app_event_logs(protected);
             "#,
         )
         .execute(&self.pool)
