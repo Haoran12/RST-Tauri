@@ -684,9 +684,6 @@ onMounted(refreshAll)
                 </NTabPane>
                 <NTabPane v-if="selectedLlm" name="response" tab="原始响应">
                   <NScrollbar class="tab-scroll">
-                    <NAlert type="info" class="inline-alert">
-                      原始响应可能包含 prompt、角色卡、世界书或 Agent 私有上下文；数据库写入层已执行凭证脱敏。
-                    </NAlert>
                     <pre class="json-block">{{ jsonText(selectedLlm.response_json) }}</pre>
                   </NScrollbar>
                 </NTabPane>

@@ -443,7 +443,7 @@ CREATE TABLE IF NOT EXISTS llm_call_logs (
     call_type TEXT NOT NULL,               -- chat / chat_structured / chat_stream
     request_json TEXT NOT NULL,            -- JSON: 写入前必须脱敏
     schema_json TEXT,                      -- JSON Schema，仅 structured 调用有值
-    response_json TEXT,                    -- JSON: 原始响应或结构化结果
+    response_json TEXT,                    -- JSON: 完整响应（已脱敏）
     assembled_text TEXT,                   -- stream chunk 直接拼接文本
     readable_text TEXT,                    -- 仅展示用的段落化文本
     status TEXT NOT NULL,                  -- started / succeeded / failed / cancelled
