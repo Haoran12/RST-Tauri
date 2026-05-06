@@ -480,6 +480,7 @@ const DEFAULT_PRESET_TEMPLATE: Omit<PresetFile, 'name'> = {
       order: [
         { identifier: 'main', enabled: true },
         { identifier: 'worldInfoBefore', enabled: true },
+        { identifier: 'personaDescription', enabled: true },
         { identifier: 'charDescription', enabled: true },
         { identifier: 'charPersonality', enabled: true },
         { identifier: 'scenario', enabled: true },
@@ -496,7 +497,6 @@ const DEFAULT_PRESET_TEMPLATE: Omit<PresetFile, 'name'> = {
       order: [
         { identifier: 'main', enabled: true },
         { identifier: 'worldInfoBefore', enabled: true },
-        { identifier: 'personaDescription', enabled: true },
         { identifier: 'charDescription', enabled: true },
         { identifier: 'charPersonality', enabled: true },
         { identifier: 'scenario', enabled: true },

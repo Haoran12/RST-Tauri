@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::st::keyword_matcher::GlobalScanData;
+use crate::st::macros::{substitute_params, MacroContext};
 use crate::st::preset::{
     ContextTemplate, InstructTemplate, PromptItem, PromptPreset, ReasoningTemplate, SamplerPreset,
     SystemPrompt,
@@ -342,13 +343,14 @@ impl RequestAssembler {
     /// 构建系统提示词
     fn build_system_prompt(context: &RuntimeContext) -> String {
         let mut parts: Vec<String> = Vec::new();
+        let macro_context = Self::macro_context(context);
 
         if let Some(prompt_preset) = &context.prompt_preset {
             for prompt in ordered_prompt_items(prompt_preset) {
                 match prompt.identifier.as_str() {
                     "main" | "nsfw" | "enhanceDefinitions" => {
                         if !prompt.content.is_empty() {
-                            parts.push(prompt.content.clone());
+                            parts.push(substitute_params(&prompt.content, &macro_context));
                         }
                     }
                     "worldInfoBefore" => {
@@ -395,10 +397,13 @@ impl RequestAssembler {
                     }
                     "jailbreak" => {
                         if !prompt.content.is_empty() {
-                            parts.push(prompt.content.clone());
+                            parts.push(substitute_params(&prompt.content, &macro_context));
                         } else if let Some(char) = &context.character {
                             if !char.data.post_history_instructions.is_empty() {
-                                parts.push(char.data.post_history_instructions.clone());
+                                parts.push(substitute_params(
+                                    char.data.post_history_instructions.as_str(),
+                                    &macro_context,
+                                ));
                             }
                         }
                     }
@@ -408,13 +413,13 @@ impl RequestAssembler {
         } else {
             if let Some(sp) = &context.system_prompt {
                 if !sp.content.is_empty() {
-                    parts.push(sp.content.clone());
+                    parts.push(substitute_params(sp.content.as_str(), &macro_context));
                 }
             }
 
             if let Some(char) = &context.character {
                 if !char.data.system_prompt.is_empty() {
-                    parts.push(char.data.system_prompt.clone());
+                    parts.push(substitute_params(char.data.system_prompt.as_str(), &macro_context));
                 }
             }
 
@@ -454,13 +459,21 @@ impl RequestAssembler {
 
         if let Some(context_template) = &context.context_template {
             if !context_template.story_string.is_empty() {
-                let mut story = context_template.story_string.clone();
+                let mut story = substitute_params(context_template.story_string.as_str(), &macro_context);
                 if let Some(instruct) = &context.instruct_template {
                     if !instruct.story_string_prefix.is_empty() {
-                        story = format!("{}{}", instruct.story_string_prefix, story);
+                        story = format!(
+                            "{}{}",
+                            substitute_params(instruct.story_string_prefix.as_str(), &macro_context),
+                            story
+                        );
                     }
                     if !instruct.story_string_suffix.is_empty() {
-                        story = format!("{}{}", story, instruct.story_string_suffix);
+                        story = format!(
+                            "{}{}",
+                            story,
+                            substitute_params(instruct.story_string_suffix.as_str(), &macro_context)
+                        );
                     }
                 }
                 parts.push(story);
@@ -514,7 +527,7 @@ impl RequestAssembler {
                 .as_ref()
                 .map(|preset| preset.wi_format.as_str())
                 .unwrap_or(""),
-            content,
+            &Self::macro_context(context).with_world_info(content),
         )
     }
 
@@ -524,7 +537,8 @@ impl RequestAssembler {
         if description.is_empty() {
             return None;
         }
-        Some(format!("Description: {}", description))
+        let macro_context = Self::macro_context(context).with_original(description);
+        Some(substitute_params(description, &macro_context))
     }
 
     fn format_character_scenario(context: &RuntimeContext, content: &str) -> Option<String> {
@@ -537,7 +551,9 @@ impl RequestAssembler {
                 .as_ref()
                 .map(|preset| preset.scenario_format.as_str())
                 .unwrap_or("Scenario: {{scenario}}"),
-            content,
+            &Self::macro_context(context)
+                .with_world_info(content)
+                .with_original(content),
         ))
     }
 
@@ -556,7 +572,8 @@ impl RequestAssembler {
             (true, true) => String::new(),
         };
 
-        Some(format!("Persona Description: {}", content))
+        let macro_context = Self::macro_context(context).with_original(content.clone());
+        Some(substitute_params(&content, &macro_context))
     }
 
     fn format_character_personality(context: &RuntimeContext, content: &str) -> Option<String> {
@@ -569,7 +586,9 @@ impl RequestAssembler {
                 .as_ref()
                 .map(|preset| preset.personality_format.as_str())
                 .unwrap_or("Personality: {{personality}}"),
-            content,
+            &Self::macro_context(context)
+                .with_world_info(content)
+                .with_original(content),
         ))
     }
 
@@ -581,7 +600,10 @@ impl RequestAssembler {
 
         Some(AssembledMessage {
             role: "system".to_string(),
-            content: preset.new_chat_prompt.clone(),
+            content: substitute_params(
+                preset.new_chat_prompt.as_str(),
+                &Self::macro_context(context),
+            ),
             attachments: Vec::new(),
         })
     }
@@ -603,9 +625,27 @@ impl RequestAssembler {
 
         Some(AssembledMessage {
             role: "system".to_string(),
-            content: content.to_string(),
+            content: substitute_params(content, &Self::macro_context(context)),
             attachments: Vec::new(),
         })
+    }
+
+    fn macro_context(context: &RuntimeContext) -> MacroContext {
+        MacroContext::from_chat_metadata(
+            &context.session.chat_metadata,
+            context.character.as_ref(),
+            context
+                .world_info_result
+                .as_ref()
+                .map(|world_info| {
+                    if !world_info.world_info_before.is_empty() {
+                        world_info.world_info_before.clone()
+                    } else {
+                        world_info.world_info_after.clone()
+                    }
+                })
+                .unwrap_or_default(),
+        )
     }
 
     fn build_reasoning(context: &RuntimeContext) -> Option<AssembledReasoningParams> {
@@ -1031,14 +1071,202 @@ fn ordered_prompt_items(prompt_preset: &PromptPreset) -> Vec<&PromptItem> {
     ordered
 }
 
-fn apply_prompt_format(template: &str, content: &str) -> String {
+fn apply_prompt_format(template: &str, macro_context: &MacroContext) -> String {
     if template.is_empty() {
-        return content.to_string();
+        return macro_context.world_info.clone();
     }
 
-    template
-        .replace("{{wi}}", content)
-        .replace("{{world_info}}", content)
-        .replace("{{scenario}}", content)
-        .replace("{{personality}}", content)
+    substitute_params(template, macro_context)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::st::keyword_matcher::GlobalScanData;
+    use crate::st::preset::{PromptOrder, PromptOrderItem};
+    use crate::storage::st_resources::{ApiConfig, CharacterData, TavernCardV3};
+
+    fn sample_context() -> RuntimeContext {
+        RuntimeContext {
+            api_config: ApiConfig {
+                id: "api".to_string(),
+                name: "API".to_string(),
+                provider: "openai".to_string(),
+                model: "gpt".to_string(),
+                base_url: None,
+                api_key: None,
+                enabled: true,
+                settings: serde_json::Map::new(),
+                created_at: String::new(),
+                updated_at: String::new(),
+            },
+            sampler_preset: None,
+            instruct_template: None,
+            context_template: None,
+            system_prompt: None,
+            reasoning_template: None,
+            prompt_preset: Some(PromptPreset {
+                name: "Default".to_string(),
+                prompts: vec![
+                    PromptItem {
+                        identifier: "main".to_string(),
+                        name: "Main".to_string(),
+                        role: "system".to_string(),
+                        content: "Write {{char}} and {{user}}.".to_string(),
+                        system_prompt: true,
+                        marker: false,
+                        enabled: None,
+                        injection_position: None,
+                        injection_depth: None,
+                        injection_order: None,
+                        forbid_overrides: None,
+                        injection_trigger: Vec::new(),
+                        builtin: false,
+                        editable: true,
+                        description: String::new(),
+                    },
+                    PromptItem {
+                        identifier: "personaDescription".to_string(),
+                        name: "Persona".to_string(),
+                        role: "system".to_string(),
+                        content: String::new(),
+                        system_prompt: true,
+                        marker: true,
+                        enabled: None,
+                        injection_position: None,
+                        injection_depth: None,
+                        injection_order: None,
+                        forbid_overrides: None,
+                        injection_trigger: Vec::new(),
+                        builtin: false,
+                        editable: true,
+                        description: String::new(),
+                    },
+                    PromptItem {
+                        identifier: "charDescription".to_string(),
+                        name: "Description".to_string(),
+                        role: "system".to_string(),
+                        content: String::new(),
+                        system_prompt: true,
+                        marker: true,
+                        enabled: None,
+                        injection_position: None,
+                        injection_depth: None,
+                        injection_order: None,
+                        forbid_overrides: None,
+                        injection_trigger: Vec::new(),
+                        builtin: false,
+                        editable: true,
+                        description: String::new(),
+                    },
+                    PromptItem {
+                        identifier: "worldInfoBefore".to_string(),
+                        name: "WI".to_string(),
+                        role: "system".to_string(),
+                        content: String::new(),
+                        system_prompt: true,
+                        marker: true,
+                        enabled: None,
+                        injection_position: None,
+                        injection_depth: None,
+                        injection_order: None,
+                        forbid_overrides: None,
+                        injection_trigger: Vec::new(),
+                        builtin: false,
+                        editable: true,
+                        description: String::new(),
+                    },
+                ],
+                prompt_order: vec![PromptOrder {
+                    character_id: 100000,
+                    order: vec![
+                        PromptOrderItem {
+                            identifier: "main".to_string(),
+                            enabled: true,
+                            position: None,
+                        },
+                        PromptOrderItem {
+                            identifier: "worldInfoBefore".to_string(),
+                            enabled: true,
+                            position: None,
+                        },
+                        PromptOrderItem {
+                            identifier: "personaDescription".to_string(),
+                            enabled: true,
+                            position: None,
+                        },
+                        PromptOrderItem {
+                            identifier: "charDescription".to_string(),
+                            enabled: true,
+                            position: None,
+                        },
+                    ],
+                }],
+                wi_format: "{0}".to_string(),
+                scenario_format: "{{scenario}}".to_string(),
+                personality_format: "{{personality}}".to_string(),
+                new_chat_prompt: String::new(),
+                new_group_chat_prompt: String::new(),
+                continue_nudge_prompt: String::new(),
+                group_nudge_prompt: String::new(),
+                impersonation_prompt: String::new(),
+                extensions: HashMap::new(),
+            }),
+            character: Some(TavernCardV3 {
+                spec: "chara_card_v3".to_string(),
+                spec_version: "3.0".to_string(),
+                data: CharacterData {
+                    name: "Bob".to_string(),
+                    description: "Knight of the north".to_string(),
+                    personality: "Brave".to_string(),
+                    scenario: "Snowfield".to_string(),
+                    first_mes: String::new(),
+                    mes_example: String::new(),
+                    creator_notes: String::new(),
+                    system_prompt: String::new(),
+                    post_history_instructions: String::new(),
+                    alternate_greetings: Vec::new(),
+                    tags: Vec::new(),
+                    creator: String::new(),
+                    character_version: String::new(),
+                    extensions: serde_json::Map::new(),
+                    character_book: None,
+                    extra: serde_json::Map::new(),
+                },
+                extra: serde_json::Map::new(),
+            }),
+            session: STSessionData {
+                session_id: "session".to_string(),
+                character_id: None,
+                group_id: None,
+                chat_metadata: STChatMetadata {
+                    world_info: None,
+                    enabled_world_info: Vec::new(),
+                    disabled_world_info: Vec::new(),
+                    user_persona: Some(STUserPersona {
+                        name: "Alice".to_string(),
+                        description: "A ranger".to_string(),
+                    }),
+                    extra: serde_json::Map::new(),
+                },
+                messages: Vec::new(),
+            },
+            global_scan_data: GlobalScanData::default(),
+            world_info_result: Some(WorldInfoInjectionResult {
+                world_info_before: "Lore before".to_string(),
+                ..Default::default()
+            }),
+        }
+    }
+
+    #[test]
+    fn build_system_prompt_substitutes_persona_character_and_world_info() {
+        let context = sample_context();
+        let prompt = RequestAssembler::build_system_prompt(&context);
+
+        assert!(prompt.contains("Write Bob and Alice."));
+        assert!(prompt.contains("Lore before"));
+        assert!(prompt.contains("Name: Alice\nDescription: A ranger"));
+        assert!(prompt.contains("Knight of the north"));
+    }
 }

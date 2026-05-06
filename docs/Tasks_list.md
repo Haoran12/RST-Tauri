@@ -349,3 +349,4 @@
 | 2026-05-06 | 调整角色卡资源页 UI：左侧上下文列表负责角色选择，右侧内容区直接展示当前角色卡详情与导入 / 导出 / 删除操作，移除卡片网格和编辑弹窗路径 |
 | 2026-05-06 | 角色卡详情接入自动保存：字段变更标记 dirty，右侧编辑区整体失焦、切换角色或卸载离开时自动保存当前角色卡 |
 | 2026-05-06 | 依据 `E:\AIPlay\cccode` 源码修正 Claude Code Interface：契约改为 Messages API `/v1/messages` + `Authorization: Bearer`，实际 provider 改用顶层 system blocks、user/assistant messages、tool schema 结构化输出和 Anthropic Messages 响应解析 |
+| 2026-05-06 | 修复 ST 预设宏与世界书注入断链：新增统一 `st/macros` 替换层，恢复 `{{char}}` / `{{user}}` / `{0}` / `{{wi}}` 等宏在 preset、角色卡字段、Persona、世界书关键词与内容中的运行时展开；世界书扫描补上 role->角色/Persona 名回退；默认 prompt_order 将 `personaDescription` 重新纳入主链，并补 Rust 回归测试 |

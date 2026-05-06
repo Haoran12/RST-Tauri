@@ -4,6 +4,7 @@
 
 pub mod character;
 pub mod keyword_matcher;
+pub mod macros;
 pub mod preset;
 pub mod regex_engine;
 pub mod runtime_assembly;
@@ -15,6 +16,7 @@ pub use character::{
     parse_character_from_png,
 };
 pub use keyword_matcher::{GlobalScanData, KeywordMatcher, MatchContext, MatchResult};
+pub use macros::{substitute_params, MacroContext};
 pub use preset::{
     AutoSelectConfig, ContextTemplate, InstructTemplate, PresetFile, PresetType,
     PromptPreset, ReasoningTemplate, SamplerPreset, SystemPrompt,

@@ -17,9 +17,9 @@ use crate::st::runtime_assembly::AssembledAttachmentRef;
 use crate::st::{
     AssembledRequest, ContextTemplate, GlobalAppState, InstructTemplate, PresetFile,
     PromptPreset, ProviderRequestMapper, ReasoningTemplate, RegexEngine, RegexPlacement,
-    RegexRunOptions, RequestAssembler, RuntimeContext, STChatMessage, STChatMetadata,
-    STSessionData, STWorldInfoSettings, SamplerPreset, SystemPrompt, WorldInfoInjectionResult,
-    WorldInfoInjector, WorldInfoSource,
+    RegexRunOptions, RequestAssembler, RuntimeContext, SamplerPreset, STChatMessage,
+    STChatMetadata, STSessionData, STWorldInfoSettings, SystemPrompt, WorldInfoInjectionResult,
+    WorldInfoInjector, WorldInfoSource, MacroContext,
 };
 use crate::storage::json_store::JsonStore;
 use crate::storage::paths::{app_data_root, safe_join};
@@ -625,6 +625,8 @@ pub async fn assemble_st_request(
             None
         } else {
             let mut injector = WorldInfoInjector::new();
+            let macro_context =
+                MacroContext::from_chat_metadata(&session.chat_metadata, character.as_ref(), "");
             Some(
                 injector
                     .check_world_info(
@@ -633,6 +635,7 @@ pub async fn assemble_st_request(
                         &input.world_info_settings,
                         sources,
                         &global_scan_data,
+                        &macro_context,
                     )
                     .await,
             )
@@ -1219,6 +1222,7 @@ fn create_default_preset_file(name: &str) -> PresetFile {
                 order: vec![
                     PromptOrderItem { identifier: "main".to_string(), enabled: true, position: None },
                     PromptOrderItem { identifier: "worldInfoBefore".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "personaDescription".to_string(), enabled: true, position: None },
                     PromptOrderItem { identifier: "charDescription".to_string(), enabled: true, position: None },
                     PromptOrderItem { identifier: "charPersonality".to_string(), enabled: true, position: None },
                     PromptOrderItem { identifier: "scenario".to_string(), enabled: true, position: None },
@@ -1235,7 +1239,6 @@ fn create_default_preset_file(name: &str) -> PresetFile {
                 order: vec![
                     PromptOrderItem { identifier: "main".to_string(), enabled: true, position: None },
                     PromptOrderItem { identifier: "worldInfoBefore".to_string(), enabled: true, position: None },
-                    PromptOrderItem { identifier: "personaDescription".to_string(), enabled: true, position: None },
                     PromptOrderItem { identifier: "charDescription".to_string(), enabled: true, position: None },
                     PromptOrderItem { identifier: "charPersonality".to_string(), enabled: true, position: None },
                     PromptOrderItem { identifier: "scenario".to_string(), enabled: true, position: None },
@@ -1377,21 +1380,23 @@ pub async fn run_world_info_injection(
         }
     }
 
+    let chat_metadata = STChatMetadata {
+        world_info: chat_session.chat_metadata.world_info.clone(),
+        enabled_world_info: chat_session.chat_metadata.enabled_world_info.clone(),
+        disabled_world_info: chat_session.chat_metadata.disabled_world_info.clone(),
+        user_persona: chat_session.chat_metadata.user_persona.clone().map(|persona| {
+            crate::st::runtime_assembly::STUserPersona {
+                name: persona.name,
+                description: persona.description,
+            }
+        }),
+        extra: chat_session.chat_metadata.extra.clone(),
+    };
+
     let sources = collect_world_info_sources(
         &store,
         character.as_ref(),
-        &STChatMetadata {
-            world_info: chat_session.chat_metadata.world_info.clone(),
-            enabled_world_info: chat_session.chat_metadata.enabled_world_info.clone(),
-            disabled_world_info: chat_session.chat_metadata.disabled_world_info.clone(),
-            user_persona: chat_session.chat_metadata.user_persona.clone().map(|persona| {
-                crate::st::runtime_assembly::STUserPersona {
-                    name: persona.name,
-                    description: persona.description,
-                }
-            }),
-            extra: chat_session.chat_metadata.extra.clone(),
-        },
+        &chat_metadata,
         &input.world_info_settings,
         input.chat_lore_id.as_deref(),
         &global_lore_ids,
@@ -1399,18 +1404,7 @@ pub async fn run_world_info_injection(
 
     // 3. 构建全局扫描数据
     let global_scan_data = GlobalScanData {
-        persona_description: persona_scan_text(&STChatMetadata {
-            world_info: chat_session.chat_metadata.world_info.clone(),
-            enabled_world_info: chat_session.chat_metadata.enabled_world_info.clone(),
-            disabled_world_info: chat_session.chat_metadata.disabled_world_info.clone(),
-            user_persona: chat_session.chat_metadata.user_persona.clone().map(|persona| {
-                crate::st::runtime_assembly::STUserPersona {
-                    name: persona.name,
-                    description: persona.description,
-                }
-            }),
-            extra: chat_session.chat_metadata.extra.clone(),
-        }),
+        persona_description: persona_scan_text(&chat_metadata),
         character_description: character
             .as_ref()
             .map(|c| c.data.description.clone())
@@ -1430,6 +1424,7 @@ pub async fn run_world_info_injection(
             .unwrap_or_default(),
         trigger: None,
     };
+    let macro_context = MacroContext::from_chat_metadata(&chat_metadata, character.as_ref(), "");
 
     // 4. 执行注入
     let mut injector = WorldInfoInjector::new();
@@ -1440,6 +1435,7 @@ pub async fn run_world_info_injection(
             &input.world_info_settings,
             sources,
             &global_scan_data,
+            &macro_context,
         )
         .await)
 }

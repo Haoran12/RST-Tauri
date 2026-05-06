@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::st::keyword_matcher::{GlobalScanData, KeywordMatcher, MatchContext};
+use crate::st::macros::{substitute_params, MacroContext};
 use crate::st::runtime_assembly::{STChatMessage, STWorldInfoSettings, WorldInfoInjectionResult};
 use crate::storage::st_resources::{WorldInfoEntry, WorldInfoFile, WorldInfoPosition};
 
@@ -99,15 +100,16 @@ impl WorldInfoInjector {
         settings: &STWorldInfoSettings,
         sources: Vec<WorldInfoSource>,
         global_scan_data: &GlobalScanData,
+        macro_context: &MacroContext,
     ) -> WorldInfoInjectionResult {
         // 1. 合并并排序所有来源的词条
-        let sorted_entries = self.get_sorted_entries(sources, settings).await;
+        let sorted_entries = self.get_sorted_entries(sources, settings, macro_context).await;
 
         // 2. 计算 token 预算
         let budget = self.calculate_budget(max_context, settings);
 
         // 3. 构造扫描文本
-        let scan_text = self.build_scan_text(chat_for_wi, settings);
+        let scan_text = self.build_scan_text(chat_for_wi, settings, macro_context);
 
         // 4. 执行扫描
         let scan_result = self
@@ -131,6 +133,7 @@ impl WorldInfoInjector {
         &self,
         sources: Vec<WorldInfoSource>,
         settings: &STWorldInfoSettings,
+        macro_context: &MacroContext,
     ) -> Vec<(WorldInfoEntry, String)> {
         let mut all_entries: Vec<(WorldInfoEntry, String, i32)> = Vec::new();
         let mut seen_worlds: HashSet<String> = HashSet::new();
@@ -150,8 +153,20 @@ impl WorldInfoInjector {
 
             // 提取词条并添加来源标记
             for (_, entry) in &source.file().entries {
+                let mut entry = entry.clone();
+                entry.content = substitute_params(entry.content.as_str(), macro_context);
+                entry.key = entry
+                    .key
+                    .iter()
+                    .map(|key| substitute_params(key, macro_context))
+                    .collect();
+                entry.keysecondary = entry
+                    .keysecondary
+                    .iter()
+                    .map(|key| substitute_params(key, macro_context))
+                    .collect();
                 all_entries.push((
-                    entry.clone(),
+                    entry,
                     source.source_name().to_string(),
                     source.priority(),
                 ));
@@ -203,13 +218,14 @@ impl WorldInfoInjector {
         &self,
         chat: &[STChatMessage],
         settings: &STWorldInfoSettings,
+        macro_context: &MacroContext,
     ) -> Vec<String> {
         // 反转聊天顺序（最近消息在前）
         let mut scan_text: Vec<String> = Vec::new();
 
         for msg in chat.iter().rev() {
             let text = if settings.world_info_include_names {
-                let name = msg.name.clone().unwrap_or_default();
+                let name = macro_context.message_speaker_name(msg);
                 if !name.is_empty() {
                     format!("{}: {}", name, msg.content)
                 } else {
@@ -585,6 +601,8 @@ impl Default for WorldInfoManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::st::runtime_assembly::{STChatMetadata, STUserPersona};
+    use crate::storage::st_resources::{CharacterData, TavernCardV3};
 
     fn empty_worldbook(name: &str) -> WorldInfoFile {
         WorldInfoFile {
@@ -623,5 +641,82 @@ mod tests {
         manager.invalidate_worldbook("lore-a").await;
 
         assert!(manager.load_worldbook("lore-a").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn check_world_info_substitutes_macros_and_uses_role_name_fallback() {
+        let mut entries = HashMap::new();
+        let mut entry = crate::storage::st_resources::WorldInfoEntry::new(1);
+        entry.key = vec!["{{char}}".to_string()];
+        entry.content = "Known as ally of {{user}}".to_string();
+        entries.insert("1".to_string(), entry);
+
+        let source = WorldInfoSource::CharacterLore(WorldInfoFile {
+            entries,
+            original_data: None,
+            rst_lore_id: Some("lore-1".to_string()),
+            name: "Lore".to_string(),
+            description: String::new(),
+            extensions: serde_json::Map::new(),
+            extra: serde_json::Map::new(),
+        });
+
+        let messages = vec![STChatMessage {
+            id: "m1".to_string(),
+            role: "assistant".to_string(),
+            content: "Bob arrives".to_string(),
+            created_at: String::new(),
+            name: None,
+            attachments: Vec::new(),
+        }];
+        let chat_metadata = STChatMetadata {
+            world_info: None,
+            enabled_world_info: Vec::new(),
+            disabled_world_info: Vec::new(),
+            user_persona: Some(STUserPersona {
+                name: "Alice".to_string(),
+                description: "Ranger".to_string(),
+            }),
+            extra: serde_json::Map::new(),
+        };
+        let character = TavernCardV3 {
+            spec: "chara_card_v3".to_string(),
+            spec_version: "3.0".to_string(),
+            data: CharacterData {
+                name: "Bob".to_string(),
+                description: String::new(),
+                personality: String::new(),
+                scenario: String::new(),
+                first_mes: String::new(),
+                mes_example: String::new(),
+                creator_notes: String::new(),
+                system_prompt: String::new(),
+                post_history_instructions: String::new(),
+                alternate_greetings: Vec::new(),
+                tags: Vec::new(),
+                creator: String::new(),
+                character_version: String::new(),
+                extensions: serde_json::Map::new(),
+                character_book: None,
+                extra: serde_json::Map::new(),
+            },
+            extra: serde_json::Map::new(),
+        };
+        let macro_context = MacroContext::from_chat_metadata(&chat_metadata, Some(&character), "");
+
+        let mut injector = WorldInfoInjector::new();
+        let result = injector
+            .check_world_info(
+                &messages,
+                4096,
+                &STWorldInfoSettings::default(),
+                vec![source],
+                &GlobalScanData::default(),
+                &macro_context,
+            )
+            .await;
+
+        assert_eq!(result.activated_entries, vec![1]);
+        assert!(result.world_info_before.contains("Known as ally of Alice"));
     }
 }
