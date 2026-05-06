@@ -188,6 +188,7 @@ pub fn run() {
             commands::get_log_protection,
             commands::validate_structured_text,
             commands::format_structured_text,
+            commands::log_frontend_event,
             // Runtime assembly commands
             commands::get_global_state,
             commands::save_global_state,

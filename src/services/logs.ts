@@ -274,3 +274,53 @@ export async function getLogProtection(recordKind: 'llm' | 'event', recordId: st
     record_id: recordId,
   })
 }
+
+// ============================================================================
+// Frontend Event Logging
+// ============================================================================
+
+export interface FrontendEventInput {
+  level: 'debug' | 'info' | 'warn' | 'error' | 'fatal'
+  event_type: string
+  message: string
+  detail_json?: unknown
+}
+
+/**
+ * Log an event from frontend to application logs
+ */
+export async function logFrontendEvent(input: FrontendEventInput): Promise<void> {
+  return await invoke('log_frontend_event', { input })
+}
+
+/**
+ * Log an error from frontend to application logs
+ */
+export async function logFrontendError(
+  eventType: string,
+  message: string,
+  detail?: unknown,
+): Promise<void> {
+  return await logFrontendEvent({
+    level: 'error',
+    event_type: eventType,
+    message,
+    detail_json: detail,
+  })
+}
+
+/**
+ * Log a warning from frontend to application logs
+ */
+export async function logFrontendWarn(
+  eventType: string,
+  message: string,
+  detail?: unknown,
+): Promise<void> {
+  return await logFrontendEvent({
+    level: 'warn',
+    event_type: eventType,
+    message,
+    detail_json: detail,
+  })
+}

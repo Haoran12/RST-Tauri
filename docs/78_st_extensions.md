@@ -4,15 +4,15 @@
 
 ## 1. 参考依据
 
-- `E:\AIPlay\SillyTavern\public\scripts\extensions.js`
-- `E:\AIPlay\SillyTavern\public\scripts\st-context.js`
-- `E:\AIPlay\SillyTavern\public\scripts\events.js`
-- `E:\AIPlay\SillyTavern\public\lib\eventemitter.js`
-- `E:\AIPlay\SillyTavern\public\script.js`
-- `E:\AIPlay\SillyTavern\public\scripts\world-info.js`
-- `E:\AIPlay\SillyTavern\public\scripts\openai.js`
-- `E:\AIPlay\SillyTavern\src\endpoints\extensions.js`
-- `E:\AIPlay\SillyTavern\src\plugin-loader.js`
+- `SillyTavern\public\scripts\extensions.js`
+- `SillyTavern\public\scripts\st-context.js`
+- `SillyTavern\public\scripts\events.js`
+- `SillyTavern\public\lib\eventemitter.js`
+- `SillyTavern\public\script.js`
+- `SillyTavern\public\scripts\world-info.js`
+- `SillyTavern\public\scripts\openai.js`
+- `SillyTavern\src\endpoints\extensions.js`
+- `SillyTavern\src\plugin-loader.js`
 
 ## 2. 名词边界
 

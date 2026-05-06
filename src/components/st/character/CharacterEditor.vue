@@ -14,6 +14,7 @@ import {
 } from 'naive-ui'
 import { useCharactersStore } from '@/stores/characters'
 import { getCharacter, saveCharacter } from '@/services/storage'
+import { logFrontendError } from '@/services/logs'
 import type { TavernCardV3 } from '@/types/st'
 import type {
   StructuredTextBinding,
@@ -224,7 +225,12 @@ async function persistCurrentCharacter(options: {
       emit('close')
     }
   } catch (e) {
-    message.error(`${silent ? '自动保存失败' : '保存失败'}: ${e}`)
+    const errorMsg = String(e)
+    message.error(`${silent ? '自动保存失败' : '保存失败'}: ${errorMsg}`)
+    void logFrontendError('character_save_failed', errorMsg, {
+      characterId: id,
+      error: errorMsg,
+    })
   } finally {
     isSaving.value = false
   }
