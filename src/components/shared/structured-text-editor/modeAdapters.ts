@@ -689,7 +689,7 @@ function collectYamlFeatureDiagnostic(
 
   const unsupportedForStructured = binding.storageKind === 'json_value'
   return {
-    severity: unsupportedForStructured ? BLOCKER : WARNING,
+    severity: unsupportedForStructured ? BLOCKER : INFO,
     code: 'unsupported_yaml_feature',
     message: unsupportedForStructured
       ? '当前字段保存为结构化值，暂不支持 YAML anchor / alias / tag。'
