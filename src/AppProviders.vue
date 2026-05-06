@@ -62,23 +62,24 @@ function handleKeyDown(e: KeyboardEvent) {
  * 优先级: 弹窗 > 页面区域
  */
 function triggerSave() {
-  // 1. 查找 NaiveUI 弹窗 (NModal preset="card" 使用 .n-card)
-  // 弹窗通常在 .n-modal-body 或 .n-card 内
-  const modalCards = document.querySelectorAll('.n-modal .n-card')
+  // 1. 查找 NaiveUI 弹窗
+  // NModal preset="card" 结构: .n-modal > .n-modal-container > .n-card
+  // 或者直接查找所有可见的 .n-modal
   let targetContainer: Element | null = null
 
-  // 找到最顶层（DOM顺序最后）可见的弹窗卡片
-  if (modalCards.length > 0) {
-    for (let i = modalCards.length - 1; i >= 0; i--) {
-      const card = modalCards[i]
-      // 检查弹窗是否可见（父级 .n-modal 是否显示）
-      const modal = card.closest('.n-modal')
-      if (modal) {
-        const style = window.getComputedStyle(modal)
-        if (style.display !== 'none' && style.visibility !== 'hidden') {
-          targetContainer = card
-          break
-        }
+  // 查找所有可见的弹窗
+  const modals = document.querySelectorAll('.n-modal')
+  if (modals.length > 0) {
+    // 从最后一个（最顶层）开始查找
+    for (let i = modals.length - 1; i >= 0; i--) {
+      const modal = modals[i]
+      const style = window.getComputedStyle(modal)
+      // 检查是否可见
+      if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') {
+        // 找到弹窗内的卡片或内容区域
+        const card = modal.querySelector('.n-card')
+        targetContainer = card || modal
+        break
       }
     }
   }
