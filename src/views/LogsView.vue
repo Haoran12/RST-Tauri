@@ -795,7 +795,7 @@ onMounted(refreshAll)
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 250px minmax(280px, 0.9fr) minmax(360px, 1.25fr);
+  grid-template-columns: 250px minmax(240px, 0.6fr) minmax(400px, 1.4fr);
   overflow: hidden;
 }
 
