@@ -280,10 +280,11 @@ export const useChatStore = defineStore('chat', () => {
             streamingContent.value = accumulatedContent
             const index = messages.value.findIndex(msg => msg.id === assistantMessage.id)
             if (index !== -1) {
-              messages.value[index] = {
+              // Use splice to ensure Vue reactivity triggers
+              messages.value.splice(index, 1, {
                 ...messages.value[index],
                 content: accumulatedContent,
-              }
+              })
             }
           },
           onError: (event) => {
