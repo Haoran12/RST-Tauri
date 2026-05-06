@@ -200,8 +200,14 @@ const sessionWorldbooks = computed(() => {
     result.push({ loreId, label, source, enabled: !disabled.has(loreId) })
   }
 
-  const chatLoreId = chatStore.currentSession?.chat_metadata?.world_info
-  if (chatLoreId) add(chatLoreId, worldbookName(chatLoreId), '聊天')
+  const chatLoreIds = chatStore.currentSession?.chat_metadata?.enabled_world_info ?? (
+    chatStore.currentSession?.chat_metadata?.world_info
+      ? [chatStore.currentSession.chat_metadata.world_info]
+      : []
+  )
+  for (const chatLoreId of chatLoreIds) {
+    add(chatLoreId, worldbookName(chatLoreId), '会话')
+  }
 
   for (const loreId of runtimeStore.globalState.world_info_settings.global_select) {
     add(loreId, worldbookName(loreId), '全局')

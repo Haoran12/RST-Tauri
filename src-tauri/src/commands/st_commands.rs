@@ -890,6 +890,15 @@ fn cleanup_chat_worldbook_references(
             changed = true;
         }
 
+        if let Some(enabled) = chat_metadata
+            .get_mut("enabled_world_info")
+            .and_then(|value| value.as_array_mut())
+        {
+            let original_len = enabled.len();
+            enabled.retain(|value| value.as_str() != Some(deleted_lore_id));
+            changed |= enabled.len() != original_len;
+        }
+
         if let Some(disabled) = chat_metadata
             .get_mut("disabled_world_info")
             .and_then(|value| value.as_array_mut())
@@ -1170,6 +1179,7 @@ mod tests {
                     "updated_at": "",
                     "chat_metadata": {
                         "world_info": "lore-a",
+                        "enabled_world_info": ["lore-a", "lore-b"],
                         "disabled_world_info": ["lore-a", "lore-z"]
                     },
                     "messages": []
@@ -1193,6 +1203,10 @@ mod tests {
 
         let chat = store.read("chats/session-1.json").expect("read chat");
         assert!(chat["chat_metadata"]["world_info"].is_null());
+        assert_eq!(
+            chat["chat_metadata"]["enabled_world_info"],
+            json!(["lore-b"])
+        );
         assert_eq!(
             chat["chat_metadata"]["disabled_world_info"],
             json!(["lore-z"])

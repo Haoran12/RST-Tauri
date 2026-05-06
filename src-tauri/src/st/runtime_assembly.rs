@@ -166,21 +166,39 @@ pub struct STChatMetadata {
     #[serde(default)]
     pub world_info: Option<String>,
 
+    /// 当前会话显式启用的世界书列表。首项同步到 `world_info` 作为 ST 兼容 chat lore。
+    #[serde(default)]
+    pub enabled_world_info: Vec<String>,
+
     /// 当前会话显式关闭的世界书列表。
     /// 默认绑定在未被列入此清单前应视为启用。
     #[serde(default)]
     pub disabled_world_info: Vec<String>,
+
+    /// User 角色描述，用于 Persona Description 与世界书 match_persona_description。
+    #[serde(default)]
+    pub user_persona: Option<STUserPersona>,
 
     /// 其他扩展字段（Author's Note、变量、脚本注入、书签等）
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct STUserPersona {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
 impl Default for STChatMetadata {
     fn default() -> Self {
         Self {
             world_info: None,
+            enabled_world_info: Vec::new(),
             disabled_world_info: Vec::new(),
+            user_persona: None,
             extra: serde_json::Map::new(),
         }
     }
@@ -348,6 +366,10 @@ impl RequestAssembler {
             }
         }
 
+        if let Some(formatted) = Self::format_user_persona(context) {
+            parts.push(formatted);
+        }
+
         // 角色描述
         if let Some(char) = &context.character {
             if !char.data.description.is_empty() {
@@ -459,6 +481,24 @@ impl RequestAssembler {
                 .unwrap_or("Scenario: {{scenario}}"),
             content,
         ))
+    }
+
+    fn format_user_persona(context: &RuntimeContext) -> Option<String> {
+        let persona = context.session.chat_metadata.user_persona.as_ref()?;
+        let name = persona.name.trim();
+        let description = persona.description.trim();
+        if name.is_empty() && description.is_empty() {
+            return None;
+        }
+
+        let content = match (name.is_empty(), description.is_empty()) {
+            (false, false) => format!("Name: {}\nDescription: {}", name, description),
+            (false, true) => format!("Name: {}", name),
+            (true, false) => description.to_string(),
+            (true, true) => String::new(),
+        };
+
+        Some(format!("Persona Description: {}", content))
     }
 
     fn format_character_personality(context: &RuntimeContext, content: &str) -> Option<String> {

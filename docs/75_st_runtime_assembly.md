@@ -68,7 +68,7 @@ interface SessionData {
 
   // 不存储 API 配置或预设引用。
   // API 配置和预设由全局状态管理，用户随时可切换。
-  // chat_metadata.world_info 是会话自己的世界书绑定，不随 API 配置切换。
+  // chat_metadata.enabled_world_info / world_info 是会话自己的世界书绑定，不随 API 配置切换。
 }
 
 type ChatMessagePart =
@@ -83,8 +83,23 @@ type ChatMessagePart =
     };
 
 interface STChatMetadata {
-  // Chat lore：当前聊天绑定的单本世界书。对应 SillyTavern chat_metadata.world_info。
-  world_info?: string;                    // RST 内部使用 lore_id，ST 导入导出时映射为文件名
+  // Chat lore：当前聊天绑定的首本世界书。对应 SillyTavern chat_metadata.world_info。
+  // RST 内部继续保存 lore_id，ST 导入导出时映射为文件名。
+  world_info?: string;
+
+  // RST 会话级世界书多选。运行时按顺序作为 Chat lore 来源收集；
+  // 保存时首项同步到 world_info，保留单书 ST 兼容入口。
+  enabled_world_info?: string[];
+
+  // 当前会话显式关闭的默认 / 会话 / 角色 / 全局世界书列表。
+  disabled_world_info?: string[];
+
+  // User 角色描述。运行时写入 Persona Description，
+  // 同时作为世界书 match_persona_description 的扫描文本。
+  user_persona?: {
+    name?: string;
+    description?: string;
+  };
 
   // Author's Note、变量、脚本注入、书签等扩展继续保留原始 key。
   [key: string]: any;
@@ -115,9 +130,10 @@ interface STChatMetadata {
 ┌──────────────────────────────────────┐
 │ 3. 加载会话内容                       │
 │    - 角色卡 → 角色信息                │
-│    - chat_metadata.world_info → Chat lore │
+│    - chat_metadata.enabled_world_info / world_info → Chat lore │
 │    - 角色卡 extensions.world → Character lore │
 │    - world_info.globalSelect → Global lore │
+│    - chat_metadata.user_persona → Persona Description │
 │    - 聊天记录 parts → 对话上下文      │
 └──────────────────────────────────────┘
        ↓

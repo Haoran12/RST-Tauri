@@ -6,16 +6,21 @@ import {
   NSpin,
   NInput,
   NButton,
+  NDropdown,
+  NForm,
+  NFormItem,
   NIcon,
   NSelect,
   NSwitch,
+  NModal,
   NPopconfirm,
   NText,
   NTag,
+  useMessage,
 } from 'naive-ui'
 import { computed, ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { SearchOutline, AddOutline, TrashOutline, SettingsOutline, ReorderFourOutline } from '@vicons/ionicons5'
+import { SearchOutline, AddOutline, TrashOutline, SettingsOutline, ReorderFourOutline, EllipsisHorizontalOutline } from '@vicons/ionicons5'
 import { useAgentStore } from '@/stores/agent'
 import { useAppShellStore } from '@/stores/appShell'
 import { useCharactersStore } from '@/stores/characters'
@@ -24,10 +29,12 @@ import { usePresetsStore, type PresetSectionKey } from '@/stores/presets'
 import { useWorldbooksStore } from '@/stores/worldbooks'
 import type { WorldInfoEntry } from '@/types/st'
 import { WorldInfoPosition } from '@/types/st'
+import type { ChatSession } from '@/types/st'
 import type { PromptItem } from '@/types/preset'
 
 const route = useRoute()
 const router = useRouter()
+const message = useMessage()
 const agentStore = useAgentStore()
 const appShellStore = useAppShellStore()
 const charactersStore = useCharactersStore()
@@ -35,6 +42,12 @@ const chatStore = useChatStore()
 const presetsStore = usePresetsStore()
 const worldbooksStore = useWorldbooksStore()
 const searchQuery = ref('')
+const editingStSessionId = ref<string | null>(null)
+const editSessionName = ref('')
+const editSessionWorldbooks = ref<string[]>([])
+const editPersonaName = ref('')
+const editPersonaDescription = ref('')
+const isSavingSessionSettings = ref(false)
 
 // Drag and drop state for prompt items
 const draggedItem = ref<PromptItem | null>(null)
@@ -46,6 +59,7 @@ type ContextItem = {
   type: string
   meta?: string
   active?: boolean
+  session?: ChatSession
   action: () => unknown
 }
 
@@ -138,6 +152,7 @@ const contextItems = computed<ContextItem[]>(() => {
           type: 'ST 会话',
           meta: formatShortTime(session.updated_at),
           active: route.params.sessionId === session.id,
+          session,
           action: () => router.push({ name: 'st-chat', params: { sessionId: session.id } }),
         }))
     case 'agent-worlds':
@@ -255,6 +270,42 @@ async function handleDefaultAdd() {
     case 'resources-presets':
       window.dispatchEvent(new CustomEvent('open-preset-create'))
       break
+  }
+}
+
+function openSessionSettings(session: ChatSession) {
+  const metadata = session.chat_metadata ?? {}
+  editingStSessionId.value = session.id
+  editSessionName.value = session.name || '未命名会话'
+  editSessionWorldbooks.value = metadata.enabled_world_info ?? (metadata.world_info ? [metadata.world_info] : [])
+  editPersonaName.value = metadata.user_persona?.name ?? ''
+  editPersonaDescription.value = metadata.user_persona?.description ?? ''
+}
+
+async function saveSessionSettings() {
+  if (!editingStSessionId.value) return
+  isSavingSessionSettings.value = true
+  try {
+    await chatStore.updateSessionSettings(editingStSessionId.value, {
+      name: editSessionName.value,
+      enabled_world_info: editSessionWorldbooks.value,
+      user_persona: {
+        name: editPersonaName.value,
+        description: editPersonaDescription.value,
+      },
+    })
+    editingStSessionId.value = null
+    message.success('会话设置已保存')
+  } catch (err) {
+    message.error(String(err))
+  } finally {
+    isSavingSessionSettings.value = false
+  }
+}
+
+function handleSessionMenuSelect(key: string, session: ChatSession) {
+  if (key === 'edit') {
+    openSessionSettings(session)
   }
 }
 
@@ -572,7 +623,10 @@ watch(() => route.name, async (newName) => {
   if (newName === 'resources-worldbooks') {
     await worldbooksStore.loadWorldbooks()
   } else if (newName === 'st-chat') {
-    await chatStore.loadSessions()
+    await Promise.all([
+      chatStore.loadSessions(),
+      worldbooksStore.loadWorldbooks(),
+    ])
   } else if (newName === 'resources-characters') {
     await charactersStore.loadCharacters()
   } else if (newName === 'resources-presets') {
@@ -938,9 +992,29 @@ watch(currentWorldId, async (worldId) => {
               :class="{ 'context-item-active': item.active }"
               @click="item.action"
             >
-              <div class="context-item-main">
-                <span class="context-item-name">{{ item.name }}</span>
-                <NTag size="tiny" :bordered="false">{{ item.type }}</NTag>
+              <div class="context-item-row">
+                <div class="context-item-main">
+                  <span class="context-item-name">{{ item.name }}</span>
+                  <NTag size="tiny" :bordered="false">{{ item.type }}</NTag>
+                </div>
+                <NDropdown
+                  v-if="route.name === 'st-chat' && item.session"
+                  trigger="click"
+                  :options="[{ label: '编辑会话', key: 'edit' }]"
+                  @select="(key: string) => handleSessionMenuSelect(key, item.session!)"
+                >
+                  <NButton
+                    quaternary
+                    circle
+                    size="tiny"
+                    class="context-item-menu"
+                    @click.stop
+                  >
+                    <template #icon>
+                      <NIcon><EllipsisHorizontalOutline /></NIcon>
+                    </template>
+                  </NButton>
+                </NDropdown>
               </div>
               <NText v-if="item.meta" depth="3" class="context-item-meta">
                 {{ item.meta }}
@@ -951,6 +1025,47 @@ watch(currentWorldId, async (worldId) => {
         </NSpin>
       </div>
     </template>
+
+    <NModal
+      :show="editingStSessionId !== null"
+      preset="card"
+      title="编辑 ST 会话"
+      class="session-settings-modal"
+      @update:show="value => { if (!value) editingStSessionId = null }"
+    >
+      <NForm label-placement="top">
+        <NFormItem label="会话名称">
+          <NInput v-model:value="editSessionName" placeholder="会话名称" />
+        </NFormItem>
+        <NFormItem label="选用的世界书">
+          <NSelect
+            v-model:value="editSessionWorldbooks"
+            :options="worldbookOptions"
+            multiple
+            filterable
+            clearable
+            placeholder="选择一个或多个世界书"
+          />
+        </NFormItem>
+        <NFormItem label="User name">
+          <NInput v-model:value="editPersonaName" placeholder="User name" />
+        </NFormItem>
+        <NFormItem label="Persona Description">
+          <NInput
+            v-model:value="editPersonaDescription"
+            type="textarea"
+            :autosize="{ minRows: 4, maxRows: 8 }"
+            placeholder="User 角色描述"
+          />
+        </NFormItem>
+      </NForm>
+      <div class="modal-actions">
+        <NButton @click="editingStSessionId = null">取消</NButton>
+        <NButton type="primary" :loading="isSavingSessionSettings" @click="saveSessionSettings">
+          保存
+        </NButton>
+      </div>
+    </NModal>
   </div>
 </template>
 
@@ -1048,6 +1163,13 @@ watch(currentWorldId, async (worldId) => {
   min-width: 0;
 }
 
+.context-item-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .context-item-name {
   min-width: 0;
   overflow: hidden;
@@ -1055,6 +1177,15 @@ watch(currentWorldId, async (worldId) => {
   white-space: nowrap;
   font-size: 13px;
   font-weight: 500;
+}
+
+.context-item-menu {
+  flex: 0 0 auto;
+  opacity: 0;
+}
+
+.context-item:hover .context-item-menu {
+  opacity: 1;
 }
 
 .context-item-meta {
@@ -1182,5 +1313,16 @@ watch(currentWorldId, async (worldId) => {
 
 .entry-item:hover .delete-btn {
   opacity: 1;
+}
+
+.session-settings-modal {
+  width: min(640px, calc(100vw - 32px));
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
 }
 </style>

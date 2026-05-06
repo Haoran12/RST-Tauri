@@ -486,9 +486,21 @@ pub struct ChatSessionMetadata {
     #[serde(default)]
     pub world_info: Option<String>,
     #[serde(default)]
+    pub enabled_world_info: Vec<String>,
+    #[serde(default)]
     pub disabled_world_info: Vec<String>,
+    #[serde(default)]
+    pub user_persona: Option<STUserPersona>,
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct STUserPersona {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

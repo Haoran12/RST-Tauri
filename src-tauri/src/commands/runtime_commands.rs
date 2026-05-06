@@ -535,7 +535,14 @@ pub async fn assemble_st_request(
         group_id: None,
         chat_metadata: STChatMetadata {
             world_info: chat_session.chat_metadata.world_info.clone(),
+            enabled_world_info: chat_session.chat_metadata.enabled_world_info.clone(),
             disabled_world_info: chat_session.chat_metadata.disabled_world_info.clone(),
+            user_persona: chat_session.chat_metadata.user_persona.clone().map(|persona| {
+                crate::st::runtime_assembly::STUserPersona {
+                    name: persona.name,
+                    description: persona.description,
+                }
+            }),
             extra: chat_session.chat_metadata.extra.clone(),
         },
         messages: chat_session
@@ -578,7 +585,7 @@ pub async fn assemble_st_request(
 
     // 5. 构建全局扫描数据
     let global_scan_data = GlobalScanData {
-        persona_description: String::new(),
+        persona_description: persona_scan_text(&session.chat_metadata),
         character_description: character
             .as_ref()
             .map(|c| c.data.description.clone())
@@ -1095,7 +1102,14 @@ pub async fn run_world_info_injection(
         character.as_ref(),
         &STChatMetadata {
             world_info: chat_session.chat_metadata.world_info.clone(),
+            enabled_world_info: chat_session.chat_metadata.enabled_world_info.clone(),
             disabled_world_info: chat_session.chat_metadata.disabled_world_info.clone(),
+            user_persona: chat_session.chat_metadata.user_persona.clone().map(|persona| {
+                crate::st::runtime_assembly::STUserPersona {
+                    name: persona.name,
+                    description: persona.description,
+                }
+            }),
             extra: chat_session.chat_metadata.extra.clone(),
         },
         &input.world_info_settings,
@@ -1105,7 +1119,18 @@ pub async fn run_world_info_injection(
 
     // 3. 构建全局扫描数据
     let global_scan_data = GlobalScanData {
-        persona_description: String::new(),
+        persona_description: persona_scan_text(&STChatMetadata {
+            world_info: chat_session.chat_metadata.world_info.clone(),
+            enabled_world_info: chat_session.chat_metadata.enabled_world_info.clone(),
+            disabled_world_info: chat_session.chat_metadata.disabled_world_info.clone(),
+            user_persona: chat_session.chat_metadata.user_persona.clone().map(|persona| {
+                crate::st::runtime_assembly::STUserPersona {
+                    name: persona.name,
+                    description: persona.description,
+                }
+            }),
+            extra: chat_session.chat_metadata.extra.clone(),
+        }),
         character_description: character
             .as_ref()
             .map(|c| c.data.description.clone())
@@ -1155,19 +1180,23 @@ fn collect_world_info_sources(
         .map(String::as_str)
         .collect();
 
-    if let Some(lore_id) = chat_lore_id {
-        if !disabled_world_info.contains(lore_id) {
-            if let Some(worldbook) = load_worldbook_by_id(store, lore_id)? {
-                seen_lore_ids.insert(lore_id.to_string());
-                sources.push(WorldInfoSource::ChatLore(worldbook));
-            }
+    let chat_lore_ids = if let Some(lore_id) = chat_lore_id {
+        vec![lore_id.to_string()]
+    } else if !chat_metadata.enabled_world_info.is_empty() {
+        chat_metadata.enabled_world_info.clone()
+    } else {
+        chat_metadata.world_info.iter().cloned().collect()
+    };
+
+    for lore_id in chat_lore_ids {
+        if disabled_world_info.contains(lore_id.as_str()) {
+            continue;
         }
-    } else if let Some(lore_id) = chat_metadata.world_info.as_deref() {
-        if !disabled_world_info.contains(lore_id) {
-            if let Some(worldbook) = load_worldbook_by_id(store, lore_id)? {
-                seen_lore_ids.insert(lore_id.to_string());
-                sources.push(WorldInfoSource::ChatLore(worldbook));
-            }
+        if !seen_lore_ids.insert(lore_id.clone()) {
+            continue;
+        }
+        if let Some(worldbook) = load_worldbook_by_id(store, &lore_id)? {
+            sources.push(WorldInfoSource::ChatLore(worldbook));
         }
     }
 
@@ -1195,6 +1224,19 @@ fn collect_world_info_sources(
     }
 
     Ok(sources)
+}
+
+fn persona_scan_text(chat_metadata: &STChatMetadata) -> String {
+    let Some(persona) = chat_metadata.user_persona.as_ref() else {
+        return String::new();
+    };
+
+    match (persona.name.trim(), persona.description.trim()) {
+        ("", "") => String::new(),
+        ("", description) => description.to_string(),
+        (name, "") => name.to_string(),
+        (name, description) => format!("{}\n{}", name, description),
+    }
 }
 
 fn load_worldbook_by_id(store: &JsonStore, lore_id: &str) -> Result<Option<WorldInfoFile>, String> {
@@ -1386,7 +1428,9 @@ mod tests {
             &character,
             &STChatMetadata {
                 world_info: None,
+                enabled_world_info: Vec::new(),
                 disabled_world_info: vec!["lore-1".to_string()],
+                user_persona: None,
                 extra: serde_json::Map::new(),
             },
             &settings,

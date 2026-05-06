@@ -7,6 +7,7 @@ import type {
   ApiConfig,
   ChatAttachmentRef,
   ChatSessionMetadata,
+  STUserPersona,
 } from '@/types/st'
 import * as storage from '@/services/storage'
 import { sendAssembledSTChatMessage } from '@/services/runtime'
@@ -38,10 +39,23 @@ export const useChatStore = defineStore('chat', () => {
   const hasPendingAttachments = computed(() => pendingAttachments.value.length > 0)
 
   function normalizeChatMetadata(metadata?: ChatSessionMetadata): ChatSessionMetadata {
+    const enabledWorldInfo = metadata?.enabled_world_info ?? (
+      metadata?.world_info ? [metadata.world_info] : []
+    )
+    const userPersona = normalizeUserPersona(metadata?.user_persona)
     return {
-      world_info: metadata?.world_info ?? null,
-      disabled_world_info: metadata?.disabled_world_info ?? [],
       ...metadata,
+      world_info: enabledWorldInfo[0] ?? metadata?.world_info ?? null,
+      enabled_world_info: enabledWorldInfo,
+      disabled_world_info: metadata?.disabled_world_info ?? [],
+      user_persona: userPersona,
+    }
+  }
+
+  function normalizeUserPersona(persona?: STUserPersona): STUserPersona {
+    return {
+      name: persona?.name ?? '',
+      description: persona?.description ?? '',
     }
   }
 
@@ -169,7 +183,7 @@ export const useChatStore = defineStore('chat', () => {
         session_id: currentSession.value.id,
         preset_name: runtimeStore.globalState.active_preset || 'Default',
         world_info_settings: runtimeStore.globalState.world_info_settings,
-        chat_lore_id: currentSession.value.chat_metadata?.world_info ?? null,
+        chat_lore_id: null,
         global_lore_ids: [],
         max_context: 8192,
       })
@@ -240,7 +254,7 @@ export const useChatStore = defineStore('chat', () => {
         session_id: currentSession.value.id,
         preset_name: runtimeStore.globalState.active_preset || 'Default',
         world_info_settings: runtimeStore.globalState.world_info_settings,
-        chat_lore_id: currentSession.value.chat_metadata?.world_info ?? null,
+        chat_lore_id: null,
         global_lore_ids: [],
         max_context: 8192,
       })
@@ -326,6 +340,48 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function updateSessionSettings(
+    id: string,
+    settings: {
+      name: string
+      enabled_world_info: string[]
+      user_persona: STUserPersona
+    }
+  ) {
+    try {
+      const session = currentSession.value?.id === id
+        ? currentSession.value
+        : await storage.getChatSession(id)
+      const metadata = normalizeChatMetadata(session.chat_metadata)
+      const enabledWorldInfo = Array.from(new Set(settings.enabled_world_info))
+
+      session.name = settings.name.trim() || '未命名会话'
+      session.chat_metadata = {
+        ...metadata,
+        world_info: enabledWorldInfo[0] ?? null,
+        enabled_world_info: enabledWorldInfo,
+        disabled_world_info: (metadata.disabled_world_info ?? []).filter(
+          loreId => !enabledWorldInfo.includes(loreId)
+        ),
+        user_persona: normalizeUserPersona(settings.user_persona),
+      }
+      session.updated_at = new Date().toISOString()
+
+      await storage.saveChatSession(session)
+
+      const index = sessions.value.findIndex(s => s.id === id)
+      if (index !== -1) {
+        sessions.value[index] = { ...session, messages: sessions.value[index].messages }
+      }
+      if (currentSession.value?.id === id) {
+        currentSession.value = session
+      }
+    } catch (e) {
+      error.value = String(e)
+      throw e
+    }
+  }
+
   async function setWorldbookDisabled(loreId: string, disabled: boolean) {
     if (!currentSession.value) return
 
@@ -376,6 +432,7 @@ export const useChatStore = defineStore('chat', () => {
     deleteMessage,
     deleteSession,
     saveCurrentSession,
+    updateSessionSettings,
     setWorldbookDisabled,
   }
 })

@@ -111,8 +111,15 @@ export interface STSessionData {
  */
 export interface STChatMetadata {
   world_info?: string | null;
+  enabled_world_info?: string[];
   disabled_world_info?: string[];
+  user_persona?: STUserPersona;
   [key: string]: unknown;
+}
+
+export interface STUserPersona {
+  name?: string;
+  description?: string;
 }
 
 /**
