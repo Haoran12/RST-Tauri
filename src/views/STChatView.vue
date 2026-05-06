@@ -9,6 +9,7 @@ import {
   NScrollbar,
   NSpin,
   NText,
+  NAvatar,
   useMessage,
 } from 'naive-ui'
 import {
@@ -17,6 +18,8 @@ import {
   SendOutline,
   StopOutline,
   TrashOutline,
+  PersonOutline,
+  SparklesOutline,
 } from '@vicons/ionicons5'
 import { useChatStore } from '@/stores/chat'
 import { useSettingsStore } from '@/stores/settings'
@@ -94,6 +97,19 @@ async function onFileChange(e: Event) {
 function formatTime(dateStr: string) {
   return new Date(dateStr).toLocaleTimeString()
 }
+
+const characterAvatar = computed(() => {
+  const avatarPath = chatStore.currentCharacter?.data.avatar
+  if (avatarPath) {
+    // 返回相对路径或base64，这里需要根据实际存储方式处理
+    return null // 暂时返回null，后续可以加载头像
+  }
+  return null
+})
+
+const characterName = computed(() => {
+  return chatStore.currentCharacter?.data.name ?? 'AI'
+})
 
 function getPreviewUrl(attachment: ChatAttachmentRef): string | null {
   return previewUrls.value[attachment.attachment_id] ?? null
@@ -260,24 +276,55 @@ onBeforeUnmount(() => {
             </div>
             <div v-else class="message-list">
               <div v-for="msg in chatStore.messages" :key="msg.id" :class="['msg', msg.role]">
-                <div class="msg-time">{{ formatTime(msg.created_at) }}</div>
-                <div class="msg-content">
-                  <div class="msg-text">{{ msg.content }}</div>
-                  <div v-if="msg.attachments?.length" class="msg-attachments">
-                    <img
-                      v-for="att in msg.attachments"
-                      :key="att.attachment_id"
-                      :src="getPreviewUrl(att) ?? ''"
-                      class="att-thumb"
-                    >
+                <!-- Avatar -->
+                <div class="msg-avatar">
+                  <template v-if="msg.role === 'user'">
+                    <NAvatar round size="small" color="var(--n-primary-color)">
+                      <NIcon :component="PersonOutline" />
+                    </NAvatar>
+                  </template>
+                  <template v-else>
+                    <NAvatar v-if="characterAvatar" round size="small" :src="characterAvatar" />
+                    <NAvatar v-else round size="small" color="var(--n-success-color)">
+                      <NIcon :component="SparklesOutline" />
+                    </NAvatar>
+                  </template>
+                </div>
+                <!-- Content -->
+                <div class="msg-body">
+                  <div class="msg-header">
+                    <span class="msg-name">{{ msg.role === 'user' ? '你' : characterName }}</span>
+                    <span class="msg-time">{{ formatTime(msg.created_at) }}</span>
+                  </div>
+                  <div class="msg-content">
+                    <div class="msg-text">{{ msg.content }}</div>
+                    <div v-if="msg.attachments?.length" class="msg-attachments">
+                      <img
+                        v-for="att in msg.attachments"
+                        :key="att.attachment_id"
+                        :src="getPreviewUrl(att) ?? ''"
+                        class="att-thumb"
+                      >
+                    </div>
                   </div>
                 </div>
               </div>
               <div v-if="chatStore.isGenerating" class="msg assistant">
-                <div class="msg-time">生成中</div>
-                <div class="msg-content">
-                  <NSpin v-if="!chatStore.streamingContent" size="small" />
-                  <div v-else class="msg-text">{{ chatStore.streamingContent }}</div>
+                <div class="msg-avatar">
+                  <NAvatar v-if="characterAvatar" round size="small" :src="characterAvatar" />
+                  <NAvatar v-else round size="small" color="var(--n-success-color)">
+                    <NIcon :component="SparklesOutline" />
+                  </NAvatar>
+                </div>
+                <div class="msg-body">
+                  <div class="msg-header">
+                    <span class="msg-name">{{ characterName }}</span>
+                    <span class="msg-time">生成中...</span>
+                  </div>
+                  <div class="msg-content">
+                    <NSpin v-if="!chatStore.streamingContent" size="small" />
+                    <div v-else class="msg-text">{{ chatStore.streamingContent }}</div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -413,26 +460,58 @@ onBeforeUnmount(() => {
 }
 
 .message-list {
-  padding: 16px;
+  padding: 16px 20px;
+  max-width: 900px;
+  margin: 0 auto;
 }
 
 .msg {
-  margin-bottom: 14px;
-  max-width: 85%;
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
 }
 
 .msg.user {
-  margin-left: auto;
+  flex-direction: row-reverse;
+}
+
+.msg-avatar {
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+
+.msg-body {
+  flex: 1;
+  min-width: 0;
+  max-width: 75%;
+}
+
+.msg.user .msg-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.msg-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.msg.user .msg-header {
+  flex-direction: row-reverse;
+}
+
+.msg-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--n-text-color);
 }
 
 .msg-time {
   font-size: 11px;
   color: var(--n-text-color-3);
-  margin-bottom: 4px;
-}
-
-.msg.user .msg-time {
-  text-align: right;
 }
 
 .msg-content {
@@ -440,32 +519,39 @@ onBeforeUnmount(() => {
 }
 
 .msg-text {
-  padding: 10px 14px;
-  border-radius: 10px;
+  padding: 12px 16px;
+  border-radius: 16px;
   background: var(--n-color);
   border: 1px solid var(--n-border-color);
   white-space: pre-wrap;
   word-break: break-word;
-  line-height: 1.5;
+  line-height: 1.6;
+  font-size: 14px;
 }
 
 .msg.user .msg-text {
-  background: color-mix(in srgb, var(--n-primary-color) 14%, var(--n-color));
-  border-color: color-mix(in srgb, var(--n-primary-color) 25%, var(--n-border-color));
+  background: var(--n-primary-color);
+  color: white;
+  border-color: transparent;
+  border-bottom-right-radius: 4px;
+}
+
+.msg.assistant .msg-text {
+  border-bottom-left-radius: 4px;
 }
 
 .msg-attachments {
-  margin-top: 6px;
+  margin-top: 8px;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 
 .att-thumb {
-  width: 120px;
-  height: 80px;
+  width: 160px;
+  max-height: 200px;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: 12px;
   border: 1px solid var(--n-border-color);
 }
 
