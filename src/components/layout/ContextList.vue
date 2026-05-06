@@ -641,7 +641,7 @@ async function onDrop(event: DragEvent, targetItem: PromptItem) {
   preset.prompt_order = preset.prompt_order.map((orderEntry) => {
     const existingOrder = orderEntry.order ?? []
     return {
-      ...orderEntry,
+      character_id: orderEntry.character_id ?? 100000,
       order: newOrder.map((item) => {
         // 保留原有的 enabled 状态
         const existing = existingOrder.find((o) => o.identifier === item.identifier)
