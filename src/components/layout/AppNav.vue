@@ -68,10 +68,6 @@ const activeKey = computed(() => {
   return name
 })
 
-function navigate(key: string) {
-  router.push({ name: key })
-}
-
 function switchMode(mode: AppMode) {
   appShell.setCurrentMode(mode)
   const target = mode === 'st' ? appShell.lastStRoute || '/st' : appShell.lastAgentRoute || '/agent'
@@ -106,34 +102,46 @@ function switchMode(mode: AppMode) {
         :key="sectionIndex"
         class="nav-section"
       >
-        <button
+        <RouterLink
           v-for="item in section"
           :key="item.key"
-          type="button"
-          class="nav-item"
-          :class="{ active: activeKey === item.key }"
-          :aria-label="item.label"
-          :aria-current="activeKey === item.key ? 'page' : undefined"
-          @click="navigate(item.key)"
+          v-slot="{ href, navigate }"
+          custom
+          :to="{ name: item.key }"
         >
-          <NIcon class="nav-icon" :component="item.icon" />
-          <span class="nav-tooltip" role="tooltip">{{ item.label }}</span>
-        </button>
+          <a
+            :href="href"
+            class="nav-item"
+            :class="{ active: activeKey === item.key }"
+            :aria-label="item.label"
+            :aria-current="activeKey === item.key ? 'page' : undefined"
+            @click="navigate"
+          >
+            <NIcon class="nav-icon" :component="item.icon" />
+            <span class="nav-tooltip" role="tooltip">{{ item.label }}</span>
+          </a>
+        </RouterLink>
       </div>
     </nav>
 
     <div class="nav-footer">
-      <button
-        type="button"
-        class="nav-item"
-        :class="{ active: activeKey === 'settings' }"
-        aria-label="设置"
-        :aria-current="activeKey === 'settings' ? 'page' : undefined"
-        @click="navigate('settings')"
+      <RouterLink
+        v-slot="{ href, navigate }"
+        custom
+        :to="{ name: 'settings' }"
       >
-        <NIcon class="nav-icon nav-icon-sm" :component="SettingsOutline" />
-        <span class="nav-tooltip" role="tooltip">设置</span>
-      </button>
+        <a
+          :href="href"
+          class="nav-item"
+          :class="{ active: activeKey === 'settings' }"
+          aria-label="设置"
+          :aria-current="activeKey === 'settings' ? 'page' : undefined"
+          @click="navigate"
+        >
+          <NIcon class="nav-icon nav-icon-sm" :component="SettingsOutline" />
+          <span class="nav-tooltip" role="tooltip">设置</span>
+        </a>
+      </RouterLink>
     </div>
   </div>
 </template>
@@ -204,6 +212,7 @@ function switchMode(mode: AppMode) {
   color: var(--n-text-color-2, #4b5563);
   background: transparent;
   cursor: pointer;
+  text-decoration: none;
   overflow: visible;
   transition:
     color 0.15s ease,
