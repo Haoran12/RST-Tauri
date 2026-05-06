@@ -397,7 +397,7 @@ function getRoleType(role: string): 'default' | 'success' | 'info' | 'warning' |
 
 // Check if prompt item is enabled
 function isPromptEnabled(identifier: string): boolean {
-  const order = presetsStore.currentPreset?.prompt?.prompt_order?.[0]?.order
+  const order = presetsStore.currentPreset?.prompt_order?.[0]?.order
   if (!order) return true // Default enabled if no order specified
   const item = order.find((o) => o.identifier === identifier)
   return item?.enabled !== false
@@ -407,38 +407,34 @@ function isPromptEnabled(identifier: string): boolean {
 async function togglePromptEnabled(identifier: string, enabled: boolean) {
   if (!presetsStore.currentPreset) return
   const preset = presetsStore.currentPreset
-  if (!preset.prompt) {
-    preset.prompt = { prompts: [], prompt_order: [] }
+  if (!preset.prompt_order || preset.prompt_order.length === 0) {
+    preset.prompt_order = [{ order: [] }]
   }
-  if (!preset.prompt.prompt_order || preset.prompt.prompt_order.length === 0) {
-    preset.prompt.prompt_order = [{ order: [] }]
-  }
-  const order = preset.prompt.prompt_order[0].order || []
+  const order = preset.prompt_order[0].order || []
   const existingIndex = order.findIndex((o) => o.identifier === identifier)
   if (existingIndex >= 0) {
     order[existingIndex].enabled = enabled
   } else {
     order.push({ identifier, enabled })
   }
-  preset.prompt.prompt_order[0].order = order
+  preset.prompt_order[0].order = order
   await presetsStore.savePreset(preset)
 }
 
 // Delete prompt item
 async function deletePromptItem(identifier: string) {
-  if (!presetsStore.currentPreset?.prompt?.prompts) return
+  if (!presetsStore.currentPreset?.prompts) return
   const preset = presetsStore.currentPreset
-  const promptData = preset.prompt!
   // Remove from prompts array
-  promptData.prompts = promptData.prompts!.filter((p) => p.identifier !== identifier)
+  preset.prompts = preset.prompts.filter((p) => p.identifier !== identifier)
   // Remove from order array
-  if (promptData.prompt_order?.[0]?.order) {
-    promptData.prompt_order[0].order = promptData.prompt_order[0].order.filter(
+  if (preset.prompt_order?.[0]?.order) {
+    preset.prompt_order[0].order = preset.prompt_order[0].order.filter(
       (o) => o.identifier !== identifier
     )
   }
   if (presetsStore.currentPromptIdentifier === identifier) {
-    presetsStore.selectPromptItem(promptData.prompts?.[0]?.identifier ?? null)
+    presetsStore.selectPromptItem(preset.prompts?.[0]?.identifier ?? null)
   }
   await presetsStore.savePreset(preset)
 }
@@ -447,20 +443,17 @@ async function deletePromptItem(identifier: string) {
 async function createPromptItem() {
   if (!presetsStore.currentPreset) return
   const preset = presetsStore.currentPreset
-  if (!preset.prompt) {
-    preset.prompt = { prompts: [], prompt_order: [] }
-  }
-  if (!preset.prompt.prompts) {
-    preset.prompt.prompts = []
+  if (!preset.prompts) {
+    preset.prompts = []
   }
   // Generate unique identifier
-  const existingIds = new Set(preset.prompt.prompts.map((p) => p.identifier))
+  const existingIds = new Set(preset.prompts.map((p) => p.identifier))
   let counter = 1
   while (existingIds.has(`prompt_${counter}`)) {
     counter++
   }
   const newIdentifier = `prompt_${counter}`
-  preset.prompt.prompts.push({
+  preset.prompts.push({
     identifier: newIdentifier,
     name: `新提示词 ${counter}`,
     role: 'system',
@@ -508,9 +501,9 @@ async function onDrop(event: DragEvent, targetItem: PromptItem) {
   }
 
   const preset = presetsStore.currentPreset
-  if (!preset?.prompt?.prompts) return
+  if (!preset?.prompts) return
 
-  const prompts = preset.prompt.prompts
+  const prompts = preset.prompts
   const draggedIndex = prompts.findIndex(p => p.identifier === draggedItem.value!.identifier)
   const targetIndex = prompts.findIndex(p => p.identifier === targetItem.identifier)
 
@@ -521,12 +514,12 @@ async function onDrop(event: DragEvent, targetItem: PromptItem) {
   prompts.splice(targetIndex, 0, removed)
 
   // Update positions in prompt_order
-  if (!preset.prompt.prompt_order || preset.prompt.prompt_order.length === 0) {
-    preset.prompt.prompt_order = [{ order: [] }]
+  if (!preset.prompt_order || preset.prompt_order.length === 0) {
+    preset.prompt_order = [{ order: [] }]
   }
 
-  const order = preset.prompt.prompt_order[0].order ?? []
-  preset.prompt.prompt_order[0].order = order
+  const order = preset.prompt_order[0].order ?? []
+  preset.prompt_order[0].order = order
   prompts.forEach((p, index) => {
     const existingOrder = order.find(o => o.identifier === p.identifier)
     if (existingOrder) {
@@ -544,10 +537,10 @@ async function onDrop(event: DragEvent, targetItem: PromptItem) {
 
 // Get sorted prompt items with position from prompt_order
 const sortedPromptItems = computed(() => {
-  const prompts = presetsStore.currentPreset?.prompt?.prompts
+  const prompts = presetsStore.currentPreset?.prompts
   if (!prompts) return []
 
-  const order = presetsStore.currentPreset?.prompt?.prompt_order?.[0]?.order
+  const order = presetsStore.currentPreset?.prompt_order?.[0]?.order
   const positionMap = new Map<string, number>()
   order?.forEach(item => {
     if (item.position !== undefined) {

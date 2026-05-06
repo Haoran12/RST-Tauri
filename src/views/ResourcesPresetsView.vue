@@ -107,9 +107,9 @@ async function createPreset() {
 }
 
 async function savePromptItem() {
-  if (!store.currentPreset?.prompt?.prompts) return
+  if (!store.currentPreset?.prompts) return
 
-  const prompts = store.currentPreset.prompt.prompts
+  const prompts = store.currentPreset.prompts
   const index = prompts.findIndex((p) => p.identifier === editIdentifier.value)
   if (index >= 0) {
     prompts[index] = {

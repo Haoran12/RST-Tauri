@@ -678,3 +678,220 @@ pub struct AutoSelectConfig {
     #[serde(default)]
     pub bindings: Vec<AutoSelectBinding>,
 }
+
+// ============================================================================
+// Preset File - 预设文件（SillyTavern 兼容格式）
+// ============================================================================
+
+/// 预设文件
+///
+/// 采用 SillyTavern 扁平格式，采样参数和提示词配置都在顶层。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PresetFile {
+    pub name: String,
+
+    // ========================================
+    // 采样参数（顶层，与 ST 一致）
+    // ========================================
+    #[serde(default = "default_temperature")]
+    pub temperature: f64,
+    #[serde(default)]
+    pub frequency_penalty: f64,
+    #[serde(default)]
+    pub presence_penalty: f64,
+    #[serde(default = "default_top_p")]
+    pub top_p: f64,
+    #[serde(default)]
+    pub top_k: i32,
+    #[serde(default)]
+    pub top_a: f64,
+    #[serde(default)]
+    pub min_p: f64,
+    #[serde(default)]
+    pub repetition_penalty: f64,
+    #[serde(default)]
+    pub rep_pen_range: i32,
+    #[serde(default)]
+    pub rep_pen_decay: f64,
+    #[serde(default)]
+    pub rep_pen_slope: f64,
+    #[serde(default)]
+    pub typical_p: f64,
+    #[serde(default)]
+    pub tfs: f64,
+    #[serde(default)]
+    pub epsilon_cutoff: f64,
+    #[serde(default)]
+    pub eta_cutoff: f64,
+    #[serde(default)]
+    pub guidance_scale: f64,
+    #[serde(default)]
+    pub negative_prompt: String,
+
+    // DRY
+    #[serde(default)]
+    pub dry_allowed_length: i32,
+    #[serde(default)]
+    pub dry_multiplier: f64,
+    #[serde(default)]
+    pub dry_base: f64,
+    #[serde(default)]
+    pub dry_sequence_breakers: String,
+
+    // Mirostat
+    #[serde(default)]
+    pub mirostat_mode: i32,
+    #[serde(default)]
+    pub mirostat_tau: f64,
+    #[serde(default)]
+    pub mirostat_eta: f64,
+
+    // 其他采样
+    #[serde(default)]
+    pub no_repeat_ngram_size: i32,
+    #[serde(default)]
+    pub encoder_rep_pen: f64,
+    #[serde(default)]
+    pub sampler_priority: Vec<String>,
+    #[serde(default)]
+    pub temperature_last: bool,
+
+    // ========================================
+    // 提示词配置（顶层，与 ST 一致）
+    // ========================================
+    #[serde(default)]
+    pub prompts: Vec<PromptItem>,
+    #[serde(default)]
+    pub prompt_order: Vec<PromptOrder>,
+
+    // 格式化模板
+    #[serde(default)]
+    pub wi_format: String,
+    #[serde(default)]
+    pub scenario_format: String,
+    #[serde(default)]
+    pub personality_format: String,
+
+    // 特殊提示词
+    #[serde(default)]
+    pub send_if_empty: String,
+    #[serde(default)]
+    pub impersonation_prompt: String,
+    #[serde(default)]
+    pub new_chat_prompt: String,
+    #[serde(default)]
+    pub new_group_chat_prompt: String,
+    #[serde(default)]
+    pub new_example_chat_prompt: String,
+    #[serde(default)]
+    pub continue_nudge_prompt: String,
+    #[serde(default)]
+    pub group_nudge_prompt: String,
+
+    // ========================================
+    // ST 兼容字段
+    // ========================================
+    #[serde(default = "default_true")]
+    pub stream_openai: bool,
+    #[serde(default = "default_true")]
+    pub use_sysprompt: bool,
+    #[serde(default)]
+    pub assistant_prefill: String,
+    #[serde(default)]
+    pub reasoning_effort: String,
+    #[serde(default = "default_true")]
+    pub max_context_unlocked: bool,
+    #[serde(default = "default_openai_max_context")]
+    pub openai_max_context: i32,
+    #[serde(default = "default_openai_max_tokens")]
+    pub openai_max_tokens: i32,
+    #[serde(default)]
+    pub names_behavior: i32,
+
+    // ========================================
+    // RST 扩展字段
+    // ========================================
+    #[serde(default)]
+    pub instruct: Option<InstructTemplate>,
+    #[serde(default)]
+    pub context: Option<ContextTemplate>,
+    #[serde(default)]
+    pub sysprompt: Option<SystemPrompt>,
+    #[serde(default)]
+    pub reasoning: Option<ReasoningTemplate>,
+
+    // 元数据
+    #[serde(default)]
+    pub source_api_id: Option<String>,
+    #[serde(default)]
+    pub extensions: HashMap<String, serde_json::Value>,
+}
+
+fn default_openai_max_context() -> i32 {
+    128000
+}
+fn default_openai_max_tokens() -> i32 {
+    4096
+}
+
+impl PresetFile {
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            temperature: 1.0,
+            frequency_penalty: 0.0,
+            presence_penalty: 0.0,
+            top_p: 1.0,
+            top_k: 0,
+            top_a: 0.0,
+            min_p: 0.0,
+            repetition_penalty: 1.0,
+            rep_pen_range: 0,
+            rep_pen_decay: 0.0,
+            rep_pen_slope: 0.0,
+            typical_p: 1.0,
+            tfs: 1.0,
+            epsilon_cutoff: 0.0,
+            eta_cutoff: 0.0,
+            guidance_scale: 1.0,
+            negative_prompt: String::new(),
+            dry_allowed_length: 0,
+            dry_multiplier: 0.0,
+            dry_base: 0.0,
+            dry_sequence_breakers: String::new(),
+            mirostat_mode: 0,
+            mirostat_tau: 5.0,
+            mirostat_eta: 0.1,
+            no_repeat_ngram_size: 0,
+            encoder_rep_pen: 1.0,
+            sampler_priority: Vec::new(),
+            temperature_last: false,
+            prompts: Vec::new(),
+            prompt_order: Vec::new(),
+            wi_format: String::new(),
+            scenario_format: String::new(),
+            personality_format: String::new(),
+            send_if_empty: String::new(),
+            impersonation_prompt: String::new(),
+            new_chat_prompt: String::new(),
+            new_group_chat_prompt: String::new(),
+            new_example_chat_prompt: String::new(),
+            continue_nudge_prompt: String::new(),
+            group_nudge_prompt: String::new(),
+            stream_openai: true,
+            use_sysprompt: true,
+            assistant_prefill: String::new(),
+            reasoning_effort: String::new(),
+            max_context_unlocked: true,
+            openai_max_context: 128000,
+            openai_max_tokens: 4096,
+            names_behavior: 0,
+            instruct: None,
+            context: None,
+            sysprompt: None,
+            reasoning: None,
+            source_api_id: None,
+            extensions: HashMap::new(),
+        }
+    }
+}

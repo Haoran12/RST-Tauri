@@ -453,29 +453,107 @@ export function createDefaultPromptPreset(name = ''): PromptPreset {
 }
 
 // ============================================================================
-// Preset File - 预设文件（包含所有类型）
+// Preset File - 预设文件（SillyTavern 兼容格式）
 // ============================================================================
 
+/**
+ * 预设文件
+ *
+ * 采用 SillyTavern 扁平格式，采样参数和提示词配置都在顶层。
+ * 参考: E:\AIPlay\SillyTavern\public\scripts\presets.js
+ */
 export interface PresetFile {
   name: string
 
-  // 采样参数
-  sampler?: SamplerPreset
+  // ========================================
+  // 采样参数（顶层，与 ST 一致）
+  // ========================================
+  temperature?: number
+  frequency_penalty?: number
+  presence_penalty?: number
+  top_p?: number
+  top_k?: number
+  top_a?: number
+  min_p?: number
+  repetition_penalty?: number
+  rep_pen_range?: number
+  rep_pen_decay?: number
+  rep_pen_slope?: number
+  typical_p?: number
+  tfs?: number
+  epsilon_cutoff?: number
+  eta_cutoff?: number
+  guidance_scale?: number
+  negative_prompt?: string
 
-  // 对话格式模板
+  // DRY
+  dry_allowed_length?: number
+  dry_multiplier?: number
+  dry_base?: number
+  dry_sequence_breakers?: string
+
+  // Mirostat
+  mirostat_mode?: number
+  mirostat_tau?: number
+  mirostat_eta?: number
+
+  // 其他采样
+  no_repeat_ngram_size?: number
+  encoder_rep_pen?: number
+  sampler_priority?: string[]
+  temperature_last?: boolean
+
+  // ========================================
+  // 提示词配置（顶层，与 ST 一致）
+  // ========================================
+  prompts?: PromptItem[]
+  prompt_order?: PromptOrder[]
+
+  // 格式化模板
+  wi_format?: string
+  scenario_format?: string
+  personality_format?: string
+
+  // 特殊提示词
+  send_if_empty?: string
+  impersonation_prompt?: string
+  new_chat_prompt?: string
+  new_group_chat_prompt?: string
+  new_example_chat_prompt?: string
+  continue_nudge_prompt?: string
+  group_nudge_prompt?: string
+
+  // ========================================
+  // ST 兼容字段
+  // ========================================
+  /** 流式输出 */
+  stream_openai?: boolean
+  /** 使用系统提示词 */
+  use_sysprompt?: boolean
+  /** 助手预填充 */
+  assistant_prefill?: string
+  /** 推理强度 */
+  reasoning_effort?: string
+  /** 最大上下文解锁 */
+  max_context_unlocked?: boolean
+  /** OpenAI 最大上下文 */
+  openai_max_context?: number
+  /** OpenAI 最大 tokens */
+  openai_max_tokens?: number
+  /** 名称行为 */
+  names_behavior?: number
+
+  // ========================================
+  // RST 扩展字段
+  // ========================================
+  /** 对话格式模板（RST 扩展） */
   instruct?: InstructTemplate
-
-  // 上下文组装模板
+  /** 上下文组装模板（RST 扩展） */
   context?: ContextTemplate
-
-  // 系统提示词
+  /** 系统提示词（RST 扩展，已弃用，使用 prompts 中的 Main Prompt） */
   sysprompt?: SystemPrompt
-
-  // 思维链格式
+  /** 思维链格式（RST 扩展） */
   reasoning?: ReasoningTemplate
-
-  // 完整提示词组装
-  prompt?: PromptPreset
 
   // 元数据
   source_api_id?: string
@@ -485,12 +563,59 @@ export interface PresetFile {
 export function createDefaultPresetFile(name: string): PresetFile {
   return {
     name,
-    sampler: createDefaultSamplerPreset(name),
+    // 采样参数默认值
+    temperature: 1.0,
+    top_p: 1.0,
+    top_k: 0,
+    top_a: 0,
+    min_p: 0,
+    typical_p: 1.0,
+    tfs: 1.0,
+    epsilon_cutoff: 0,
+    eta_cutoff: 0,
+    repetition_penalty: 1.0,
+    rep_pen_range: 0,
+    rep_pen_decay: 0,
+    rep_pen_slope: 0,
+    frequency_penalty: 0,
+    presence_penalty: 0,
+    encoder_rep_pen: 1.0,
+    dry_allowed_length: 0,
+    dry_multiplier: 0,
+    dry_base: 0,
+    dry_sequence_breakers: '',
+    mirostat_mode: 0,
+    mirostat_tau: 5.0,
+    mirostat_eta: 0.1,
+    no_repeat_ngram_size: 0,
+    guidance_scale: 1.0,
+    negative_prompt: '',
+    sampler_priority: [],
+    temperature_last: false,
+    // 提示词配置
+    prompts: [],
+    prompt_order: [],
+    wi_format: '',
+    scenario_format: '',
+    personality_format: '',
+    send_if_empty: '',
+    impersonation_prompt: '',
+    new_chat_prompt: '',
+    new_group_chat_prompt: '',
+    new_example_chat_prompt: '',
+    continue_nudge_prompt: '',
+    group_nudge_prompt: '',
+    // ST 兼容字段
+    stream_openai: true,
+    use_sysprompt: true,
+    max_context_unlocked: true,
+    openai_max_context: 128000,
+    openai_max_tokens: 4096,
+    names_behavior: 0,
+    // RST 扩展
     instruct: createDefaultInstructTemplate(name),
     context: createDefaultContextTemplate(name),
-    sysprompt: createDefaultSystemPrompt(name),
     reasoning: createDefaultReasoningTemplate(name),
-    prompt: createDefaultPromptPreset(name),
     extensions: {},
   }
 }

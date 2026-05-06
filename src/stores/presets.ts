@@ -26,11 +26,11 @@ export const usePresetsStore = defineStore('presets', () => {
   const isLoading = ref(false)
 
   function firstPromptIdentifier(preset: PresetFile | null) {
-    return preset?.prompt?.prompts?.[0]?.identifier ?? null
+    return preset?.prompts?.[0]?.identifier ?? null
   }
 
   function ensureCurrentPromptSelection() {
-    const prompts = currentPreset.value?.prompt?.prompts ?? []
+    const prompts = currentPreset.value?.prompts ?? []
     if (prompts.length === 0) {
       currentPromptIdentifier.value = null
       return
@@ -137,30 +137,24 @@ export const usePresetsStore = defineStore('presets', () => {
    * 将导入的数据转换为 PresetFile 格式
    *
    * 支持以下格式：
-   * 1. RST 新格式（PresetFile）- 包含 sampler/instruct/context 等字段
+   * 1. RST/ST 新格式（PresetFile）- 扁平结构，采样参数和 prompts 在顶层
    * 2. ST Master 格式 - 包含 instruct/context/sysprompt/reasoning 等 section
-   * 3. ST 预设扁平格式 - 顶层有 prompts 数组和采样参数
-   * 4. ST 单类型格式 - 单独的 sampler/instruct/context 等文件
-   * 5. Text Completion 预设 - temp/top_k/top_p/rep_pen 等字段
+   * 3. ST 单类型格式 - 单独的 sampler/instruct/context 等文件
+   * 4. Text Completion 预设 - temp/top_k/top_p/rep_pen 等字段
    */
   function convertToPresetFile(data: Record<string, unknown>): PresetFile {
-    // 1. RST 新格式：已有 name 且包含预设类型字段
+    // 1. RST/ST 新格式：已有 name 且包含 prompts 数组或采样参数
     if (isPresetFileFormat(data)) {
       return data as unknown as PresetFile
     }
 
-    // 2. ST 预设扁平格式：顶层有 prompts 数组
-    if (isSTPresetFlatFormat(data)) {
-      return convertFromSTPresetFlat(data)
-    }
-
-    // 3. ST Master 格式：包含多个 section
+    // 2. ST Master 格式：包含多个 section
     if (isSTMasterFormat(data)) {
       return convertFromSTMaster(data)
     }
 
-    // 4. ST 单类型格式检测
-    // 4.1 Instruct Template
+    // 3. ST 单类型格式检测
+    // 3.1 Instruct Template
     if (isPossiblyInstructData(data)) {
       return {
         name: (data.name as string) || 'Imported Instruct',
@@ -168,7 +162,7 @@ export const usePresetsStore = defineStore('presets', () => {
       }
     }
 
-    // 4.2 Context Template
+    // 3.2 Context Template
     if (isPossiblyContextData(data)) {
       return {
         name: (data.name as string) || 'Imported Context',
@@ -176,7 +170,7 @@ export const usePresetsStore = defineStore('presets', () => {
       }
     }
 
-    // 4.3 System Prompt
+    // 3.3 System Prompt
     if (isPossiblySystemPromptData(data)) {
       return {
         name: (data.name as string) || 'Imported System Prompt',
@@ -184,7 +178,7 @@ export const usePresetsStore = defineStore('presets', () => {
       }
     }
 
-    // 4.4 Reasoning Template
+    // 3.4 Reasoning Template
     if (isPossiblyReasoningData(data)) {
       return {
         name: (data.name as string) || 'Imported Reasoning',
@@ -192,16 +186,17 @@ export const usePresetsStore = defineStore('presets', () => {
       }
     }
 
-    // 5. Text Completion / Sampler 预设
+    // 4. Text Completion / Sampler 预设
     if (isPossiblySamplerData(data)) {
-      return {
+      const result: PresetFile = {
         name: (data.name as string) || 'Imported Sampler',
-        sampler: extractSamplerPreset(data),
-        source_api_id: detectSourceApiId(data),
       }
+      // 直接提取采样参数到顶层
+      extractSamplerParams(data, result)
+      return result
     }
 
-    // 6. 无法识别，尝试作为新格式处理
+    // 5. 无法识别，尝试作为新格式处理
     if (data.name && typeof data.name === 'string') {
       console.warn('Unrecognized preset format, treating as PresetFile')
       return data as unknown as PresetFile
@@ -215,23 +210,22 @@ export const usePresetsStore = defineStore('presets', () => {
   // ============================================================================
 
   function isPresetFileFormat(data: Record<string, unknown>): boolean {
+    // RST/ST 新格式：有 name 且包含 prompts 数组或采样参数
     return (
       !!data.name &&
       typeof data.name === 'string' &&
-      !!(
-        data.sampler ||
-        data.instruct ||
-        data.context ||
-        data.sysprompt ||
-        data.reasoning ||
-        data.prompt
-      )
+      !!(Array.isArray(data.prompts) || hasSamplerParams(data))
     )
   }
 
-  function isSTPresetFlatFormat(data: Record<string, unknown>): boolean {
-    // ST 预设扁平格式：顶层有 prompts 数组
-    return Array.isArray(data.prompts)
+  function hasSamplerParams(data: Record<string, unknown>): boolean {
+    // 检测是否有采样参数
+    const samplerKeys = [
+      'temperature', 'top_p', 'top_k', 'top_a', 'min_p', 'typical_p', 'tfs',
+      'repetition_penalty', 'frequency_penalty', 'presence_penalty',
+      'mirostat_mode', 'mirostat_tau', 'mirostat_eta'
+    ]
+    return samplerKeys.some(key => key in data && typeof data[key] === 'number')
   }
 
   function isSTMasterFormat(data: Record<string, unknown>): boolean {
@@ -294,7 +288,6 @@ export const usePresetsStore = defineStore('presets', () => {
   function detectSourceApiId(data: Record<string, unknown>): string | undefined {
     // 从数据中检测来源 API（用于迁移追踪）
     if (data.source_api_id) return data.source_api_id as string
-    // ST 可能有其他标识字段
     return undefined
   }
 
@@ -303,76 +296,48 @@ export const usePresetsStore = defineStore('presets', () => {
   // ============================================================================
 
   /**
-   * 转换 ST 预设扁平格式
-   *
-   * ST 预设文件结构：
-   * - 顶层采样参数：temperature, top_p, repetition_penalty 等
-   * - prompts[]: 提示词条目数组
-   * - prompt_order[]: 提示词排序
-   * - 格式化模板：wi_format, scenario_format, personality_format
-   * - 特殊提示词：new_chat_prompt, continue_nudge_prompt 等
-   * - extensions.regex_scripts[]: 正则脚本
+   * 提取采样参数到 PresetFile 顶层
    */
-  function convertFromSTPresetFlat(data: Record<string, unknown>): PresetFile {
-    const result: PresetFile = {
-      name: (data.name as string) || 'Imported ST Preset',
-    }
+  function extractSamplerParams(data: Record<string, unknown>, result: PresetFile) {
+    // 基础采样参数
+    if (data.temperature !== undefined) result.temperature = data.temperature as number
+    if (data.temp !== undefined) result.temperature = data.temp as number
+    if (data.top_p !== undefined) result.top_p = data.top_p as number
+    if (data.top_k !== undefined) result.top_k = data.top_k as number
+    if (data.top_a !== undefined) result.top_a = data.top_a as number
+    if (data.min_p !== undefined) result.min_p = data.min_p as number
+    if (data.typical_p !== undefined) result.typical_p = data.typical_p as number
+    if (data.tfs !== undefined) result.tfs = data.tfs as number
+    if (data.epsilon_cutoff !== undefined) result.epsilon_cutoff = data.epsilon_cutoff as number
+    if (data.eta_cutoff !== undefined) result.eta_cutoff = data.eta_cutoff as number
 
-    // 提取采样参数
-    result.sampler = extractSamplerPreset(data)
+    // 重复惩罚
+    if (data.repetition_penalty !== undefined) result.repetition_penalty = data.repetition_penalty as number
+    if (data.rep_pen !== undefined) result.repetition_penalty = data.rep_pen as number
+    if (data.rep_pen_range !== undefined) result.rep_pen_range = data.rep_pen_range as number
+    if (data.rep_pen_decay !== undefined) result.rep_pen_decay = data.rep_pen_decay as number
+    if (data.rep_pen_slope !== undefined) result.rep_pen_slope = data.rep_pen_slope as number
+    if (data.frequency_penalty !== undefined) result.frequency_penalty = data.frequency_penalty as number
+    if (data.presence_penalty !== undefined) result.presence_penalty = data.presence_penalty as number
+    if (data.encoder_rep_pen !== undefined) result.encoder_rep_pen = data.encoder_rep_pen as number
 
-    // 提取提示词配置
-    const prompt: import('@/types/preset').PromptPreset = {
-      prompts: [],
-      prompt_order: [],
-    }
+    // DRY
+    if (data.dry_allowed_length !== undefined) result.dry_allowed_length = data.dry_allowed_length as number
+    if (data.dry_multiplier !== undefined) result.dry_multiplier = data.dry_multiplier as number
+    if (data.dry_base !== undefined) result.dry_base = data.dry_base as number
+    if (data.dry_sequence_breakers !== undefined) result.dry_sequence_breakers = data.dry_sequence_breakers as string
 
-    // 提取 prompts 数组
-    if (Array.isArray(data.prompts)) {
-      prompt.prompts = data.prompts.map((p: Record<string, unknown>) => ({
-        identifier: p.identifier as string || '',
-        name: p.name as string || '',
-        role: (p.role as 'system' | 'user' | 'assistant') || 'system',
-        content: p.content as string || '',
-        system_prompt: p.system_prompt as boolean || false,
-        marker: p.marker as boolean || false,
-        enabled: p.enabled as boolean | undefined,
-        injection_position: p.injection_position as number | undefined,
-        injection_depth: p.injection_depth as number | undefined,
-        injection_order: p.injection_order as number | undefined,
-        forbid_overrides: p.forbid_overrides as boolean | undefined,
-        injection_trigger: (p.injection_trigger as string[]) || [],
-      }))
-    }
+    // Mirostat
+    if (data.mirostat_mode !== undefined) result.mirostat_mode = data.mirostat_mode as number
+    if (data.mirostat_tau !== undefined) result.mirostat_tau = data.mirostat_tau as number
+    if (data.mirostat_eta !== undefined) result.mirostat_eta = data.mirostat_eta as number
 
-    // 提取 prompt_order
-    if (Array.isArray(data.prompt_order)) {
-      prompt.prompt_order = data.prompt_order.map((order: Record<string, unknown>) => ({
-        character_id: order.character_id as number | undefined,
-        order: Array.isArray(order.order)
-          ? order.order.map((item: Record<string, unknown>) => ({
-              identifier: item.identifier as string,
-              enabled: item.enabled as boolean | undefined,
-            }))
-          : [],
-      }))
-    }
-
-    // 提取格式化模板
-    if (data.wi_format) prompt.wi_format = data.wi_format as string
-    if (data.scenario_format) prompt.scenario_format = data.scenario_format as string
-    if (data.personality_format) prompt.personality_format = data.personality_format as string
-
-    // 提取特殊提示词
-    if (data.new_chat_prompt) prompt.new_chat_prompt = data.new_chat_prompt as string
-    if (data.new_group_chat_prompt) prompt.new_group_chat_prompt = data.new_group_chat_prompt as string
-    if (data.continue_nudge_prompt) prompt.continue_nudge_prompt = data.continue_nudge_prompt as string
-    if (data.group_nudge_prompt) prompt.group_nudge_prompt = data.group_nudge_prompt as string
-    if (data.impersonation_prompt) prompt.impersonation_prompt = data.impersonation_prompt as string
-
-    result.prompt = prompt
-
-    return result
+    // 其他
+    if (data.no_repeat_ngram_size !== undefined) result.no_repeat_ngram_size = data.no_repeat_ngram_size as number
+    if (data.guidance_scale !== undefined) result.guidance_scale = data.guidance_scale as number
+    if (data.negative_prompt !== undefined) result.negative_prompt = data.negative_prompt as string
+    if (data.sampler_priority !== undefined) result.sampler_priority = data.sampler_priority as string[]
+    if (data.temperature_last !== undefined) result.temperature_last = data.temperature_last as boolean
   }
 
   function convertFromSTMaster(data: Record<string, unknown>): PresetFile {
@@ -408,10 +373,10 @@ export const usePresetsStore = defineStore('presets', () => {
       result.reasoning = extractReasoningTemplate(reasoningData)
     }
 
-    // 提取 preset section (Text Completion)
+    // 提取 preset section (Text Completion) - 采样参数直接到顶层
     if (data.preset && typeof data.preset === 'object') {
       const presetData = data.preset as Record<string, unknown>
-      result.sampler = extractSamplerPreset(presetData)
+      extractSamplerParams(presetData, result)
       result.source_api_id = detectSourceApiId(presetData)
     }
 
@@ -470,43 +435,6 @@ export const usePresetsStore = defineStore('presets', () => {
       prefix: data.prefix as string | undefined,
       suffix: data.suffix as string | undefined,
       separator: data.separator as string | undefined,
-    }
-  }
-
-  function extractSamplerPreset(data: Record<string, unknown>): import('@/types/preset').SamplerPreset {
-    // 处理 ST Text Completion 预设的字段名映射
-    return {
-      // ST Text Completion 使用 temp，RST 使用 temperature
-      temperature: (data.temperature ?? data.temp) as number | undefined,
-      top_p: (data.top_p ?? data.top_p) as number | undefined,
-      top_k: data.top_k as number | undefined,
-      top_a: data.top_a as number | undefined,
-      min_p: data.min_p as number | undefined,
-      typical_p: data.typical_p as number | undefined,
-      tfs: data.tfs as number | undefined,
-      epsilon_cutoff: data.epsilon_cutoff as number | undefined,
-      eta_cutoff: data.eta_cutoff as number | undefined,
-      // ST Text Completion 使用 rep_pen，RST 使用 repetition_penalty
-      repetition_penalty: (data.repetition_penalty ?? data.rep_pen) as number | undefined,
-      rep_pen_range: data.rep_pen_range as number | undefined,
-      rep_pen_decay: data.rep_pen_decay as number | undefined,
-      rep_pen_slope: data.rep_pen_slope as number | undefined,
-      frequency_penalty: data.frequency_penalty as number | undefined,
-      presence_penalty: data.presence_penalty as number | undefined,
-      encoder_rep_pen: data.encoder_rep_pen as number | undefined,
-      dry_allowed_length: data.dry_allowed_length as number | undefined,
-      dry_multiplier: data.dry_multiplier as number | undefined,
-      dry_base: data.dry_base as number | undefined,
-      dry_sequence_breakers: data.dry_sequence_breakers as string | undefined,
-      mirostat_mode: data.mirostat_mode as number | undefined,
-      mirostat_tau: data.mirostat_tau as number | undefined,
-      mirostat_eta: data.mirostat_eta as number | undefined,
-      no_repeat_ngram_size: data.no_repeat_ngram_size as number | undefined,
-      guidance_scale: data.guidance_scale as number | undefined,
-      negative_prompt: data.negative_prompt as string | undefined,
-      sampler_priority: data.sampler_priority as string[] | undefined,
-      temperature_last: data.temperature_last as boolean | undefined,
-      provider_overrides: data.provider_overrides as Record<string, Record<string, unknown>> | undefined,
     }
   }
 
