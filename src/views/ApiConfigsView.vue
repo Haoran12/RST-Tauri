@@ -31,6 +31,7 @@ import type { ApiConfig } from '@/types/st'
 import { DEFAULT_BINDINGS } from '@/types/structuredText'
 import type { StructuredTextDiagnostic } from '@/types/structuredText'
 import * as storage from '@/services/storage'
+import { modalSizeStyles } from '@/composables/useModalSize'
 
 type ProviderPreset = {
   value: ApiConfig['provider']
@@ -662,7 +663,7 @@ onMounted(async () => {
       v-model:show="showCreateModal"
       preset="card"
       title="新建 API 配置"
-      style="width: min(92vw, 520px)"
+      :style="modalSizeStyles.editor"
     >
       <NForm label-placement="top">
         <NFormItem label="名称" required>

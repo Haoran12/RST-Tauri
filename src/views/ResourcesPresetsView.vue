@@ -20,6 +20,7 @@ import {
 import { usePresetsStore, type PresetSectionKey } from '@/stores/presets'
 import { useRuntimeStore } from '@/stores/runtime'
 import type { PromptItem, PromptOrder, PromptOrderItem } from '@/types/preset'
+import { modalSizeStyles } from '@/composables/useModalSize'
 
 const store = usePresetsStore()
 const runtimeStore = useRuntimeStore()
@@ -877,7 +878,7 @@ onBeforeUnmount(() => {
       v-model:show="showEditModal"
       preset="card"
       title="编辑提示词"
-      style="width: 640px"
+      :style="modalSizeStyles.editor"
     >
       <NForm label-placement="left" label-width="96px">
         <NFormItem label="标识符">

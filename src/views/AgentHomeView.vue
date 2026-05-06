@@ -26,6 +26,7 @@ import {
 import { useAgentStore } from '@/stores/agent'
 import { useSettingsStore } from '@/stores/settings'
 import { useAppShellStore } from '@/stores/appShell'
+import { modalSizeStyles } from '@/composables/useModalSize'
 
 const router = useRouter()
 const agentStore = useAgentStore()
@@ -328,7 +329,7 @@ onMounted(async () => {
       v-model:show="showCreateWorldModal"
       preset="card"
       title="新建 Agent World"
-      style="width: 460px; max-width: 90vw"
+      :style="modalSizeStyles.editor"
       :mask-closable="!isCreatingWorld"
     >
       <div class="modal-form">

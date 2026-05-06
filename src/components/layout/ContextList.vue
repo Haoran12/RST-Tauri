@@ -31,6 +31,7 @@ import type { WorldInfoEntry } from '@/types/st'
 import { WorldInfoPosition } from '@/types/st'
 import type { ChatSession } from '@/types/st'
 import type { PromptItem } from '@/types/preset'
+import { modalSizeStyles } from '@/composables/useModalSize'
 
 const route = useRoute()
 const router = useRouter()
@@ -1094,7 +1095,7 @@ watch(() => route.name, async (newName) => {
       :show="editingStSessionId !== null"
       preset="card"
       title="编辑 ST 会话"
-      class="session-settings-modal"
+      :style="modalSizeStyles.editor"
       @update:show="value => { if (!value) editingStSessionId = null }"
     >
       <NForm label-placement="top">
@@ -1145,7 +1146,7 @@ watch(() => route.name, async (newName) => {
       :show="switchingSessionId !== null"
       preset="card"
       title="切换会话"
-      class="session-switch-modal"
+      :style="modalSizeStyles.dialog"
       @update:show="value => { if (!value) switchingSessionId = null }"
     >
       <NText>确定切换到该会话？</NText>
@@ -1407,14 +1408,6 @@ watch(() => route.name, async (newName) => {
 
 .entry-item:hover .delete-btn {
   opacity: 1;
-}
-
-.session-settings-modal {
-  width: min(420px, 60vw, calc(100vw - 32px));
-}
-
-.session-switch-modal {
-  width: min(400px, calc(100vw - 32px));
 }
 
 .switch-warning {

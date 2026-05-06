@@ -19,6 +19,7 @@ import { useWorldbooksStore } from '@/stores/worldbooks'
 import { useRuntimeStore } from '@/stores/runtime'
 import WorldbookEntryEditor from '@/components/st/worldbook/WorldbookEntryEditor.vue'
 import type { WorldInfoEntry } from '@/types/st'
+import { modalSizeStyles } from '@/composables/useModalSize'
 
 const store = useWorldbooksStore()
 const runtimeStore = useRuntimeStore()
@@ -318,7 +319,7 @@ async function handleExport() {
       v-model:show="showGlobalSettings"
       preset="card"
       title="全局世界书设置"
-      style="width: 450px"
+      :style="modalSizeStyles.editor"
     >
       <NForm label-placement="left" label-width="120px">
         <NFormItem label="扫描深度">

@@ -39,6 +39,7 @@ import type { AgentLlmProfile } from '@/types/agent/llm-config'
 import { createDefaultAgentLlmProfile } from '@/types/agent/llm-config'
 import type { AgentSession, TimeAnchor } from '@/types/agent/session'
 import { createTimeAnchor } from '@/types/agent/session'
+import { modalSizeStyles } from '@/composables/useModalSize'
 
 const route = useRoute()
 const router = useRouter()
@@ -480,7 +481,7 @@ onBeforeUnmount(() => {
     <NModal
       v-model:show="showSessionModal"
       preset="card"
-      style="width: 600px; max-width: 90vw"
+      :style="modalSizeStyles.editor"
       :mask-closable="true"
     >
       <SessionCreateDialog
@@ -497,7 +498,7 @@ onBeforeUnmount(() => {
       v-model:show="showCreateWorldModal"
       preset="card"
       title="新建 Agent World"
-      style="width: 460px; max-width: 90vw"
+      :style="modalSizeStyles.editor"
       :mask-closable="!isCreatingWorld"
     >
       <div class="modal-form">

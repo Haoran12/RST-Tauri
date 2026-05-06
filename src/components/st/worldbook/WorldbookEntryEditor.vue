@@ -26,6 +26,7 @@ import type {
 import { DEFAULT_BINDINGS } from '@/types/structuredText'
 import StructuredTextEditor from '@/components/shared/structured-text-editor/StructuredTextEditor.vue'
 import { validateStructuredText } from '@/services/storage'
+import { modalSizeStyles } from '@/composables/useModalSize'
 
 const props = defineProps<{
   entry: WorldInfoEntry | null
@@ -492,7 +493,7 @@ function cancelOverlay() {
       v-model:show="showContentOverlay"
       preset="card"
       title="编辑内容"
-      style="width: min(92vw, 900px);"
+      :style="modalSizeStyles.editor"
       :mask-closable="false"
     >
       <div class="overlay-content">

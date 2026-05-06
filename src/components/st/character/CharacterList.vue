@@ -13,6 +13,7 @@ import {
 } from 'naive-ui'
 import { useCharactersStore } from '@/stores/characters'
 import CharacterEditor from './CharacterEditor.vue'
+import { modalSizeStyles } from '@/composables/useModalSize'
 
 const store = useCharactersStore()
 const message = useMessage()
@@ -216,7 +217,7 @@ async function handleDeleteCharacter(id: string) {
         v-model:show="showImportModal"
         preset="card"
         title="导入角色卡"
-        style="width: 600px"
+        :style="modalSizeStyles.editor"
       >
         <div class="import-options">
           <NUpload

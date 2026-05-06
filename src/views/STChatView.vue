@@ -9,7 +9,6 @@ import {
   NModal,
   NScrollbar,
   NSelect,
-  NSpin,
   NText,
   useDialog,
   useMessage,
@@ -28,6 +27,7 @@ import { useRuntimeStore } from '@/stores/runtime'
 import { useWorldbooksStore } from '@/stores/worldbooks'
 import { usePresetsStore } from '@/stores/presets'
 import type { CharacterCard, ChatAttachmentRef, ChatMessage } from '@/types/st'
+import { modalSizeStyles } from '@/composables/useModalSize'
 import { getChatAttachmentBlob, loadPreset } from '@/services/storage'
 
 const route = useRoute()
@@ -476,7 +476,7 @@ onBeforeUnmount(() => {
       :show="editingMessageId !== null"
       preset="card"
       title="修改消息"
-      class="message-edit-modal"
+      :style="modalSizeStyles.editor"
       @update:show="value => { if (!value) editingMessageId = null }"
     >
       <NInput
@@ -700,10 +700,6 @@ onBeforeUnmount(() => {
 
 .input-row :deep(.n-input-wrapper) {
   min-width: 0;
-}
-
-.message-edit-modal {
-  width: min(720px, calc(100vw - 32px));
 }
 
 .modal-actions {

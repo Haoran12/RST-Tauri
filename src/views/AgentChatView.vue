@@ -26,6 +26,7 @@ import {
   processAgentTurn,
   updateAgentSessionTurn,
 } from '@/services/agentApi'
+import { modalSizeStyles } from '@/composables/useModalSize'
 
 const route = useRoute()
 const router = useRouter()
@@ -270,7 +271,7 @@ onMounted(loadSession)
       :show="editingTurnId !== null"
       preset="card"
       title="修改消息"
-      class="message-edit-modal"
+      :style="modalSizeStyles.editor"
       @update:show="value => { if (!value) editingTurnId = null }"
     >
       <NInput
@@ -392,10 +393,6 @@ onMounted(loadSession)
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.message-edit-modal {
-  width: min(720px, calc(100vw - 32px));
 }
 
 .modal-actions {
