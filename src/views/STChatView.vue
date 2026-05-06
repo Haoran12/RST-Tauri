@@ -101,6 +101,10 @@ const characterName = computed(() => {
   return chatStore.currentCharacter?.data.name ?? 'AI'
 })
 
+const userName = computed(() => {
+  return chatStore.currentSession?.chat_metadata?.user_persona?.name || 'User'
+})
+
 const shouldShowGenerating = computed(() => {
   return chatStore.isGenerating && chatStore.messages[chatStore.messages.length - 1]?.role !== 'assistant'
 })
@@ -112,7 +116,7 @@ function messageRole(msg: ChatMessage): 'user' | 'assistant' | 'system' {
 }
 
 function messageName(msg: ChatMessage) {
-  if (msg.role === 'user') return '你'
+  if (msg.role === 'user') return userName.value
   if (msg.role === 'assistant') return characterName.value
   return '系统'
 }
