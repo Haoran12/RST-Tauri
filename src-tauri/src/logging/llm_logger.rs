@@ -347,7 +347,7 @@ impl LlmCallLogger {
                     world_rules_snapshot_id, provider, model, call_type, request_url, request_json,
                     schema_json, response_json, reasoning_text, assembled_text, readable_text, status,
                     latency_ms, token_usage, retry_count, redaction_applied, created_at, completed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(request_id)
@@ -374,6 +374,7 @@ impl LlmCallLogger {
             .bind("success")
             .bind(latency_ms as i64)
             .bind(token_usage.as_ref().map(|t| serde_json::to_string(t).unwrap_or_default()))
+            .bind(0i32) // retry_count
             .bind(if redaction_applied { 1 } else { 0 })
             .bind(call.started_at.to_rfc3339())
             .bind(completed_at.to_rfc3339())
