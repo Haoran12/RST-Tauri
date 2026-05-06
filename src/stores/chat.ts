@@ -191,15 +191,17 @@ export const useChatStore = defineStore('chat', () => {
         max_context: 8192,
       })
 
-      // Add assistant message
-      const assistantMessage: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: response.content,
-        created_at: new Date().toISOString(),
-        attachments: [],
+      // Only add assistant message if response has valid content
+      if (response.content?.trim()) {
+        const assistantMessage: ChatMessage = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: response.content,
+          created_at: new Date().toISOString(),
+          attachments: [],
+        }
+        messages.value.push(assistantMessage)
       }
-      messages.value.push(assistantMessage)
 
       // Save session
       await saveCurrentSession()
