@@ -855,19 +855,27 @@ pub async fn send_assembled_st_chat_message(
     match provider.chat(request).await {
         Ok(resp) => {
             tracing::info!(
-                "[ST Chat Log] LLM call succeeded, request_id: {}",
-                request_id
+                "[ST Chat Log] LLM call succeeded, request_id: {}, raw_response present: {}",
+                request_id,
+                resp.raw_response.is_some()
             );
             if let Some(sqlite_store) = store_guard.as_ref() {
                 tracing::info!(
                     "[ST Chat Log] Calling log_success for request_id: {}",
                     request_id
                 );
+                let response_for_log = resp.raw_response.clone().unwrap_or_else(|| {
+                    tracing::warn!(
+                        "[ST Chat Log] raw_response is None for request_id: {}, using fallback",
+                        request_id
+                    );
+                    serde_json::json!({"content": &resp.content})
+                });
                 sqlite_store
                     .llm_logger()
                     .log_success(
                         &request_id,
-                        resp.raw_response.as_ref().unwrap_or(&serde_json::json!({"content": &resp.content})),
+                        &response_for_log,
                         resp.reasoning.as_deref(),
                         resp.token_usage.as_ref().map(|u| {
                             serde_json::json!({
@@ -2255,12 +2263,16 @@ pub async fn start_st_chat_stream(
         match provider.chat_stream(stream_request).await {
             Ok(mut stream) => {
                 let mut full_content = String::new();
+                let mut finish_reason: Option<String> = None;
 
                 while let Some(chunk_result) = stream.next().await {
                     match chunk_result {
                         Ok(chunk) => {
                             if !chunk.delta.is_empty() {
                                 full_content.push_str(&chunk.delta);
+                            }
+                            if chunk.finish_reason.is_some() {
+                                finish_reason = chunk.finish_reason.clone();
                             }
 
                             // Emit chunk event
@@ -2295,15 +2307,21 @@ pub async fn start_st_chat_stream(
                     }
                 }
 
-                // Log success
+                // Log success with assembled response structure
                 {
                     let store_guard = sqlite_store_arc.read().await;
                     if let Some(ref store) = store_guard.as_ref() {
+                        // Build a response structure similar to what the provider would return
+                        let response_json = serde_json::json!({
+                            "content": full_content,
+                            "finish_reason": finish_reason,
+                            "stream": true,
+                        });
                         store
                             .llm_logger()
                             .log_success(
                                 &request_id_clone,
-                                &serde_json::json!({"content": &full_content}),
+                                &response_json,
                                 None,
                                 None,
                             )

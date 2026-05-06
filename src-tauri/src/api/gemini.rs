@@ -181,7 +181,22 @@ impl GeminiProvider {
             .and_then(|p| p.text.clone())
             .unwrap_or_default();
 
-        let raw_response = serde_json::from_str(&response_text).ok();
+        let raw_response: Option<serde_json::Value> = match serde_json::from_str(&response_text) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                tracing::error!(
+                    "[Gemini] Failed to parse raw_response: {}, response_text preview: {}",
+                    e,
+                    &response_text[..response_text.len().min(200)]
+                );
+                None
+            }
+        };
+        tracing::info!(
+            "[Gemini] raw_response parsed: {}, response_text length: {}",
+            raw_response.is_some(),
+            response_text.len()
+        );
 
         Ok(ChatResponse {
             request_id: request.request_id.clone(),

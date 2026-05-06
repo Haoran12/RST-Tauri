@@ -103,7 +103,22 @@ impl AIProvider for ClaudeCodeProvider {
         let body: ClaudeCodeResponse = serde_json::from_str(&response_text)
             .map_err(|e| format!("Failed to parse response: {}", e))?;
 
-        let raw_response = serde_json::from_str(&response_text).ok();
+        let raw_response: Option<serde_json::Value> = match serde_json::from_str(&response_text) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                tracing::error!(
+                    "[Claude Code] Failed to parse raw_response: {}, response_text preview: {}",
+                    e,
+                    &response_text[..response_text.len().min(200)]
+                );
+                None
+            }
+        };
+        tracing::info!(
+            "[Claude Code] raw_response parsed: {}, response_text length: {}",
+            raw_response.is_some(),
+            response_text.len()
+        );
 
         Ok(ChatResponse {
             request_id: request.request_id,
