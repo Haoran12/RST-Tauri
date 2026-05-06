@@ -273,7 +273,7 @@ function escapeHtml(raw: string) {
 
 .chat-message-item.assistant .message-shell,
 .chat-message-item.system .message-shell {
-  align-items: center;
+  align-items: flex-start;
 }
 
 .message-header {
@@ -285,6 +285,11 @@ function escapeHtml(raw: string) {
 
 .chat-message-item.user .message-header {
   flex-direction: row-reverse;
+}
+
+.chat-message-item.assistant .message-header,
+.chat-message-item.system .message-header {
+  flex-direction: row;
 }
 
 .message-author {
