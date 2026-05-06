@@ -171,7 +171,7 @@ const contextItems = computed<ContextItem[]>(() => {
         .map((session) => ({
           id: session.id,
           name: session.name || '未命名会话',
-          type: 'ST 会话',
+          type: '',
           meta: formatShortTime(session.updated_at),
           active: route.params.sessionId === session.id,
           session,
@@ -1054,7 +1054,7 @@ onMounted(async () => {
               <div class="context-item-row">
                 <div class="context-item-main">
                   <span class="context-item-name">{{ item.name }}</span>
-                  <NTag size="tiny" :bordered="false">{{ item.type }}</NTag>
+                  <NTag v-if="item.type" size="tiny" :bordered="false">{{ item.type }}</NTag>
                 </div>
                 <div v-if="route.name === 'st-chat' && item.session" class="context-item-actions">
                   <NDropdown
