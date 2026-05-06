@@ -28,6 +28,8 @@ import { useWorldbooksStore } from '@/stores/worldbooks'
 import type { CharacterCard, ChatAttachmentRef, ChatMessage } from '@/types/st'
 import { getChatAttachmentBlob } from '@/services/storage'
 
+defineOptions({ name: 'STChatView' })
+
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()

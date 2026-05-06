@@ -215,6 +215,8 @@ export const useChatStore = defineStore('chat', () => {
   async function sendMessageStream(content: string, apiConfig: ApiConfig) {
     if (!currentSession.value || isGenerating.value) return
 
+    const sessionId = currentSession.value.id
+    const sessionCharacterId = currentSession.value.character_id ?? null
     isGenerating.value = true
     streamingContent.value = ''
     error.value = null
@@ -255,8 +257,9 @@ export const useChatStore = defineStore('chat', () => {
       currentStreamController = await startSTChatStream(
         {
           api_config_id: apiConfig.id,
-          character_id: currentSession.value.character_id ?? null,
-          session_id: currentSession.value.id,
+          character_id: sessionCharacterId,
+          session_id: sessionId,
+          assistant_message_id: assistantMessage.id,
           preset_name: runtimeStore.globalState.active_preset || 'Default',
           world_info_settings: runtimeStore.globalState.world_info_settings,
           chat_lore_id: null,
@@ -275,14 +278,23 @@ export const useChatStore = defineStore('chat', () => {
           onError: (event) => {
             error.value = event.error
             // Remove the assistant placeholder on error
-            if (messages.value[messages.value.length - 1]?.id === assistantMessage.id) {
-              messages.value.pop()
+            const index = messages.value.findIndex(msg => msg.id === assistantMessage.id)
+            if (index !== -1) {
+              messages.value.splice(index, 1)
             }
+            currentStreamController = null
+            isGenerating.value = false
+            streamingContent.value = ''
           },
           onEnd: async () => {
-            // Stream ended, save the session
+            // The backend persists the final assistant message. Reload the active
+            // session so returning to the pinned chat shows the durable state.
             currentStreamController = null
-            await saveCurrentSession()
+            isGenerating.value = false
+            streamingContent.value = ''
+            if (currentSession.value?.id === sessionId) {
+              await loadSession(sessionId)
+            }
           },
         }
       )
@@ -293,7 +305,6 @@ export const useChatStore = defineStore('chat', () => {
         messages.value.pop()
       }
       await saveCurrentSession()
-    } finally {
       isGenerating.value = false
       streamingContent.value = ''
     }

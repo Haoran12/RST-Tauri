@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { NLayout, NLayoutSider, NLayoutContent } from 'naive-ui'
-import { computed, defineAsyncComponent } from 'vue'
-import { useRoute } from 'vue-router'
+import { NButton, NIcon, NLayout, NLayoutSider, NLayoutContent } from 'naive-ui'
+import { ChatbubbleOutline, AlbumsOutline } from '@vicons/ionicons5'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAppShellStore } from '@/stores/appShell'
+import { useChatStore } from '@/stores/chat'
 import AppNav from './AppNav.vue'
 import PanelLoading from './PanelLoading.vue'
 
 const route = useRoute()
+const router = useRouter()
 const appShell = useAppShellStore()
+const chatStore = useChatStore()
 const STContextList = defineAsyncComponent({
   loader: () => import('./ContextList.vue'),
   loadingComponent: PanelLoading,
@@ -23,6 +27,11 @@ const STInspectPanel = defineAsyncComponent({
   loadingComponent: PanelLoading,
   delay: 80,
 })
+const STPinnedChatView = defineAsyncComponent({
+  loader: () => import('@/views/STChatView.vue'),
+  loadingComponent: PanelLoading,
+  delay: 80,
+})
 const AgentInspectPanel = defineAsyncComponent({
   loader: () => import('./AgentInspectPanel.vue'),
   loadingComponent: PanelLoading,
@@ -30,6 +39,35 @@ const AgentInspectPanel = defineAsyncComponent({
 })
 
 const isAgentMode = computed(() => route.path.startsWith('/agent'))
+const isStChatRoute = computed(() => route.name === 'st-chat')
+const stWorkspaceRouteNames = new Set([
+  'st-home',
+  'st-chat',
+  'resources-characters',
+  'resources-worldbooks',
+  'resources-presets',
+  'resources-regex',
+])
+const sharedToolRouteNames = new Set(['api-configs', 'logs'])
+const isStTabbedWorkspace = computed(() => {
+  const routeName = route.name as string
+  return stWorkspaceRouteNames.has(routeName)
+    || (appShell.currentMode === 'st' && sharedToolRouteNames.has(routeName))
+})
+const activeStTab = computed<'chat' | 'tools'>(() => isStChatRoute.value ? 'chat' : 'tools')
+const stToolLabel = computed(() => {
+  const labels: Record<string, string> = {
+    'st-home': 'ST 首页',
+    'resources-characters': '角色卡',
+    'resources-worldbooks': '世界书',
+    'resources-presets': '预设',
+    'resources-regex': 'Regex',
+    'api-configs': 'API 配置',
+    logs: '日志',
+  }
+  return labels[route.name as string] ?? '工具'
+})
+const lastStToolPath = ref('/st')
 
 const showContextList = computed(() => {
   const contextPages = [
@@ -50,6 +88,29 @@ const showInspectPanel = computed(() => {
   const inspectPages = ['st-chat', 'agent-worlds', 'agent-world-editor']
   return inspectPages.includes(route.name as string) && appShell.inspectPanelOpen
 })
+
+watch(
+  () => route.fullPath,
+  () => {
+    if (isStTabbedWorkspace.value && !isStChatRoute.value) {
+      lastStToolPath.value = route.fullPath
+    }
+  },
+  { immediate: true }
+)
+
+function openPinnedChat() {
+  const sessionId = chatStore.currentSession?.id
+  if (sessionId) {
+    router.push({ name: 'st-chat', params: { sessionId } })
+    return
+  }
+  router.push({ name: 'st-chat' })
+}
+
+function openStTools() {
+  router.push(lastStToolPath.value || '/st')
+}
 
 const contextSiderContentStyle = {
   height: '100%',
@@ -112,7 +173,59 @@ const mainContentStyle = {
         :content-style="mainContentStyle"
       >
         <div class="route-host">
-          <router-view v-slot="{ Component }">
+          <template v-if="isStTabbedWorkspace">
+            <div class="st-tabbed-workspace">
+              <div class="st-tabbar" role="tablist" aria-label="ST 工作区页签">
+                <NButton
+                  size="small"
+                  :type="activeStTab === 'chat' ? 'primary' : 'default'"
+                  @click="openPinnedChat"
+                >
+                  <template #icon><NIcon :component="ChatbubbleOutline" /></template>
+                  聊天
+                </NButton>
+                <NButton
+                  size="small"
+                  :type="activeStTab === 'tools' ? 'primary' : 'default'"
+                  @click="openStTools"
+                >
+                  <template #icon><NIcon :component="AlbumsOutline" /></template>
+                  {{ stToolLabel }}
+                </NButton>
+              </div>
+
+              <div class="st-tab-panels">
+                <div v-show="activeStTab === 'chat'" class="st-tab-panel">
+                  <Suspense>
+                    <STPinnedChatView />
+                    <template #fallback>
+                      <PanelLoading />
+                    </template>
+                  </Suspense>
+                </div>
+
+                <div v-show="activeStTab === 'tools'" class="st-tab-panel">
+                  <router-view v-if="!isStChatRoute" v-slot="{ Component }">
+                    <Suspense>
+                      <component :is="Component" />
+                      <template #fallback>
+                        <div class="route-loading">
+                          <div class="route-loading-header" />
+                          <div class="route-loading-grid">
+                            <div class="route-loading-card route-loading-card-wide" />
+                            <div class="route-loading-card" />
+                            <div class="route-loading-card" />
+                          </div>
+                        </div>
+                      </template>
+                    </Suspense>
+                  </router-view>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <router-view v-else v-slot="{ Component }">
             <Suspense>
               <component :is="Component" />
               <template #fallback>
@@ -208,6 +321,44 @@ const mainContentStyle = {
   height: 100%;
   min-width: 0;
   min-height: 0;
+}
+
+.st-tabbed-workspace {
+  flex: 1 1 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.st-tabbar {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--color-border-subtle, #e0e0e6);
+  background: var(--color-bg-surface, #fff);
+}
+
+.st-tabbar :deep(.n-button) {
+  max-width: 180px;
+}
+
+.st-tab-panels,
+.st-tab-panel {
+  flex: 1 1 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .route-loading {

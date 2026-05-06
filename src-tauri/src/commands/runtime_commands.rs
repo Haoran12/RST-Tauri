@@ -15,26 +15,28 @@ use crate::logging::context::{LlmNode, LogContext, LogMode};
 use crate::st::keyword_matcher::GlobalScanData;
 use crate::st::runtime_assembly::AssembledAttachmentRef;
 use crate::st::{
-    AssembledRequest, ContextTemplate, GlobalAppState, InstructTemplate, PresetFile,
+    AssembledRequest, ContextTemplate, GlobalAppState, InstructTemplate, MacroContext, PresetFile,
     PromptPreset, ProviderRequestMapper, ReasoningTemplate, RegexEngine, RegexPlacement,
-    RegexRunOptions, RequestAssembler, RuntimeContext, SamplerPreset, STChatMessage,
-    STChatMetadata, STSessionData, STWorldInfoSettings, SystemPrompt, WorldInfoInjectionResult,
-    WorldInfoInjector, WorldInfoSource, MacroContext,
+    RegexRunOptions, RequestAssembler, RuntimeContext, STChatMessage, STChatMetadata,
+    STSessionData, STWorldInfoSettings, SamplerPreset, SystemPrompt, WorldInfoInjectionResult,
+    WorldInfoInjector, WorldInfoSource,
 };
 use crate::storage::json_store::JsonStore;
 use crate::storage::paths::{app_data_root, safe_join};
 use crate::storage::st_resources::{
-    ApiConfig, ChatAttachmentKind, ChatAttachmentRecord, ChatSession, TavernCardV3, WorldInfoFile,
+    ApiConfig, ChatAttachmentKind, ChatAttachmentRecord, ChatMessage, ChatSession, TavernCardV3,
+    WorldInfoFile,
 };
 use crate::AppState;
 use base64::{engine::general_purpose::STANDARD, Engine};
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
-use futures::StreamExt;
 
 /// Stream event payload sent to frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -270,7 +272,9 @@ pub async fn load_context_template(
     ensure_default_presets(&store)?;
 
     let preset = load_combined_preset(&store, &name)?;
-    Ok(preset.context.unwrap_or_else(|| ContextTemplate::new(&name)))
+    Ok(preset
+        .context
+        .unwrap_or_else(|| ContextTemplate::new(&name)))
 }
 
 /// 加载 System Prompt
@@ -478,6 +482,9 @@ pub struct AssembleRequestInput {
     pub api_config_id: String,
     pub character_id: Option<String>,
     pub session_id: String,
+    /// Optional frontend-created assistant message id for stream persistence.
+    #[serde(default)]
+    pub assistant_message_id: Option<String>,
     /// 预设名称（一个预设文件包含所有类型）
     #[serde(default)]
     pub preset_name: Option<String>,
@@ -488,6 +495,46 @@ pub struct AssembleRequestInput {
     pub global_lore_ids: Vec<String>,
     #[serde(default = "default_max_context")]
     pub max_context: i32,
+}
+
+fn persist_stream_assistant_message(
+    data_dir: &Path,
+    session_id: &str,
+    assistant_message_id: &str,
+    content: &str,
+) -> Result<(), String> {
+    let store = JsonStore::new(data_dir.to_path_buf());
+    let path = format!("chats/{}.json", session_id);
+    let value = store.read(&path)?;
+    let mut session: ChatSession = serde_json::from_value(value)
+        .map_err(|e| format!("Failed to parse chat session: {}", e))?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    if let Some(message) = session
+        .messages
+        .iter_mut()
+        .find(|message| message.id == assistant_message_id)
+    {
+        message.role = "assistant".to_string();
+        message.content = content.to_string();
+        if message.created_at.trim().is_empty() {
+            message.created_at = now.clone();
+        }
+        message.attachments.clear();
+    } else {
+        session.messages.push(ChatMessage {
+            id: assistant_message_id.to_string(),
+            role: "assistant".to_string(),
+            content: content.to_string(),
+            created_at: now.clone(),
+            attachments: Vec::new(),
+        });
+    }
+    session.updated_at = now;
+
+    let value = serde_json::to_value(&session)
+        .map_err(|e| format!("Failed to serialize chat session: {}", e))?;
+    store.write(&path, &value)
 }
 
 /// 组装请求的输出
@@ -545,12 +592,14 @@ pub async fn assemble_st_request(
             world_info: chat_session.chat_metadata.world_info.clone(),
             enabled_world_info: chat_session.chat_metadata.enabled_world_info.clone(),
             disabled_world_info: chat_session.chat_metadata.disabled_world_info.clone(),
-            user_persona: chat_session.chat_metadata.user_persona.clone().map(|persona| {
-                crate::st::runtime_assembly::STUserPersona {
+            user_persona: chat_session
+                .chat_metadata
+                .user_persona
+                .clone()
+                .map(|persona| crate::st::runtime_assembly::STUserPersona {
                     name: persona.name,
                     description: persona.description,
-                }
-            }),
+                }),
             extra: chat_session.chat_metadata.extra.clone(),
         },
         messages: chat_session
@@ -568,7 +617,8 @@ pub async fn assemble_st_request(
     };
 
     // 4. 加载预设（一个文件包含所有类型）
-    let active_preset_name = resolve_active_preset_name(input.preset_name.as_deref(), &global_state);
+    let active_preset_name =
+        resolve_active_preset_name(input.preset_name.as_deref(), &global_state);
     let preset: Option<PresetFile> = if let Some(name) = active_preset_name.as_deref() {
         if !name.is_empty() {
             Some(load_combined_preset(&store, name)?)
@@ -781,7 +831,10 @@ pub async fn send_assembled_st_chat_message(
     );
     if let Some(sqlite_store) = store_guard.as_ref() {
         let request_json = serde_json::to_value(&request).unwrap_or(serde_json::Value::Null);
-        tracing::info!("[ST Chat Log] Calling log_start for request_id: {}", request_id);
+        tracing::info!(
+            "[ST Chat Log] Calling log_start for request_id: {}",
+            request_id
+        );
         sqlite_store
             .llm_logger()
             .log_start(
@@ -800,9 +853,15 @@ pub async fn send_assembled_st_chat_message(
 
     match provider.chat(request).await {
         Ok(resp) => {
-            tracing::info!("[ST Chat Log] LLM call succeeded, request_id: {}", request_id);
+            tracing::info!(
+                "[ST Chat Log] LLM call succeeded, request_id: {}",
+                request_id
+            );
             if let Some(sqlite_store) = store_guard.as_ref() {
-                tracing::info!("[ST Chat Log] Calling log_success for request_id: {}", request_id);
+                tracing::info!(
+                    "[ST Chat Log] Calling log_success for request_id: {}",
+                    request_id
+                );
                 sqlite_store
                     .llm_logger()
                     .log_success(
@@ -1451,12 +1510,14 @@ pub async fn run_world_info_injection(
         world_info: chat_session.chat_metadata.world_info.clone(),
         enabled_world_info: chat_session.chat_metadata.enabled_world_info.clone(),
         disabled_world_info: chat_session.chat_metadata.disabled_world_info.clone(),
-        user_persona: chat_session.chat_metadata.user_persona.clone().map(|persona| {
-            crate::st::runtime_assembly::STUserPersona {
+        user_persona: chat_session
+            .chat_metadata
+            .user_persona
+            .clone()
+            .map(|persona| crate::st::runtime_assembly::STUserPersona {
                 name: persona.name,
                 description: persona.description,
-            }
-        }),
+            }),
         extra: chat_session.chat_metadata.extra.clone(),
     };
 
@@ -1659,6 +1720,7 @@ mod tests {
     use super::{
         apply_prompt_only_regex, assembled_to_chat_request, character_lore_ids,
         ensure_default_presets, load_combined_preset, load_global_state, load_worldbook_by_id,
+        persist_stream_assistant_message,
     };
     use crate::config::llm_contracts::{CompiledProviderContractView, ProviderContractCacheKey};
     use crate::st::runtime_assembly::AssembledAttachmentRef;
@@ -1832,6 +1894,46 @@ mod tests {
 
         assert_eq!(request.system_prompt, "mage info");
         assert_eq!(request.messages[0].content, "hello mage");
+    }
+
+    #[test]
+    fn stream_persistence_updates_or_appends_assistant_message() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let store = JsonStore::new(temp_dir.path().to_path_buf());
+        store
+            .write(
+                "chats/session-1.json",
+                &json!({
+                    "id": "session-1",
+                    "name": "Test",
+                    "character_id": null,
+                    "created_at": "2026-05-07T00:00:00Z",
+                    "updated_at": "2026-05-07T00:00:00Z",
+                    "chat_metadata": {},
+                    "messages": [
+                        {
+                            "id": "user-1",
+                            "role": "user",
+                            "content": "hello",
+                            "created_at": "2026-05-07T00:00:01Z",
+                            "attachments": []
+                        }
+                    ]
+                }),
+            )
+            .expect("write chat");
+
+        persist_stream_assistant_message(temp_dir.path(), "session-1", "assistant-1", "hi")
+            .expect("append assistant");
+        persist_stream_assistant_message(temp_dir.path(), "session-1", "assistant-1", "hi again")
+            .expect("update assistant");
+
+        let value = store.read("chats/session-1.json").expect("read chat");
+        assert_eq!(value["messages"].as_array().unwrap().len(), 2);
+        assert_eq!(value["messages"][0]["content"], "hello");
+        assert_eq!(value["messages"][1]["id"], "assistant-1");
+        assert_eq!(value["messages"][1]["role"], "assistant");
+        assert_eq!(value["messages"][1]["content"], "hi again");
     }
 
     #[tokio::test]
@@ -2050,7 +2152,8 @@ pub async fn start_st_chat_stream(
     {
         let store_guard = state.sqlite_store.read().await;
         if let Some(sqlite_store) = store_guard.as_ref() {
-            let request_json = serde_json::to_value(&stream_request).unwrap_or(serde_json::Value::Null);
+            let request_json =
+                serde_json::to_value(&stream_request).unwrap_or(serde_json::Value::Null);
             sqlite_store
                 .llm_logger()
                 .log_start(
@@ -2070,14 +2173,24 @@ pub async fn start_st_chat_stream(
     let sqlite_store_arc = state.sqlite_store.clone();
 
     // Emit start event
-    app.emit("st-stream-start", StreamStartEvent {
-        stream_id: stream_id.clone(),
-        request_id: request_id.clone(),
-    }).map_err(|e| format!("Failed to emit start event: {}", e))?;
+    app.emit(
+        "st-stream-start",
+        StreamStartEvent {
+            stream_id: stream_id.clone(),
+            request_id: request_id.clone(),
+        },
+    )
+    .map_err(|e| format!("Failed to emit start event: {}", e))?;
 
     // Spawn background task to process stream
     let app_clone = app.clone();
     let request_id_clone = request_id.clone();
+    let session_id_for_task = input.session_id.clone();
+    let assistant_message_id_for_task = input
+        .assistant_message_id
+        .clone()
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    let data_dir_for_task = data_dir.clone();
     let stream_id_for_task = stream_id.clone();
 
     tokio::spawn(async move {
@@ -2088,23 +2201,39 @@ pub async fn start_st_chat_stream(
                 while let Some(chunk_result) = stream.next().await {
                     match chunk_result {
                         Ok(chunk) => {
-                            if !chunk.delta.is_empty() {
-                                full_content.push_str(&chunk.delta);
+                            let delta = chunk.delta;
+                            if !delta.is_empty() {
+                                full_content.push_str(&delta);
+                                {
+                                    let store_guard = sqlite_store_arc.read().await;
+                                    if let Some(ref store) = store_guard.as_ref() {
+                                        store
+                                            .llm_logger()
+                                            .log_stream_chunk(&request_id_clone, &delta)
+                                            .await;
+                                    }
+                                }
                             }
 
                             // Emit chunk event
-                            let _ = app_clone.emit("st-stream-chunk", StreamChunkEvent {
-                                stream_id: stream_id_for_task.clone(),
-                                delta: chunk.delta,
-                                finish_reason: chunk.finish_reason,
-                            });
+                            let _ = app_clone.emit(
+                                "st-stream-chunk",
+                                StreamChunkEvent {
+                                    stream_id: stream_id_for_task.clone(),
+                                    delta,
+                                    finish_reason: chunk.finish_reason,
+                                },
+                            );
                         }
                         Err(e) => {
                             // Emit error event
-                            let _ = app_clone.emit("st-stream-error", StreamErrorEvent {
-                                stream_id: stream_id_for_task.clone(),
-                                error: e.clone(),
-                            });
+                            let _ = app_clone.emit(
+                                "st-stream-error",
+                                StreamErrorEvent {
+                                    stream_id: stream_id_for_task.clone(),
+                                    error: e.clone(),
+                                },
+                            );
                             // Log failure
                             {
                                 let store_guard = sqlite_store_arc.read().await;
@@ -2116,6 +2245,19 @@ pub async fn start_st_chat_stream(
                             return;
                         }
                     }
+                }
+
+                if let Err(e) = persist_stream_assistant_message(
+                    &data_dir_for_task,
+                    &session_id_for_task,
+                    &assistant_message_id_for_task,
+                    &full_content,
+                ) {
+                    tracing::warn!(
+                        "Failed to persist ST stream assistant message for session {}: {}",
+                        session_id_for_task,
+                        e
+                    );
                 }
 
                 // Log success
@@ -2139,10 +2281,13 @@ pub async fn start_st_chat_stream(
             }
             Err(e) => {
                 // Failed to create stream
-                let _ = app_clone.emit("st-stream-error", StreamErrorEvent {
-                    stream_id: stream_id_for_task.clone(),
-                    error: e.clone(),
-                });
+                let _ = app_clone.emit(
+                    "st-stream-error",
+                    StreamErrorEvent {
+                        stream_id: stream_id_for_task.clone(),
+                        error: e.clone(),
+                    },
+                );
                 // Log failure
                 {
                     let store_guard = sqlite_store_arc.read().await;
