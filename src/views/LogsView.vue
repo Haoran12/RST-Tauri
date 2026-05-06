@@ -42,7 +42,7 @@ import {
 
 const message = useMessage()
 
-const PAGE_SIZE = 50
+const PAGE_SIZE = 7
 
 const sourceScope = ref<NonNullable<LogRecordFilter['source_scope']>>('all')
 const recordKind = ref<NonNullable<LogRecordFilter['record_kind']>>('all')
