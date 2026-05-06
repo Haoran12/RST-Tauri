@@ -235,6 +235,7 @@
 | 8.12 | 内置预设提示词条目 | ✅ | 2026-05-06 | 改为直接采用 SillyTavern 风格默认 prompt 预设：`main/nsfw/dialogueExamples/jailbreak/worldInfoBefore/worldInfoAfter/charDescription/charPersonality/scenario/personaDescription/chatHistory`，默认预设与新建预设都带完整内容，运行时按 `prompt_order` 实际组装 |
 | 8.13 | Tauri 生产构建样式稳定性 | ✅ | 2026-05-06 | Vite 生产构建改为单入口 CSS，首屏 Naive UI provider 不再异步拆分，CSP 明确允许运行时 style 注入，避免 build 产物退化为近似浏览器原生控件 |
 | 8.14 | ST 会话级角色卡、世界书与 User Persona 设置 | ✅ | 2026-05-06 | 会话保存 `character_id`、`enabled_world_info` 多选与 `user_persona`；ST 会话侧栏三点菜单可编辑名称、角色卡、世界书和 Persona Description，运行时组装读取这些字段 |
+| 8.15 | ST 会话页预设 / 主 API 选择与契约参数适配 | ✅ | 2026-05-07 | 会话页页头新增紧凑预设和主 API 配置选择器；`stream_openai` 实际控制流式路径；运行时按 `llm_api_contract` 裁剪/映射采样参数并修复 provider stream 请求体 |
 
 ---
 
@@ -357,3 +358,4 @@
 | 2026-05-06 | 修复 ST 预设宏与世界书注入断链：新增统一 `st/macros` 替换层，恢复 `{{char}}` / `{{user}}` / `{0}` / `{{wi}}` 等宏在 preset、角色卡字段、Persona、世界书关键词与内容中的运行时展开；世界书扫描补上 role->角色/Persona 名回退；默认 prompt_order 将 `personaDescription` 重新纳入主链，并补 Rust 回归测试 |
 | 2026-05-06 | 补齐 Agent World 创建链路：新增 `create_agent_world` Tauri 命令，初始化 `data/worlds/<world_id>/`、`world.sqlite`、`world_base.yaml` 与主线光标；前端 Agent 首页 / World 页增加新建 World 入口与零 World 空状态修复，不再出现“以 World 为顶层却无法创建 World”的断头流程 |
 | 2026-05-07 | 修复 ST 会话流式发送路径：补充 Tauri event listen/unlisten capability，发送 store 等待真实 stream end 后再结束生成状态，并用响应式替换方式更新 assistant 消息气泡内容与滚动位置 |
+| 2026-05-07 | 修复 ST 聊天响应为空与配置选择问题：provider 流式请求补 `stream` 字段并改用带缓冲 SSE 解码，ST 会话页可直接选择当前预设 / 主 API，发送时尊重预设流式开关，运行时按当前 API 契约过滤和近似映射采样参数 |

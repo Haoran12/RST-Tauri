@@ -4,10 +4,12 @@ use crate::api::anthropic_files::{
     invalidate_anthropic_file_cache, prepare_request_messages_with_file_cache,
 };
 use crate::api::provider::*;
+use crate::api::sse::SseDecoder;
 use async_trait::async_trait;
-use futures::{Stream, StreamExt};
+use futures::{stream, Stream, StreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::pin::Pin;
 
@@ -279,38 +281,49 @@ impl AnthropicProvider {
             return Err(format!("API error: {}", error_text));
         }
 
-        let stream = response.bytes_stream().map(move |result| match result {
-            Ok(bytes) => {
-                let text = String::from_utf8_lossy(&bytes);
-                for line in text.lines() {
-                    if line.starts_with("data: ") {
-                        let data = &line[6..];
-                        if let Ok(event) = serde_json::from_str::<AnthropicStreamEvent>(data) {
-                            if event.event_type == "content_block_delta" {
-                                if let Some(delta) = event.delta {
-                                    if delta.delta_type == "text_delta" {
-                                        return Ok(StreamChunk {
-                                            delta: delta.text.clone(),
-                                            finish_reason: None,
-                                        });
-                                    }
+        let byte_stream = response.bytes_stream();
+        let stream = stream::unfold(
+            (
+                byte_stream,
+                SseDecoder::default(),
+                VecDeque::<Result<StreamChunk, String>>::new(),
+            ),
+            |(mut byte_stream, mut decoder, mut pending)| async move {
+                loop {
+                    if let Some(item) = pending.pop_front() {
+                        return Some((item, (byte_stream, decoder, pending)));
+                    }
+
+                    match byte_stream.next().await {
+                        Some(Ok(bytes)) => {
+                            let text = String::from_utf8_lossy(&bytes);
+                            for data in decoder.push_str(&text) {
+                                if let Some(chunk) = parse_anthropic_stream_data(&data) {
+                                    pending.push_back(chunk);
                                 }
-                            } else if event.event_type == "message_stop" {
-                                return Ok(StreamChunk {
-                                    delta: String::new(),
-                                    finish_reason: Some("stop".to_string()),
-                                });
                             }
+                        }
+                        Some(Err(e)) => {
+                            return Some((
+                                Err(format!("Stream error: {}", e)),
+                                (byte_stream, decoder, pending),
+                            ));
+                        }
+                        None => {
+                            for data in decoder.finish() {
+                                if let Some(chunk) = parse_anthropic_stream_data(&data) {
+                                    pending.push_back(chunk);
+                                }
+                            }
+                            if let Some(item) = pending.pop_front() {
+                                return Some((item, (byte_stream, decoder, pending)));
+                            }
+                            return None;
                         }
                     }
                 }
-                Ok(StreamChunk {
-                    delta: String::new(),
-                    finish_reason: None,
-                })
-            }
-            Err(e) => Err(format!("Stream error: {}", e)),
-        });
+            },
+        );
 
         Ok(Box::pin(stream))
     }
@@ -447,6 +460,15 @@ impl AnthropicProvider {
         if let Some(top_p) = request.sampling.top_p {
             body["top_p"] = serde_json::json!(top_p);
         }
+        if let Some(top_k) = request.sampling.top_k {
+            body["top_k"] = serde_json::json!(top_k);
+        }
+        if !request.stop_sequences.is_empty() {
+            body["stop_sequences"] = serde_json::json!(request.stop_sequences);
+        }
+        if request.stream {
+            body["stream"] = serde_json::json!(true);
+        }
 
         Ok(body)
     }
@@ -468,7 +490,7 @@ impl AnthropicProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::AnthropicProvider;
+    use super::{parse_anthropic_stream_data, AnthropicProvider};
 
     #[test]
     fn retry_missing_file_detects_expected_errors() {
@@ -482,6 +504,37 @@ mod tests {
             "API error: overloaded"
         ));
     }
+
+    #[test]
+    fn parses_anthropic_text_delta() {
+        let chunk = parse_anthropic_stream_data(
+            r#"{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}"#,
+        )
+        .expect("chunk")
+        .expect("ok");
+
+        assert_eq!(chunk.delta, "hello");
+        assert_eq!(chunk.finish_reason, None);
+    }
+}
+
+fn parse_anthropic_stream_data(data: &str) -> Option<Result<StreamChunk, String>> {
+    let event = serde_json::from_str::<AnthropicStreamEvent>(data).ok()?;
+    if event.event_type == "content_block_delta" {
+        let delta = event.delta?;
+        if delta.delta_type == "text_delta" {
+            return Some(Ok(StreamChunk {
+                delta: delta.text,
+                finish_reason: None,
+            }));
+        }
+    } else if event.event_type == "message_stop" {
+        return Some(Ok(StreamChunk {
+            delta: String::new(),
+            finish_reason: Some("stop".to_string()),
+        }));
+    }
+    None
 }
 
 fn image_mime_type_from_data_url(url: &str) -> String {

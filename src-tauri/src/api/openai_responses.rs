@@ -4,10 +4,12 @@ use crate::api::openai_files::{
     invalidate_openai_file_cache, prepare_request_messages_with_file_cache,
 };
 use crate::api::provider::*;
+use crate::api::sse::SseDecoder;
 use async_trait::async_trait;
-use futures::{Stream, StreamExt};
+use futures::{stream, Stream, StreamExt};
 use reqwest::Client;
 use serde::Deserialize;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::pin::Pin;
 
@@ -277,36 +279,49 @@ impl OpenAIResponsesProvider {
             return Err(format!("API error: {}", error_text));
         }
 
-        let stream = response.bytes_stream().map(move |result| match result {
-            Ok(bytes) => {
-                let text = String::from_utf8_lossy(&bytes);
-                for line in text.lines() {
-                    if line.starts_with("data: ") {
-                        let data = &line[6..];
-                        if let Ok(event) = serde_json::from_str::<ResponsesStreamEvent>(data) {
-                            if event.event_type == "response.output_text.delta" {
-                                if let Some(delta) = event.delta {
-                                    return Ok(StreamChunk {
-                                        delta,
-                                        finish_reason: None,
-                                    });
+        let byte_stream = response.bytes_stream();
+        let stream = stream::unfold(
+            (
+                byte_stream,
+                SseDecoder::default(),
+                VecDeque::<Result<StreamChunk, String>>::new(),
+            ),
+            |(mut byte_stream, mut decoder, mut pending)| async move {
+                loop {
+                    if let Some(item) = pending.pop_front() {
+                        return Some((item, (byte_stream, decoder, pending)));
+                    }
+
+                    match byte_stream.next().await {
+                        Some(Ok(bytes)) => {
+                            let text = String::from_utf8_lossy(&bytes);
+                            for data in decoder.push_str(&text) {
+                                if let Some(chunk) = parse_responses_stream_data(&data) {
+                                    pending.push_back(chunk);
                                 }
-                            } else if event.event_type == "response.done" {
-                                return Ok(StreamChunk {
-                                    delta: String::new(),
-                                    finish_reason: Some("stop".to_string()),
-                                });
                             }
+                        }
+                        Some(Err(e)) => {
+                            return Some((
+                                Err(format!("Stream error: {}", e)),
+                                (byte_stream, decoder, pending),
+                            ));
+                        }
+                        None => {
+                            for data in decoder.finish() {
+                                if let Some(chunk) = parse_responses_stream_data(&data) {
+                                    pending.push_back(chunk);
+                                }
+                            }
+                            if let Some(item) = pending.pop_front() {
+                                return Some((item, (byte_stream, decoder, pending)));
+                            }
+                            return None;
                         }
                     }
                 }
-                Ok(StreamChunk {
-                    delta: String::new(),
-                    finish_reason: None,
-                })
-            }
-            Err(e) => Err(format!("Stream error: {}", e)),
-        });
+            },
+        );
 
         Ok(Box::pin(stream))
     }
@@ -403,8 +418,14 @@ impl OpenAIResponsesProvider {
         if let Some(temp) = request.sampling.temperature {
             body["temperature"] = serde_json::json!(temp);
         }
+        if let Some(top_p) = request.sampling.top_p {
+            body["top_p"] = serde_json::json!(top_p);
+        }
         if let Some(max_tokens) = request.max_tokens {
             body["max_output_tokens"] = serde_json::json!(max_tokens);
+        }
+        if request.stream {
+            body["stream"] = serde_json::json!(true);
         }
 
         Ok(body)
@@ -413,7 +434,7 @@ impl OpenAIResponsesProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::OpenAIResponsesProvider;
+    use super::{parse_responses_stream_data, OpenAIResponsesProvider};
 
     #[test]
     fn retry_missing_file_detects_expected_errors() {
@@ -426,6 +447,36 @@ mod tests {
         assert!(!OpenAIResponsesProvider::should_retry_missing_file(
             "API error: rate limit exceeded"
         ));
+    }
+
+    #[test]
+    fn parses_responses_stream_delta() {
+        let chunk =
+            parse_responses_stream_data(r#"{"type":"response.output_text.delta","delta":"hello"}"#)
+                .expect("chunk")
+                .expect("ok");
+
+        assert_eq!(chunk.delta, "hello");
+        assert_eq!(chunk.finish_reason, None);
+    }
+}
+
+fn parse_responses_stream_data(data: &str) -> Option<Result<StreamChunk, String>> {
+    let event = serde_json::from_str::<ResponsesStreamEvent>(data).ok()?;
+    if event.event_type == "response.output_text.delta" {
+        event.delta.map(|delta| {
+            Ok(StreamChunk {
+                delta,
+                finish_reason: None,
+            })
+        })
+    } else if event.event_type == "response.done" {
+        Some(Ok(StreamChunk {
+            delta: String::new(),
+            finish_reason: Some("stop".to_string()),
+        }))
+    } else {
+        None
     }
 }
 

@@ -1,10 +1,12 @@
 //! Claude Code Interface provider
 
 use crate::api::provider::*;
+use crate::api::sse::SseDecoder;
 use async_trait::async_trait;
-use futures::{Stream, StreamExt};
+use futures::{stream, Stream, StreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::pin::Pin;
 
 /// Claude Code Interface - Anthropic Messages-compatible surface used by Claude Code.
@@ -169,40 +171,54 @@ impl AIProvider for ClaudeCodeProvider {
             .await
             .map_err(|e| format!("Request failed: {}", e))?;
 
-        let stream = response.bytes_stream().map(move |result| match result {
-            Ok(bytes) => {
-                let text = String::from_utf8_lossy(&bytes);
-                for line in text.lines() {
-                    if line.starts_with("data: ") {
-                        let data = &line[6..];
-                        if let Ok(event) = serde_json::from_str::<ClaudeCodeStreamEvent>(data) {
-                            match event {
-                                ClaudeCodeStreamEvent::ContentBlockDelta { delta, .. } => {
-                                    if let Some(text) = delta.text {
-                                        return Ok(StreamChunk {
-                                            delta: text,
-                                            finish_reason: None,
-                                        });
-                                    }
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(format!("API error: {}", error_text));
+        }
+
+        let byte_stream = response.bytes_stream();
+        let stream = stream::unfold(
+            (
+                byte_stream,
+                SseDecoder::default(),
+                VecDeque::<Result<StreamChunk, String>>::new(),
+            ),
+            |(mut byte_stream, mut decoder, mut pending)| async move {
+                loop {
+                    if let Some(item) = pending.pop_front() {
+                        return Some((item, (byte_stream, decoder, pending)));
+                    }
+
+                    match byte_stream.next().await {
+                        Some(Ok(bytes)) => {
+                            let text = String::from_utf8_lossy(&bytes);
+                            for data in decoder.push_str(&text) {
+                                if let Some(chunk) = parse_claude_code_stream_data(&data) {
+                                    pending.push_back(chunk);
                                 }
-                                ClaudeCodeStreamEvent::MessageDelta { delta, .. } => {
-                                    return Ok(StreamChunk {
-                                        delta: String::new(),
-                                        finish_reason: delta.stop_reason,
-                                    });
-                                }
-                                _ => {}
                             }
+                        }
+                        Some(Err(e)) => {
+                            return Some((
+                                Err(format!("Stream error: {}", e)),
+                                (byte_stream, decoder, pending),
+                            ));
+                        }
+                        None => {
+                            for data in decoder.finish() {
+                                if let Some(chunk) = parse_claude_code_stream_data(&data) {
+                                    pending.push_back(chunk);
+                                }
+                            }
+                            if let Some(item) = pending.pop_front() {
+                                return Some((item, (byte_stream, decoder, pending)));
+                            }
+                            return None;
                         }
                     }
                 }
-                Ok(StreamChunk {
-                    delta: String::new(),
-                    finish_reason: None,
-                })
-            }
-            Err(e) => Err(format!("Stream error: {}", e)),
-        });
+            },
+        );
 
         Ok(Box::pin(stream))
     }
@@ -425,6 +441,23 @@ struct ClaudeCodeMessageDelta {
     stop_reason: Option<String>,
 }
 
+fn parse_claude_code_stream_data(data: &str) -> Option<Result<StreamChunk, String>> {
+    let event = serde_json::from_str::<ClaudeCodeStreamEvent>(data).ok()?;
+    match event {
+        ClaudeCodeStreamEvent::ContentBlockDelta { delta, .. } => delta.text.map(|text| {
+            Ok(StreamChunk {
+                delta: text,
+                finish_reason: None,
+            })
+        }),
+        ClaudeCodeStreamEvent::MessageDelta { delta, .. } => Some(Ok(StreamChunk {
+            delta: String::new(),
+            finish_reason: delta.stop_reason,
+        })),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -521,5 +554,17 @@ mod tests {
             with_v1.messages_url(),
             "https://example.test/anthropic/v1/messages"
         );
+    }
+
+    #[test]
+    fn parses_claude_code_text_delta() {
+        let chunk = parse_claude_code_stream_data(
+            r#"{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}"#,
+        )
+        .expect("chunk")
+        .expect("ok");
+
+        assert_eq!(chunk.delta, "hello");
+        assert_eq!(chunk.finish_reason, None);
     }
 }

@@ -4,10 +4,12 @@ use crate::api::gemini_files::{
     invalidate_gemini_file_cache, prepare_request_messages_with_file_cache,
 };
 use crate::api::provider::*;
+use crate::api::sse::SseDecoder;
 use async_trait::async_trait;
-use futures::{Stream, StreamExt};
+use futures::{stream, Stream, StreamExt};
 use reqwest::Client;
 use serde::Deserialize;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::pin::Pin;
 
@@ -295,33 +297,49 @@ impl GeminiProvider {
             return Err(format!("API error: {}", error_text));
         }
 
-        let stream = response.bytes_stream().map(move |result| match result {
-            Ok(bytes) => {
-                let text = String::from_utf8_lossy(&bytes);
-                for line in text.lines() {
-                    if line.starts_with("data: ") {
-                        let data = &line[6..];
-                        if let Ok(chunk) = serde_json::from_str::<GeminiResponse>(data) {
-                            if let Some(candidate) = chunk.candidates.first() {
-                                if let Some(part) = candidate.content.parts.first() {
-                                    if let Some(text) = part.text.clone() {
-                                        return Ok(StreamChunk {
-                                            delta: text,
-                                            finish_reason: candidate.finish_reason.clone(),
-                                        });
-                                    }
+        let byte_stream = response.bytes_stream();
+        let stream = stream::unfold(
+            (
+                byte_stream,
+                SseDecoder::default(),
+                VecDeque::<Result<StreamChunk, String>>::new(),
+            ),
+            |(mut byte_stream, mut decoder, mut pending)| async move {
+                loop {
+                    if let Some(item) = pending.pop_front() {
+                        return Some((item, (byte_stream, decoder, pending)));
+                    }
+
+                    match byte_stream.next().await {
+                        Some(Ok(bytes)) => {
+                            let text = String::from_utf8_lossy(&bytes);
+                            for data in decoder.push_str(&text) {
+                                if let Some(chunk) = parse_gemini_stream_data(&data) {
+                                    pending.push_back(chunk);
                                 }
                             }
                         }
+                        Some(Err(e)) => {
+                            return Some((
+                                Err(format!("Stream error: {}", e)),
+                                (byte_stream, decoder, pending),
+                            ));
+                        }
+                        None => {
+                            for data in decoder.finish() {
+                                if let Some(chunk) = parse_gemini_stream_data(&data) {
+                                    pending.push_back(chunk);
+                                }
+                            }
+                            if let Some(item) = pending.pop_front() {
+                                return Some((item, (byte_stream, decoder, pending)));
+                            }
+                            return None;
+                        }
                     }
                 }
-                Ok(StreamChunk {
-                    delta: String::new(),
-                    finish_reason: None,
-                })
-            }
-            Err(e) => Err(format!("Stream error: {}", e)),
-        });
+            },
+        );
 
         Ok(Box::pin(stream))
     }
@@ -479,7 +497,7 @@ impl GeminiProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::GeminiProvider;
+    use super::{parse_gemini_stream_data, GeminiProvider};
 
     #[test]
     fn retry_missing_file_detects_expected_errors() {
@@ -493,6 +511,30 @@ mod tests {
             "API error: candidate blocked"
         ));
     }
+
+    #[test]
+    fn parses_gemini_stream_delta() {
+        let chunk = parse_gemini_stream_data(
+            r#"{"candidates":[{"content":{"parts":[{"text":"hello"}]},"finish_reason":null}]}"#,
+        )
+        .expect("chunk")
+        .expect("ok");
+
+        assert_eq!(chunk.delta, "hello");
+        assert_eq!(chunk.finish_reason, None);
+    }
+}
+
+fn parse_gemini_stream_data(data: &str) -> Option<Result<StreamChunk, String>> {
+    let chunk = serde_json::from_str::<GeminiResponse>(data).ok()?;
+    let candidate = chunk.candidates.first()?;
+    let part = candidate.content.parts.first()?;
+    part.text.clone().map(|delta| {
+        Ok(StreamChunk {
+            delta,
+            finish_reason: candidate.finish_reason.clone(),
+        })
+    })
 }
 
 fn image_mime_type_from_data_url(url: &str) -> String {

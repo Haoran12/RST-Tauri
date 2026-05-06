@@ -8,6 +8,7 @@ import {
   NInput,
   NModal,
   NScrollbar,
+  NSelect,
   NSpin,
   NText,
   useDialog,
@@ -25,8 +26,9 @@ import { useChatStore } from '@/stores/chat'
 import { useSettingsStore } from '@/stores/settings'
 import { useRuntimeStore } from '@/stores/runtime'
 import { useWorldbooksStore } from '@/stores/worldbooks'
+import { usePresetsStore } from '@/stores/presets'
 import type { CharacterCard, ChatAttachmentRef, ChatMessage } from '@/types/st'
-import { getChatAttachmentBlob } from '@/services/storage'
+import { getChatAttachmentBlob, loadPreset } from '@/services/storage'
 
 const route = useRoute()
 const router = useRouter()
@@ -37,6 +39,7 @@ const chatStore = useChatStore()
 const settingsStore = useSettingsStore()
 const runtimeStore = useRuntimeStore()
 const worldbooksStore = useWorldbooksStore()
+const presetsStore = usePresetsStore()
 
 const inputText = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
@@ -50,6 +53,19 @@ const hasActiveApiConfig = computed(() => settingsStore.activeApiConfig !== null
 const canSend = computed(() => {
   return (inputText.value.trim() || chatStore.hasPendingAttachments) && !chatStore.isGenerating && hasActiveApiConfig.value
 })
+const apiConfigOptions = computed(() => {
+  return settingsStore.apiConfigs.map(config => ({
+    label: `${config.name || config.provider} · ${config.model}`,
+    value: config.id,
+    disabled: !config.enabled,
+  }))
+})
+const presetOptions = computed(() => {
+  return presetsStore.presetList.map(preset => ({
+    label: preset.name,
+    value: preset.name,
+  }))
+})
 
 async function handleSend() {
   if (!canSend.value) return
@@ -59,7 +75,11 @@ async function handleSend() {
     message.error('请先选择 API 配置')
     return
   }
-  await chatStore.sendMessageStream(content, settingsStore.activeApiConfig)
+  if (await shouldStreamCurrentPreset()) {
+    await chatStore.sendMessageStream(content, settingsStore.activeApiConfig)
+  } else {
+    await chatStore.sendMessage(content, settingsStore.activeApiConfig)
+  }
   if (chatStore.error) {
     message.error(chatStore.error)
   }
@@ -70,6 +90,34 @@ function handleKeyDown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     handleSend()
+  }
+}
+
+async function shouldStreamCurrentPreset() {
+  try {
+    const presetName = runtimeStore.activePresetName || 'Default'
+    const preset = await loadPreset(presetName)
+    return preset.stream_openai !== false
+  } catch {
+    return true
+  }
+}
+
+async function handleApiConfigChange(value: string | null) {
+  settingsStore.setActiveApiConfig(value)
+  try {
+    await runtimeStore.setApiConfigId(value)
+  } catch (err) {
+    message.error(`保存 API 配置选择失败: ${err}`)
+  }
+}
+
+async function handlePresetChange(value: string | null) {
+  if (!value) return
+  try {
+    await runtimeStore.setPresetName(value)
+  } catch (err) {
+    message.error(`保存预设选择失败: ${err}`)
   }
 }
 
@@ -263,6 +311,7 @@ onMounted(async () => {
       settingsStore.loadApiConfigs(),
       runtimeStore.loadGlobalState(),
       worldbooksStore.loadWorldbooks(),
+      presetsStore.loadPresetList(),
     ])
     settingsStore.setActiveApiConfig(runtimeStore.activeApiConfigId)
     await syncRouteSession()
@@ -274,6 +323,10 @@ onMounted(async () => {
 })
 
 watch(() => route.params.sessionId, syncRouteSession)
+watch(
+  () => runtimeStore.activeApiConfigId,
+  id => settingsStore.setActiveApiConfig(id)
+)
 watch(() => chatStore.currentSession?.id, scrollToBottom)
 watch(
   () => [
@@ -320,6 +373,27 @@ onBeforeUnmount(() => {
           </NButton>
           <div class="chat-title">
             <h1>{{ chatStore.currentSession?.name ?? '聊天' }}</h1>
+          </div>
+          <div class="chat-selectors">
+            <NSelect
+              class="header-select preset-select"
+              size="small"
+              :value="runtimeStore.activePresetName"
+              :options="presetOptions"
+              placeholder="预设"
+              filterable
+              @update:value="handlePresetChange"
+            />
+            <NSelect
+              class="header-select api-select"
+              size="small"
+              :value="settingsStore.activeApiConfigId"
+              :options="apiConfigOptions"
+              placeholder="主 API"
+              clearable
+              filterable
+              @update:value="handleApiConfigChange"
+            />
           </div>
           <div v-if="!hasActiveApiConfig" class="api-warning">未选择 API</div>
         </header>
@@ -485,9 +559,30 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
+.chat-selectors {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.header-select {
+  min-width: 0;
+}
+
+.preset-select {
+  width: clamp(140px, 18vw, 220px);
+}
+
+.api-select {
+  width: clamp(180px, 24vw, 300px);
+}
+
 .api-warning {
   font-size: 12px;
   color: var(--n-warning-color);
+  flex: 0 0 auto;
 }
 
 /* Worldbooks */
@@ -635,5 +730,25 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 14px;
+}
+
+@media (max-width: 760px) {
+  .chat-header {
+    flex-wrap: wrap;
+  }
+
+  .chat-title {
+    flex-basis: calc(100% - 46px);
+  }
+
+  .chat-selectors {
+    flex-basis: 100%;
+  }
+
+  .preset-select,
+  .api-select {
+    width: min(100%, 240px);
+    flex: 1 1 160px;
+  }
 }
 </style>

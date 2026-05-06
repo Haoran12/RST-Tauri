@@ -273,9 +273,11 @@ ST 模式和共享 API 配置池必须把以下 Provider / 协议作为一等适
 
 ### 5.5 适配策略
 
-- 不支持的参数静默忽略，不报错。
-- 语义相近参数可自动映射（需用户确认或预设配置）。
-- 预设可声明 `provider_overrides` 字段，为特定 Provider 提供替代值。
+- `AssembledRequest` 进入 `ChatRequest` 前必须读取当前 API 配置对应的 `CompiledProviderContractView.key.protocol_kind`。
+- 参数适配顺序固定为：范围裁剪、语义近似映射、删除不支持字段、Provider adapter 字段改名。
+- 不支持的参数默认忽略，不报错；附件输入例外，图片 / PDF 不支持时必须 fail fast，不能静默丢弃。
+- 当前已落地的最小规则：OpenAI Responses 丢弃 `top_k` / penalties；OpenAI Chat 与 DeepSeek 丢弃 `top_k` 并可把非默认 `repetition_penalty` 近似映射到 `frequency_penalty`；Anthropic / Claude Code 丢弃 frequency / presence / repetition penalty；Gemini 丢弃 penalties 且 `top_k <= 0` 不发送。
+- 预设可声明 `provider_overrides` 字段，为特定 Provider 提供替代值；该字段必须仍经过契约白名单，不得直通远端 API。
 - 推理参数仅在支持的模型上生效，否则忽略。
 
 ### 5.6 请求组装示例

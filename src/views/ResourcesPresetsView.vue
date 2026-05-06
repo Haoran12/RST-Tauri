@@ -386,13 +386,13 @@ onBeforeUnmount(() => {
                   @update:value="value => setPresetField('presence_penalty', value ?? 0)"
                 />
               </NFormItem>
-              <NFormItem label="OpenAI Max Context">
+              <NFormItem label="最大上下文">
                 <NInputNumber
                   :value="store.currentPreset.openai_max_context"
                   @update:value="value => setPresetField('openai_max_context', value ?? 4095)"
                 />
               </NFormItem>
-              <NFormItem label="OpenAI Max Tokens">
+              <NFormItem label="最大输出 Tokens">
                 <NInputNumber
                   :value="store.currentPreset.openai_max_tokens"
                   @update:value="value => setPresetField('openai_max_tokens', value ?? 300)"
@@ -414,7 +414,7 @@ onBeforeUnmount(() => {
                   @update:value="value => setPresetField('use_sysprompt', value)"
                 />
               </NFormItem>
-              <NFormItem label="Stream OpenAI">
+              <NFormItem label="流式输出">
                 <NSwitch
                   :value="store.currentPreset.stream_openai"
                   @update:value="value => setPresetField('stream_openai', value)"

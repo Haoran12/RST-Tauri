@@ -110,6 +110,13 @@ interface SamplerPreset {
 }
 ```
 
+Sampler 编辑规划：
+
+- UI 分为基础生成参数、重复控制、兼容字段三组；首屏只暴露 `temperature`、`top_p`、`top_k`、`frequency_penalty`、`presence_penalty`、`repetition_penalty`、最大上下文、最大输出 tokens 与流式输出。
+- `stream_openai` 在 RST 中改名显示为“流式输出”，语义为当前预设是否走 `chat_stream`。它不再只代表 OpenAI，也不再由聊天页硬编码开启。
+- `openai_max_context` / `openai_max_tokens` 保留 ST 兼容字段名，但 UI 显示为通用最大上下文 / 最大输出 tokens。运行时必须把最大输出 tokens 写入中立 `ChatRequest.max_tokens`，再由 Provider adapter 映射为 `max_tokens`、`max_output_tokens` 或 `generationConfig.maxOutputTokens`。
+- 不同 Provider 不支持的采样字段由 `llm_api_contract` 驱动屏蔽或转换；UI 后续应在选择了主 API 配置时标记“当前连接会忽略 / 近似映射”的字段，但保存的预设仍保持 ST 兼容字段完整。
+
 ### 3.2 Instruct Template（对话格式模板）
 
 ```typescript

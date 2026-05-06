@@ -4,10 +4,12 @@ use crate::api::openai_files::{
     invalidate_openai_file_cache, prepare_request_messages_with_file_cache,
 };
 use crate::api::provider::*;
+use crate::api::sse::SseDecoder;
 use async_trait::async_trait;
-use futures::{Stream, StreamExt};
+use futures::{stream, Stream, StreamExt};
 use reqwest::Client;
 use serde::Deserialize;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::pin::Pin;
 
@@ -263,36 +265,49 @@ impl OpenAIChatProvider {
             return Err(format!("API error: {}", error_text));
         }
 
-        let stream = response.bytes_stream().map(move |result| match result {
-            Ok(bytes) => {
-                let text = String::from_utf8_lossy(&bytes);
-                for line in text.lines() {
-                    if line.starts_with("data: ") {
-                        let data = &line[6..];
-                        if data == "[DONE]" {
-                            return Ok(StreamChunk {
-                                delta: String::new(),
-                                finish_reason: Some("stop".to_string()),
-                            });
-                        }
-                        if let Ok(chunk) = serde_json::from_str::<OpenAIStreamChunk>(data) {
-                            if let Some(choice) = chunk.choices.first() {
-                                let delta = choice.delta.content.clone().unwrap_or_default();
-                                return Ok(StreamChunk {
-                                    delta,
-                                    finish_reason: choice.finish_reason.clone(),
-                                });
+        let byte_stream = response.bytes_stream();
+        let stream = stream::unfold(
+            (
+                byte_stream,
+                SseDecoder::default(),
+                VecDeque::<Result<StreamChunk, String>>::new(),
+            ),
+            |(mut byte_stream, mut decoder, mut pending)| async move {
+                loop {
+                    if let Some(item) = pending.pop_front() {
+                        return Some((item, (byte_stream, decoder, pending)));
+                    }
+
+                    match byte_stream.next().await {
+                        Some(Ok(bytes)) => {
+                            let text = String::from_utf8_lossy(&bytes);
+                            for data in decoder.push_str(&text) {
+                                if let Some(chunk) = parse_openai_stream_data(&data) {
+                                    pending.push_back(chunk);
+                                }
                             }
+                        }
+                        Some(Err(e)) => {
+                            return Some((
+                                Err(format!("Stream error: {}", e)),
+                                (byte_stream, decoder, pending),
+                            ));
+                        }
+                        None => {
+                            for data in decoder.finish() {
+                                if let Some(chunk) = parse_openai_stream_data(&data) {
+                                    pending.push_back(chunk);
+                                }
+                            }
+                            if let Some(item) = pending.pop_front() {
+                                return Some((item, (byte_stream, decoder, pending)));
+                            }
+                            return None;
                         }
                     }
                 }
-                Ok(StreamChunk {
-                    delta: String::new(),
-                    finish_reason: None,
-                })
-            }
-            Err(e) => Err(format!("Stream error: {}", e)),
-        });
+            },
+        );
 
         Ok(Box::pin(stream))
     }
@@ -369,6 +384,15 @@ impl OpenAIChatProvider {
         if !request.stop_sequences.is_empty() {
             body["stop"] = serde_json::json!(request.stop_sequences);
         }
+        if request.stream {
+            body["stream"] = serde_json::json!(true);
+        }
+        if let Some(frequency_penalty) = request.sampling.frequency_penalty {
+            body["frequency_penalty"] = serde_json::json!(frequency_penalty);
+        }
+        if let Some(presence_penalty) = request.sampling.presence_penalty {
+            body["presence_penalty"] = serde_json::json!(presence_penalty);
+        }
 
         if let Some(schema) = schema {
             body["response_format"] = serde_json::json!({
@@ -386,7 +410,10 @@ impl OpenAIChatProvider {
 }
 
 fn openai_chat_message_content(content: &[ContentPart]) -> serde_json::Value {
-    if content.iter().all(|part| matches!(part, ContentPart::Text { .. })) {
+    if content
+        .iter()
+        .all(|part| matches!(part, ContentPart::Text { .. }))
+    {
         let text = content
             .iter()
             .map(|part| match part {
@@ -431,9 +458,25 @@ fn openai_chat_message_content(content: &[ContentPart]) -> serde_json::Value {
     )
 }
 
+fn parse_openai_stream_data(data: &str) -> Option<Result<StreamChunk, String>> {
+    if data == "[DONE]" {
+        return Some(Ok(StreamChunk {
+            delta: String::new(),
+            finish_reason: Some("stop".to_string()),
+        }));
+    }
+
+    let chunk = serde_json::from_str::<OpenAIStreamChunk>(data).ok()?;
+    let choice = chunk.choices.first()?;
+    Some(Ok(StreamChunk {
+        delta: choice.delta.content.clone().unwrap_or_default(),
+        finish_reason: choice.finish_reason.clone(),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{openai_chat_message_content, OpenAIChatProvider};
+    use super::{openai_chat_message_content, parse_openai_stream_data, OpenAIChatProvider};
     use crate::api::provider::{ContentPart, ImageUrl};
     use serde_json::json;
 
@@ -478,6 +521,18 @@ mod tests {
         ]);
 
         assert!(content.is_array());
+    }
+
+    #[test]
+    fn parses_openai_stream_delta() {
+        let chunk = parse_openai_stream_data(
+            r#"{"choices":[{"delta":{"content":"hello"},"finish_reason":null}]}"#,
+        )
+        .expect("chunk")
+        .expect("ok");
+
+        assert_eq!(chunk.delta, "hello");
+        assert_eq!(chunk.finish_reason, None);
     }
 }
 

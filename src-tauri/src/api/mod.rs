@@ -12,5 +12,6 @@ pub mod openai_chat;
 pub mod openai_files;
 pub mod openai_responses;
 pub mod provider;
+pub mod sse;
 
 pub use provider::*;

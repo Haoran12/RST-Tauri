@@ -13,13 +13,13 @@ use crate::config::llm_contracts::{
 };
 use crate::logging::context::{LlmNode, LogContext, LogMode};
 use crate::st::keyword_matcher::GlobalScanData;
-use crate::st::runtime_assembly::AssembledAttachmentRef;
+use crate::st::runtime_assembly::{AssembledAttachmentRef, AssembledSamplingParams};
 use crate::st::{
-    AssembledRequest, ContextTemplate, GlobalAppState, InstructTemplate, PresetFile,
+    AssembledRequest, ContextTemplate, GlobalAppState, InstructTemplate, MacroContext, PresetFile,
     PromptPreset, ProviderRequestMapper, ReasoningTemplate, RegexEngine, RegexPlacement,
-    RegexRunOptions, RequestAssembler, RuntimeContext, SamplerPreset, STChatMessage,
-    STChatMetadata, STSessionData, STWorldInfoSettings, SystemPrompt, WorldInfoInjectionResult,
-    WorldInfoInjector, WorldInfoSource, MacroContext,
+    RegexRunOptions, RequestAssembler, RuntimeContext, STChatMessage, STChatMetadata,
+    STSessionData, STWorldInfoSettings, SamplerPreset, SystemPrompt, WorldInfoInjectionResult,
+    WorldInfoInjector, WorldInfoSource,
 };
 use crate::storage::json_store::JsonStore;
 use crate::storage::paths::{app_data_root, safe_join};
@@ -28,13 +28,13 @@ use crate::storage::st_resources::{
 };
 use crate::AppState;
 use base64::{engine::general_purpose::STANDARD, Engine};
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
-use futures::StreamExt;
 
 /// Stream event payload sent to frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -270,7 +270,9 @@ pub async fn load_context_template(
     ensure_default_presets(&store)?;
 
     let preset = load_combined_preset(&store, &name)?;
-    Ok(preset.context.unwrap_or_else(|| ContextTemplate::new(&name)))
+    Ok(preset
+        .context
+        .unwrap_or_else(|| ContextTemplate::new(&name)))
 }
 
 /// 加载 System Prompt
@@ -545,12 +547,14 @@ pub async fn assemble_st_request(
             world_info: chat_session.chat_metadata.world_info.clone(),
             enabled_world_info: chat_session.chat_metadata.enabled_world_info.clone(),
             disabled_world_info: chat_session.chat_metadata.disabled_world_info.clone(),
-            user_persona: chat_session.chat_metadata.user_persona.clone().map(|persona| {
-                crate::st::runtime_assembly::STUserPersona {
+            user_persona: chat_session
+                .chat_metadata
+                .user_persona
+                .clone()
+                .map(|persona| crate::st::runtime_assembly::STUserPersona {
                     name: persona.name,
                     description: persona.description,
-                }
-            }),
+                }),
             extra: chat_session.chat_metadata.extra.clone(),
         },
         messages: chat_session
@@ -568,7 +572,8 @@ pub async fn assemble_st_request(
     };
 
     // 4. 加载预设（一个文件包含所有类型）
-    let active_preset_name = resolve_active_preset_name(input.preset_name.as_deref(), &global_state);
+    let active_preset_name =
+        resolve_active_preset_name(input.preset_name.as_deref(), &global_state);
     let preset: Option<PresetFile> = if let Some(name) = active_preset_name.as_deref() {
         if !name.is_empty() {
             Some(load_combined_preset(&store, name)?)
@@ -709,6 +714,11 @@ pub async fn assemble_st_request(
 
     // 8. 组装请求
     let mut request = RequestAssembler::assemble(&context);
+    if let Some(preset) = preset.as_ref() {
+        if preset.openai_max_tokens > 0 {
+            request.max_tokens = Some(preset.openai_max_tokens);
+        }
+    }
     apply_prompt_only_regex(
         &mut request,
         &global_state.regex_settings,
@@ -781,7 +791,10 @@ pub async fn send_assembled_st_chat_message(
     );
     if let Some(sqlite_store) = store_guard.as_ref() {
         let request_json = serde_json::to_value(&request).unwrap_or(serde_json::Value::Null);
-        tracing::info!("[ST Chat Log] Calling log_start for request_id: {}", request_id);
+        tracing::info!(
+            "[ST Chat Log] Calling log_start for request_id: {}",
+            request_id
+        );
         sqlite_store
             .llm_logger()
             .log_start(
@@ -800,9 +813,15 @@ pub async fn send_assembled_st_chat_message(
 
     match provider.chat(request).await {
         Ok(resp) => {
-            tracing::info!("[ST Chat Log] LLM call succeeded, request_id: {}", request_id);
+            tracing::info!(
+                "[ST Chat Log] LLM call succeeded, request_id: {}",
+                request_id
+            );
             if let Some(sqlite_store) = store_guard.as_ref() {
-                tracing::info!("[ST Chat Log] Calling log_success for request_id: {}", request_id);
+                tracing::info!(
+                    "[ST Chat Log] Calling log_success for request_id: {}",
+                    request_id
+                );
                 sqlite_store
                     .llm_logger()
                     .log_success(
@@ -848,6 +867,7 @@ async fn assembled_to_chat_request(
 ) -> Result<ChatRequest, String> {
     let (_text_supported, image_supported, pdf_supported) =
         connection_supports_attachments(compiled_contract);
+    let sampling = sampling_for_contract(&compiled_contract.key.protocol_kind, &assembled.sampling);
     let mut messages = Vec::new();
     if !assembled.system_prompt.is_empty() {
         messages.push(ProviderChatMessage::system(assembled.system_prompt));
@@ -893,14 +913,7 @@ async fn assembled_to_chat_request(
         request_id,
         api_config_id,
         messages,
-        sampling: SamplingParams {
-            temperature: assembled.sampling.temperature,
-            top_p: assembled.sampling.top_p,
-            top_k: assembled.sampling.top_k.and_then(|v| u32::try_from(v).ok()),
-            repetition_penalty: assembled.sampling.repetition_penalty,
-            frequency_penalty: assembled.sampling.frequency_penalty,
-            presence_penalty: assembled.sampling.presence_penalty,
-        },
+        sampling,
         stop_sequences: assembled.stop_sequences,
         max_tokens: assembled.max_tokens.and_then(|v| u32::try_from(v).ok()),
         stream: false,
@@ -918,6 +931,78 @@ async fn assembled_to_chat_request(
         response_format: None,
         provider_overrides: serde_json::Value::Null,
     })
+}
+
+fn sampling_for_contract(protocol_kind: &str, source: &AssembledSamplingParams) -> SamplingParams {
+    let mut sampling = SamplingParams {
+        temperature: source.temperature,
+        top_p: source.top_p,
+        top_k: source.top_k.and_then(|v| u32::try_from(v).ok()),
+        repetition_penalty: source.repetition_penalty,
+        frequency_penalty: source.frequency_penalty,
+        presence_penalty: source.presence_penalty,
+    };
+
+    match protocol_kind {
+        "openai_responses" => {
+            sampling.temperature = sampling.temperature.map(|v| clamp_f64(v, 0.0, 2.0));
+            sampling.top_p = sampling.top_p.map(|v| clamp_f64(v, 0.0, 1.0));
+            sampling.top_k = None;
+            sampling.repetition_penalty = None;
+            sampling.frequency_penalty = None;
+            sampling.presence_penalty = None;
+        }
+        "openai_chat_completions" | "deepseek_chat" => {
+            sampling.temperature = sampling.temperature.map(|v| clamp_f64(v, 0.0, 2.0));
+            sampling.top_p = sampling.top_p.map(|v| clamp_f64(v, 0.0, 1.0));
+            sampling.top_k = None;
+            sampling.repetition_penalty = None;
+            if should_map_repetition_to_frequency(source, sampling.frequency_penalty) {
+                sampling.frequency_penalty = source
+                    .repetition_penalty
+                    .map(|v| clamp_f64(v - 1.0, -2.0, 2.0));
+            }
+            sampling.frequency_penalty =
+                sampling.frequency_penalty.map(|v| clamp_f64(v, -2.0, 2.0));
+            sampling.presence_penalty = sampling.presence_penalty.map(|v| clamp_f64(v, -2.0, 2.0));
+        }
+        "anthropic_messages" | "claude_code_interface" => {
+            sampling.temperature = sampling.temperature.map(|v| clamp_f64(v, 0.0, 1.0));
+            sampling.top_p = sampling.top_p.map(|v| clamp_f64(v, 0.0, 1.0));
+            sampling.repetition_penalty = None;
+            sampling.frequency_penalty = None;
+            sampling.presence_penalty = None;
+        }
+        "gemini_generate_content" => {
+            sampling.temperature = sampling.temperature.map(|v| clamp_f64(v, 0.0, 2.0));
+            sampling.top_p = sampling.top_p.map(|v| clamp_f64(v, 0.0, 1.0));
+            sampling.top_k = sampling.top_k.filter(|v| *v > 0);
+            sampling.repetition_penalty = None;
+            sampling.frequency_penalty = None;
+            sampling.presence_penalty = None;
+        }
+        _ => {}
+    }
+
+    sampling
+}
+
+fn should_map_repetition_to_frequency(
+    source: &AssembledSamplingParams,
+    current_frequency: Option<f64>,
+) -> bool {
+    let Some(repetition) = source.repetition_penalty else {
+        return false;
+    };
+
+    (repetition - 1.0).abs() > f64::EPSILON
+        && current_frequency
+            .map(|value| value.abs() <= f64::EPSILON)
+            .unwrap_or(true)
+}
+
+fn clamp_f64(value: f64, min: f64, max: f64) -> f64 {
+    value.max(min).min(max)
 }
 
 async fn assembled_attachment_to_content_part(
@@ -1451,12 +1536,14 @@ pub async fn run_world_info_injection(
         world_info: chat_session.chat_metadata.world_info.clone(),
         enabled_world_info: chat_session.chat_metadata.enabled_world_info.clone(),
         disabled_world_info: chat_session.chat_metadata.disabled_world_info.clone(),
-        user_persona: chat_session.chat_metadata.user_persona.clone().map(|persona| {
-            crate::st::runtime_assembly::STUserPersona {
+        user_persona: chat_session
+            .chat_metadata
+            .user_persona
+            .clone()
+            .map(|persona| crate::st::runtime_assembly::STUserPersona {
                 name: persona.name,
                 description: persona.description,
-            }
-        }),
+            }),
         extra: chat_session.chat_metadata.extra.clone(),
     };
 
@@ -1659,11 +1746,12 @@ mod tests {
     use super::{
         apply_prompt_only_regex, assembled_to_chat_request, character_lore_ids,
         ensure_default_presets, load_combined_preset, load_global_state, load_worldbook_by_id,
+        sampling_for_contract,
     };
     use crate::config::llm_contracts::{CompiledProviderContractView, ProviderContractCacheKey};
     use crate::st::runtime_assembly::AssembledAttachmentRef;
     use crate::st::{AssembledMessage, AssembledRequest};
-    use crate::st::{STChatMetadata, STWorldInfoSettings};
+    use crate::st::{AssembledSamplingParams, STChatMetadata, STWorldInfoSettings};
     use crate::storage::json_store::JsonStore;
     use crate::storage::st_resources::{CharacterData, TavernCardV3};
     use serde_json::json;
@@ -1882,6 +1970,43 @@ mod tests {
         assert!(error.contains("does not support image input"));
         assert!(!error.contains("Failed to read attachment"));
     }
+
+    #[test]
+    fn sampling_contract_drops_and_maps_unsupported_fields() {
+        let source = AssembledSamplingParams {
+            temperature: Some(3.0),
+            top_p: Some(1.5),
+            top_k: Some(40),
+            repetition_penalty: Some(1.4),
+            frequency_penalty: Some(0.0),
+            presence_penalty: Some(3.0),
+        };
+
+        let openai = sampling_for_contract("openai_chat_completions", &source);
+        assert_eq!(openai.temperature, Some(2.0));
+        assert_eq!(openai.top_p, Some(1.0));
+        assert_eq!(openai.top_k, None);
+        assert_eq!(openai.repetition_penalty, None);
+        assert!((openai.frequency_penalty.unwrap() - 0.4).abs() < 0.000001);
+        assert_eq!(openai.presence_penalty, Some(2.0));
+
+        let anthropic = sampling_for_contract("anthropic_messages", &source);
+        assert_eq!(anthropic.temperature, Some(1.0));
+        assert_eq!(anthropic.top_k, Some(40));
+        assert_eq!(anthropic.frequency_penalty, None);
+        assert_eq!(anthropic.presence_penalty, None);
+        assert_eq!(anthropic.repetition_penalty, None);
+
+        let gemini = sampling_for_contract(
+            "gemini_generate_content",
+            &AssembledSamplingParams {
+                top_k: Some(0),
+                ..source
+            },
+        );
+        assert_eq!(gemini.top_k, None);
+        assert_eq!(gemini.frequency_penalty, None);
+    }
 }
 
 // ============================================================================
@@ -2050,7 +2175,8 @@ pub async fn start_st_chat_stream(
     {
         let store_guard = state.sqlite_store.read().await;
         if let Some(sqlite_store) = store_guard.as_ref() {
-            let request_json = serde_json::to_value(&stream_request).unwrap_or(serde_json::Value::Null);
+            let request_json =
+                serde_json::to_value(&stream_request).unwrap_or(serde_json::Value::Null);
             sqlite_store
                 .llm_logger()
                 .log_start(
@@ -2070,10 +2196,14 @@ pub async fn start_st_chat_stream(
     let sqlite_store_arc = state.sqlite_store.clone();
 
     // Emit start event
-    app.emit("st-stream-start", StreamStartEvent {
-        stream_id: stream_id.clone(),
-        request_id: request_id.clone(),
-    }).map_err(|e| format!("Failed to emit start event: {}", e))?;
+    app.emit(
+        "st-stream-start",
+        StreamStartEvent {
+            stream_id: stream_id.clone(),
+            request_id: request_id.clone(),
+        },
+    )
+    .map_err(|e| format!("Failed to emit start event: {}", e))?;
 
     // Spawn background task to process stream
     let app_clone = app.clone();
@@ -2093,18 +2223,24 @@ pub async fn start_st_chat_stream(
                             }
 
                             // Emit chunk event
-                            let _ = app_clone.emit("st-stream-chunk", StreamChunkEvent {
-                                stream_id: stream_id_for_task.clone(),
-                                delta: chunk.delta,
-                                finish_reason: chunk.finish_reason,
-                            });
+                            let _ = app_clone.emit(
+                                "st-stream-chunk",
+                                StreamChunkEvent {
+                                    stream_id: stream_id_for_task.clone(),
+                                    delta: chunk.delta,
+                                    finish_reason: chunk.finish_reason,
+                                },
+                            );
                         }
                         Err(e) => {
                             // Emit error event
-                            let _ = app_clone.emit("st-stream-error", StreamErrorEvent {
-                                stream_id: stream_id_for_task.clone(),
-                                error: e.clone(),
-                            });
+                            let _ = app_clone.emit(
+                                "st-stream-error",
+                                StreamErrorEvent {
+                                    stream_id: stream_id_for_task.clone(),
+                                    error: e.clone(),
+                                },
+                            );
                             // Log failure
                             {
                                 let store_guard = sqlite_store_arc.read().await;
@@ -2139,10 +2275,13 @@ pub async fn start_st_chat_stream(
             }
             Err(e) => {
                 // Failed to create stream
-                let _ = app_clone.emit("st-stream-error", StreamErrorEvent {
-                    stream_id: stream_id_for_task.clone(),
-                    error: e.clone(),
-                });
+                let _ = app_clone.emit(
+                    "st-stream-error",
+                    StreamErrorEvent {
+                        stream_id: stream_id_for_task.clone(),
+                        error: e.clone(),
+                    },
+                );
                 // Log failure
                 {
                     let store_guard = sqlite_store_arc.read().await;
