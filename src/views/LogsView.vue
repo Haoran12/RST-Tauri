@@ -562,9 +562,6 @@ onMounted(refreshAll)
                 <h2>{{ selectedRecord.title }}</h2>
                 <p>{{ primaryContext(selectedRecord) }}</p>
               </div>
-              <NTag :type="statusType(selectedRecord.status || selectedRecord.level)">
-                {{ selectedRecord.status || selectedRecord.level || selectedSource }}
-              </NTag>
             </div>
 
             <div class="detail-tabs-wrapper">
