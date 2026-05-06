@@ -7,7 +7,10 @@ use crate::api::provider::{
     ReasoningParams, SamplingParams,
 };
 use crate::commands::chat_commands::{create_provider, ChatResponseData};
-use crate::config::llm_contracts::{connection_supports_attachments, CompiledProviderContractView};
+use crate::config::llm_contracts::{
+    connection_supports_attachments, load_llm_api_contracts_snapshot_from_str,
+    CompiledProviderContractView,
+};
 use crate::logging::context::{LlmNode, LogContext, LogMode};
 use crate::st::keyword_matcher::GlobalScanData;
 use crate::st::runtime_assembly::AssembledAttachmentRef;
@@ -38,10 +41,18 @@ async fn get_compiled_contract_view(
 ) -> Result<Arc<CompiledProviderContractView>, String> {
     let snapshot = {
         let guard = state.llm_api_contracts.read().await;
-        guard
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| "LLM API contracts snapshot not initialized".to_string())?
+        guard.as_ref().cloned()
+    };
+
+    let snapshot = match snapshot {
+        Some(snapshot) => snapshot,
+        None => {
+            let snapshot = Arc::new(load_llm_api_contracts_snapshot_from_str(include_str!(
+                "../../../config/llm_api_contracts.json"
+            ))?);
+            *state.llm_api_contracts.write().await = Some(snapshot.clone());
+            snapshot
+        }
     };
 
     state

@@ -133,6 +133,12 @@ impl ProviderContractCacheKey {
 pub fn load_llm_api_contracts_snapshot(path: &Path) -> Result<LlmApiContractsSnapshot, String> {
     let text = fs::read_to_string(path)
         .map_err(|e| format!("Failed to read llm_api_contracts.json: {}", e))?;
+    load_llm_api_contracts_snapshot_from_str(&text)
+}
+
+pub fn load_llm_api_contracts_snapshot_from_str(
+    text: &str,
+) -> Result<LlmApiContractsSnapshot, String> {
     let root: Value = serde_json::from_str(&text)
         .map_err(|e| format!("Failed to parse llm_api_contracts.json: {}", e))?;
 

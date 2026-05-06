@@ -188,9 +188,6 @@ export const useChatStore = defineStore('chat', () => {
       await saveCurrentSession()
     } catch (e) {
       error.value = String(e)
-      pendingAttachments.value = attachments
-      // Remove the user message on error
-      messages.value.pop()
       await saveCurrentSession()
     } finally {
       isGenerating.value = false
@@ -253,12 +250,8 @@ export const useChatStore = defineStore('chat', () => {
       await saveCurrentSession()
     } catch (e) {
       error.value = String(e)
-      pendingAttachments.value = attachments
-      // Remove both user and placeholder assistant messages on error
+      // Keep the user message persisted; only remove the assistant placeholder.
       if (messages.value[messages.value.length - 1]?.role === 'assistant') {
-        messages.value.pop()
-      }
-      if (messages.value[messages.value.length - 1]?.id === userMessage.id) {
         messages.value.pop()
       }
       await saveCurrentSession()

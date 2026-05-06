@@ -16,7 +16,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use config::llm_contracts::{
-    load_llm_api_contracts_snapshot, LlmApiContractsSnapshot, ProviderContractCache,
+    load_llm_api_contracts_snapshot, load_llm_api_contracts_snapshot_from_str,
+    LlmApiContractsSnapshot, ProviderContractCache,
 };
 use storage::paths::app_data_root;
 use storage::sqlite_store::SqliteStore;
@@ -73,7 +74,18 @@ pub fn run() {
 
             // Load bundled LLM API contracts once at startup.
             let contracts_path = std::path::PathBuf::from("config").join("llm_api_contracts.json");
-            match load_llm_api_contracts_snapshot(&contracts_path) {
+            let contracts_result = load_llm_api_contracts_snapshot(&contracts_path).or_else(|e| {
+                tracing::warn!(
+                    "Failed to load runtime llm_api_contracts.json from {}: {}; using embedded snapshot",
+                    contracts_path.display(),
+                    e
+                );
+                load_llm_api_contracts_snapshot_from_str(include_str!(
+                    "../../config/llm_api_contracts.json"
+                ))
+            });
+
+            match contracts_result {
                 Ok(snapshot) => {
                     tracing::info!(
                         "Loaded llm_api_contracts.json snapshot_id={} schema_version={} hash={}",
