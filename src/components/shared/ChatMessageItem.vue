@@ -94,7 +94,7 @@ function estimateTokens(input: string) {
 }
 
 function renderMarkdown(input: string) {
-  if (!input.trim()) return '<p class="md-empty">...</p>'
+  if (!input.trim()) return ''
 
   const lines = input.replace(/\r\n?/g, '\n').split('\n')
   const html: string[] = []
