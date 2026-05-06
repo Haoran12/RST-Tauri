@@ -49,16 +49,26 @@ function handleSystemThemeChange(e: MediaQueryListEvent) {
   }
 }
 
+// Ctrl+S 快捷键处理
+function handleKeyDown(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault()
+    void appShell.executeSave()
+  }
+}
+
 onMounted(() => {
   updateHtmlClass()
   mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
   mediaQuery.addEventListener('change', handleSystemThemeChange)
+  window.addEventListener('keydown', handleKeyDown)
 })
 
 onUnmounted(() => {
   if (mediaQuery) {
     mediaQuery.removeEventListener('change', handleSystemThemeChange)
   }
+  window.removeEventListener('keydown', handleKeyDown)
 })
 
 watch(

@@ -3,6 +3,8 @@ import { ref } from 'vue'
 
 export type AppMode = 'st' | 'agent'
 
+export type SaveHandler = () => Promise<void> | void
+
 export interface ChatBubbleRoleAppearance {
   color: string
   opacity: number
@@ -68,6 +70,10 @@ export const useAppShellStore = defineStore('appShell', () => {
   // Global UI state
   const globalLoading = ref(false)
   const globalMessage = ref<{ type: 'info' | 'success' | 'warning' | 'error'; text: string } | null>(null)
+
+  // Save handlers registry - components register their save handlers here
+  // Only the most recently focused component's handler will be called on Ctrl+S
+  const activeSaveHandler = ref<SaveHandler | null>(null)
 
   // Actions
   function toggleNav() {
@@ -135,6 +141,38 @@ export const useAppShellStore = defineStore('appShell', () => {
     globalMessage.value = null
   }
 
+  /**
+   * Register a save handler. Call this when a component with save functionality
+   * gains focus. Returns an unregister function.
+   */
+  function registerSaveHandler(handler: SaveHandler): () => void {
+    activeSaveHandler.value = handler
+    return () => {
+      if (activeSaveHandler.value === handler) {
+        activeSaveHandler.value = null
+      }
+    }
+  }
+
+  /**
+   * Clear the active save handler. Call this when a component loses focus
+   * or is unmounted.
+   */
+  function clearSaveHandler() {
+    activeSaveHandler.value = null
+  }
+
+  /**
+   * Execute the active save handler (if any). Called by Ctrl+S shortcut.
+   */
+  async function executeSave(): Promise<boolean> {
+    if (activeSaveHandler.value) {
+      await activeSaveHandler.value()
+      return true
+    }
+    return false
+  }
+
   return {
     // State
     currentMode,
@@ -166,6 +204,9 @@ export const useAppShellStore = defineStore('appShell', () => {
     setRecentResources,
     showGlobalMessage,
     clearGlobalMessage,
+    registerSaveHandler,
+    clearSaveHandler,
+    executeSave,
   }
 })
 
