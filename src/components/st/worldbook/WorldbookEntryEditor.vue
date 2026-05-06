@@ -56,10 +56,15 @@ watch(
   () => props.entry,
   (newEntry) => {
     if (newEntry) {
-      // 合并默认值，确保所有数组字段都有初始值
+      // 合并默认值，确保所有数组字段都有初始值（不会被 undefined 覆盖）
+      const defaults = createWorldInfoEntry(newEntry.uid)
       localEntry.value = {
-        ...createWorldInfoEntry(newEntry.uid),
+        ...defaults,
         ...newEntry,
+        // 确保数组字段不为 undefined
+        key: newEntry.key ?? defaults.key,
+        keysecondary: newEntry.keysecondary ?? defaults.keysecondary,
+        triggers: newEntry.triggers ?? defaults.triggers,
       }
       contentMode.value = DEFAULT_BINDINGS.st_worldbook_content.defaultMode
     } else {
