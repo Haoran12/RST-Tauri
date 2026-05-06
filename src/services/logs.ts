@@ -83,9 +83,11 @@ export interface LlmLogDetail {
   provider: string
   model: string
   call_type: string
+  request_url?: string | null
   request_json: unknown
   schema_json?: unknown
   response_json?: unknown
+  reasoning_text?: string | null
   assembled_text?: string | null
   readable_text?: string | null
   status: string

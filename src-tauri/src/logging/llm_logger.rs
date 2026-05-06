@@ -25,9 +25,11 @@ pub struct LlmCallLog {
     pub provider: String,
     pub model: String,
     pub call_type: String,
+    pub request_url: Option<String>,
     pub request_json: serde_json::Value,
     pub schema_json: Option<serde_json::Value>,
     pub response_json: Option<serde_json::Value>,
+    pub reasoning_text: Option<String>,
     pub assembled_text: Option<String>,
     pub readable_text: Option<String>,
     pub status: String,
@@ -61,6 +63,7 @@ struct InProgressCall {
     character_id: Option<String>,
     llm_node: String,
     api_config_id: String,
+    request_url: Option<String>,
     request_json: serde_json::Value,
     provider: String,
     model: String,
@@ -132,6 +135,8 @@ impl LlmCallLogger {
         // Migration: add missing columns if table already exists
         self.migrate_add_column("protected", "INTEGER DEFAULT 0").await?;
         self.migrate_add_column("redaction_applied", "INTEGER DEFAULT 0").await?;
+        self.migrate_add_column("request_url", "TEXT").await?;
+        self.migrate_add_column("reasoning_text", "TEXT").await?;
 
         // Create indexes
         sqlx::query(
@@ -196,6 +201,7 @@ impl LlmCallLogger {
         &self,
         context: &LogContext,
         request: &serde_json::Value,
+        request_url: Option<&str>,
         provider: &str,
         model: &str,
         call_type: &str,
@@ -227,6 +233,7 @@ impl LlmCallLogger {
             character_id: context.character_id.clone(),
             llm_node: llm_node.to_string(),
             api_config_id: context.api_config_id.clone(),
+            request_url: request_url.map(str::to_string),
             request_json,
             provider: provider.to_string(),
             model: model.to_string(),
@@ -302,6 +309,7 @@ impl LlmCallLogger {
         &self,
         request_id: &str,
         response: &serde_json::Value,
+        reasoning_text: Option<&str>,
         token_usage: Option<serde_json::Value>,
     ) {
         let call = self.in_progress.read().await.get(request_id).cloned();
@@ -321,10 +329,10 @@ impl LlmCallLogger {
                 INSERT INTO llm_call_logs (
                     request_id, mode, world_id, session_id, scene_turn_id, trace_id,
                     character_id, llm_node, api_config_id, runtime_config_snapshot_id,
-                    world_rules_snapshot_id, provider, model, call_type, request_json,
-                    schema_json, response_json, assembled_text, readable_text, status,
+                    world_rules_snapshot_id, provider, model, call_type, request_url, request_json,
+                    schema_json, response_json, reasoning_text, assembled_text, readable_text, status,
                     latency_ms, token_usage, retry_count, redaction_applied, created_at, completed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
                 "#,
             )
             .bind(request_id)
@@ -341,9 +349,11 @@ impl LlmCallLogger {
             .bind(&call.provider)
             .bind(&call.model)
             .bind(&call.call_type)
+            .bind(&call.request_url)
             .bind(serde_json::to_string(&call.request_json).unwrap_or_default())
             .bind(call.schema_json.as_ref().map(|s| serde_json::to_string(s).unwrap_or_default()))
             .bind(serde_json::to_string(&response_json).ok())
+            .bind(reasoning_text)
             .bind(&assembled_text)
             .bind(&readable_text)
             .bind("success")
@@ -374,10 +384,10 @@ impl LlmCallLogger {
                 INSERT INTO llm_call_logs (
                     request_id, mode, world_id, session_id, scene_turn_id, trace_id,
                     character_id, llm_node, api_config_id, runtime_config_snapshot_id,
-                    world_rules_snapshot_id, provider, model, call_type, request_json,
+                    world_rules_snapshot_id, provider, model, call_type, request_url, request_json,
                     schema_json, status, latency_ms, error_summary, retry_count,
                     redaction_applied, created_at, completed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
                 "#,
             )
             .bind(request_id)
@@ -394,6 +404,7 @@ impl LlmCallLogger {
             .bind(&call.provider)
             .bind(&call.model)
             .bind(&call.call_type)
+            .bind(&call.request_url)
             .bind(serde_json::to_string(&call.request_json).unwrap_or_default())
             .bind(
                 call.schema_json
@@ -476,6 +487,7 @@ fn row_to_log(row: &sqlx::sqlite::SqliteRow) -> LlmCallLog {
         provider: row.get("provider"),
         model: row.get("model"),
         call_type: row.get("call_type"),
+        request_url: row.get("request_url"),
         request_json: serde_json::from_str(row.get::<&str, _>("request_json"))
             .unwrap_or(serde_json::Value::Null),
         schema_json: row
@@ -484,6 +496,7 @@ fn row_to_log(row: &sqlx::sqlite::SqliteRow) -> LlmCallLog {
         response_json: row
             .get::<Option<&str>, _>("response_json")
             .and_then(|s| serde_json::from_str(s).ok()),
+        reasoning_text: row.get("reasoning_text"),
         assembled_text: row.get("assembled_text"),
         readable_text: row.get("readable_text"),
         status: row.get("status"),

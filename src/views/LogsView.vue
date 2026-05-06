@@ -185,6 +185,16 @@ function formatBytes(bytes?: number | null) {
   return `${size.toFixed(index === 0 ? 0 : 1)} ${units[index]}`
 }
 
+function formatTokenUsage(usage: unknown): string {
+  if (!usage || typeof usage !== 'object') return '-'
+  const u = usage as { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+  const parts: string[] = []
+  if (u.prompt_tokens !== undefined) parts.push(`输入 ${u.prompt_tokens}`)
+  if (u.completion_tokens !== undefined) parts.push(`输出 ${u.completion_tokens}`)
+  if (u.total_tokens !== undefined) parts.push(`总计 ${u.total_tokens}`)
+  return parts.join(' / ') || '-'
+}
+
 function statusType(value?: string | null) {
   if (!value) return 'default'
   if (['success', 'succeeded', 'canon'].includes(value)) return 'success'
@@ -565,6 +575,25 @@ onMounted(refreshAll)
                       <NDescriptionsItem label="Trace">{{ selectedRecord.trace_id || '-' }}</NDescriptionsItem>
                       <NDescriptionsItem label="Request">{{ selectedRecord.request_id || '-' }}</NDescriptionsItem>
                     </NDescriptions>
+                    <div v-if="selectedLlm" class="llm-summary-section">
+                      <NDescriptions :column="2" size="small" bordered>
+                        <NDescriptionsItem label="Provider">{{ selectedLlm.provider }}</NDescriptionsItem>
+                        <NDescriptionsItem label="Model">{{ selectedLlm.model }}</NDescriptionsItem>
+                        <NDescriptionsItem label="请求 URL">{{ selectedLlm.request_url || '-' }}</NDescriptionsItem>
+                        <NDescriptionsItem label="调用类型">{{ selectedLlm.call_type }}</NDescriptionsItem>
+                        <NDescriptionsItem label="状态">
+                          <NTag size="small" :type="statusType(selectedLlm.status)">{{ selectedLlm.status }}</NTag>
+                        </NDescriptionsItem>
+                        <NDescriptionsItem label="延迟">{{ selectedLlm.latency_ms ? `${selectedLlm.latency_ms}ms` : '-' }}</NDescriptionsItem>
+                        <NDescriptionsItem label="Token 用量">
+                          <template v-if="selectedLlm.token_usage">
+                            {{ formatTokenUsage(selectedLlm.token_usage) }}
+                          </template>
+                          <template v-else>-</template>
+                        </NDescriptionsItem>
+                        <NDescriptionsItem label="节点">{{ selectedLlm.llm_node }}</NDescriptionsItem>
+                      </NDescriptions>
+                    </div>
                     <div class="detail-actions">
                       <NButton
                         v-if="selectedKind === 'llm' || selectedKind === 'event'"
@@ -596,18 +625,32 @@ onMounted(refreshAll)
                   </NScrollbar>
                 </NTabPane>
 
-                <NTabPane v-if="selectedLlm" name="request" tab="Request">
+                <NTabPane v-if="selectedLlm" name="request" tab="原始请求">
                   <NScrollbar class="tab-scroll">
                     <pre class="json-block">{{ jsonText(selectedLlm.request_json) }}</pre>
                   </NScrollbar>
                 </NTabPane>
-                <NTabPane v-if="selectedLlm" name="response" tab="Response">
+                <NTabPane v-if="selectedLlm" name="response" tab="原始响应">
                   <NScrollbar class="tab-scroll">
                     <NAlert type="info" class="inline-alert">
                       原始响应可能包含 prompt、角色卡、世界书或 Agent 私有上下文；数据库写入层已执行凭证脱敏。
                     </NAlert>
-                    <pre v-if="selectedLlm.readable_text" class="text-block">{{ selectedLlm.readable_text }}</pre>
                     <pre class="json-block">{{ jsonText(selectedLlm.response_json) }}</pre>
+                  </NScrollbar>
+                </NTabPane>
+                <NTabPane v-if="selectedLlm" name="readable" tab="可读内容">
+                  <NScrollbar class="tab-scroll">
+                    <div v-if="selectedLlm.reasoning_text" class="reasoning-section">
+                      <div class="section-label">推理过程</div>
+                      <pre class="text-block reasoning-block">{{ selectedLlm.reasoning_text }}</pre>
+                    </div>
+                    <div v-if="selectedLlm.readable_text">
+                      <div class="section-label">对话内容</div>
+                      <pre class="text-block">{{ selectedLlm.readable_text }}</pre>
+                    </div>
+                    <div v-else class="empty-area compact">
+                      <NEmpty description="没有可读内容" />
+                    </div>
                   </NScrollbar>
                 </NTabPane>
                 <NTabPane v-if="selectedLlm" name="schema" tab="Schema">
@@ -1014,6 +1057,26 @@ onMounted(refreshAll)
 
 .inline-alert {
   margin-bottom: 10px;
+}
+
+.llm-summary-section {
+  margin-top: 16px;
+}
+
+.section-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--n-text-color-2);
+  margin-bottom: 8px;
+}
+
+.reasoning-section {
+  margin-bottom: 16px;
+}
+
+.reasoning-block {
+  background: rgba(255, 193, 7, 0.1);
+  border-color: rgba(255, 193, 7, 0.3);
 }
 
 .json-block,

@@ -66,6 +66,32 @@ fn get_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app_data_root(app)
 }
 
+/// Build request URL for logging based on provider type
+fn build_request_url(api_config: &ApiConfig) -> Option<String> {
+    let base_url = api_config.base_url.clone().unwrap_or_else(|| {
+        match api_config.provider.as_str() {
+            "openai_chat" | "openai_responses" => "https://api.openai.com/v1".to_string(),
+            "anthropic" => "https://api.anthropic.com/v1".to_string(),
+            "gemini" => "https://generativelanguage.googleapis.com/v1beta".to_string(),
+            "deepseek" => "https://api.deepseek.com".to_string(),
+            "claude_code" => "http://localhost:8080".to_string(),
+            _ => return None,
+        }
+    });
+
+    let endpoint = match api_config.provider.as_str() {
+        "openai_chat" => "/chat/completions",
+        "openai_responses" => "/responses",
+        "anthropic" => "/messages",
+        "gemini" => &format!(":{}", api_config.model),
+        "deepseek" => "/chat/completions",
+        "claude_code" => "/v1/chat",
+        _ => return Some(base_url),
+    };
+
+    Some(format!("{}{}", base_url, endpoint))
+}
+
 // ============================================================================
 // 全局应用状态命令
 // ============================================================================
@@ -708,6 +734,9 @@ pub async fn send_assembled_st_chat_message(
     )
     .await?;
 
+    // Build request URL for logging
+    let request_url = build_request_url(&api_config);
+
     let log_context = LogContext {
         mode: LogMode::St,
         world_id: None,
@@ -728,6 +757,7 @@ pub async fn send_assembled_st_chat_message(
             .log_start(
                 &log_context,
                 &request_json,
+                request_url.as_deref(),
                 &api_config.provider,
                 &api_config.model,
                 "chat",
@@ -744,6 +774,7 @@ pub async fn send_assembled_st_chat_message(
                     .log_success(
                         &request_id,
                         &serde_json::json!({"content": &resp.content}),
+                        resp.reasoning.as_deref(),
                         resp.token_usage.as_ref().map(|u| {
                             serde_json::json!({
                                 "prompt_tokens": u.prompt_tokens,
