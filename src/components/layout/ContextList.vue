@@ -181,8 +181,8 @@ const contextItems = computed<ContextItem[]>(() => {
       return charactersStore.characters.map((item) => ({
         id: item.id,
         name: item.character.data.name || '未命名角色',
-        type: '角色卡',
-        meta: item.character.data.creator_notes || item.character.data.description || undefined,
+        type: '',
+        meta: undefined,
         active: route.query.character === item.id,
         action: () => router.replace({
           name: 'resources-characters',
