@@ -596,49 +596,49 @@ async function onDrop(event: DragEvent, targetItem: PromptItem) {
   const preset = presetsStore.currentPreset
   if (!preset?.prompts) return
 
-  const prompts = preset.prompts
-  const draggedIndex = prompts.findIndex(p => p.identifier === draggedItem.value!.identifier)
-  const targetIndex = prompts.findIndex(p => p.identifier === targetItem.identifier)
-
-  if (draggedIndex === -1 || targetIndex === -1) return
-
   // 确保 prompt_order 存在
   if (!preset.prompt_order || preset.prompt_order.length === 0) {
     preset.prompt_order = [{ character_id: 100000, order: [] }]
   }
 
-  const order = preset.prompt_order[0].order ?? []
-  preset.prompt_order[0].order = order
+  // 获取当前 order 数组
+  const currentOrder = preset.prompt_order[0].order ?? []
 
-  // 获取 dragged 和 target 在 order 中的索引
-  const draggedOrderIndex = order.findIndex(o => o.identifier === draggedItem.value!.identifier)
-  const targetOrderIndex = order.findIndex(o => o.identifier === targetItem.identifier)
+  // 创建新的 order 数组（确保响应式更新）
+  const newOrder = [...currentOrder]
 
-  // 如果两个都在 order 中，直接重新排序 order 数组
+  // 获取 dragged 和 target 在 newOrder 中的索引
+  const draggedOrderIndex = newOrder.findIndex(o => o.identifier === draggedItem.value!.identifier)
+  const targetOrderIndex = newOrder.findIndex(o => o.identifier === targetItem.identifier)
+
+  // 如果两个都在 order 中，直接重新排序
   if (draggedOrderIndex >= 0 && targetOrderIndex >= 0) {
-    const [removed] = order.splice(draggedOrderIndex, 1)
-    order.splice(targetOrderIndex, 0, removed)
+    const [removed] = newOrder.splice(draggedOrderIndex, 1)
+    newOrder.splice(targetOrderIndex, 0, removed)
   } else {
     // 如果其中一个不在 order 中，需要添加到 order 中
     // 先确保所有 prompts 都在 order 中
-    prompts.forEach((p) => {
-      if (!order.some(o => o.identifier === p.identifier)) {
-        order.push({ identifier: p.identifier, enabled: true })
+    preset.prompts.forEach((p) => {
+      if (!newOrder.some(o => o.identifier === p.identifier)) {
+        newOrder.push({ identifier: p.identifier, enabled: true })
       }
     })
     // 然后重新排序
-    const newDraggedIndex = order.findIndex(o => o.identifier === draggedItem.value!.identifier)
-    const newTargetIndex = order.findIndex(o => o.identifier === targetItem.identifier)
+    const newDraggedIndex = newOrder.findIndex(o => o.identifier === draggedItem.value!.identifier)
+    const newTargetIndex = newOrder.findIndex(o => o.identifier === targetItem.identifier)
     if (newDraggedIndex >= 0 && newTargetIndex >= 0) {
-      const [removed] = order.splice(newDraggedIndex, 1)
-      order.splice(newTargetIndex, 0, removed)
+      const [removed] = newOrder.splice(newDraggedIndex, 1)
+      newOrder.splice(newTargetIndex, 0, removed)
     }
   }
 
   // 清除所有 position 字段，使用数组顺序
-  order.forEach(item => {
+  newOrder.forEach(item => {
     delete item.position
   })
+
+  // 更新 preset.prompt_order（触发响应式更新）
+  preset.prompt_order = [{ character_id: 100000, order: newOrder }]
 
   await presetsStore.savePreset(preset)
 
