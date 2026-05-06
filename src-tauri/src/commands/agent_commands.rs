@@ -162,6 +162,80 @@ pub async fn list_agent_session_turns(
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateAgentSessionTurnInput {
+    pub world_id: String,
+    pub session_id: String,
+    pub session_turn_id: String,
+    pub content: String,
+}
+
+/// 修改会话可见消息文本；不回写已经提交的 WorldTurn / Trace。
+#[tauri::command]
+pub async fn update_agent_session_turn(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    input: UpdateAgentSessionTurnInput,
+) -> Result<SessionTurn, String> {
+    let store = get_agent_store(&app, state.inner(), &input.world_id).await?;
+    let session = store
+        .get_session(&input.session_id)
+        .await?
+        .ok_or_else(|| "Session not found".to_string())?;
+    if session.world_id != input.world_id {
+        return Err("Session does not belong to requested world".to_string());
+    }
+
+    let existing = store
+        .get_session_turn(&input.session_id, &input.session_turn_id)
+        .await?
+        .ok_or_else(|| "Session turn not found".to_string())?;
+
+    let mut message_json = existing.message_json;
+    match &mut message_json {
+        serde_json::Value::Object(map) => {
+            map.insert("content".to_string(), serde_json::Value::String(input.content));
+        }
+        serde_json::Value::String(value) => {
+            *value = input.content;
+        }
+        _ => {
+            message_json = serde_json::json!({ "content": input.content });
+        }
+    }
+
+    store
+        .update_session_turn_message(&input.session_id, &input.session_turn_id, message_json)
+        .await
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteAgentSessionTurnInput {
+    pub world_id: String,
+    pub session_id: String,
+    pub session_turn_id: String,
+}
+
+/// 删除会话可见消息；不删除已经提交的 WorldTurn / Trace。
+#[tauri::command]
+pub async fn delete_agent_session_turn(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    input: DeleteAgentSessionTurnInput,
+) -> Result<(), String> {
+    let store = get_agent_store(&app, state.inner(), &input.world_id).await?;
+    let session = store
+        .get_session(&input.session_id)
+        .await?
+        .ok_or_else(|| "Session not found".to_string())?;
+    if session.world_id != input.world_id {
+        return Err("Session does not belong to requested world".to_string());
+    }
+    store
+        .delete_session_turn(&input.session_id, &input.session_turn_id)
+        .await
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessAgentTurnInput {
     pub world_id: String,
     pub session_id: String,

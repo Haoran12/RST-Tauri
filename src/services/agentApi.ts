@@ -50,6 +50,29 @@ export async function listAgentSessionTurns(
   return await invoke<SessionTurn[]>('list_agent_session_turns', { worldId, sessionId })
 }
 
+export interface UpdateAgentSessionTurnInput {
+  world_id: string
+  session_id: string
+  session_turn_id: string
+  content: string
+}
+
+export async function updateAgentSessionTurn(
+  input: UpdateAgentSessionTurnInput
+): Promise<SessionTurn> {
+  return await invoke<SessionTurn>('update_agent_session_turn', { input })
+}
+
+export interface DeleteAgentSessionTurnInput {
+  world_id: string
+  session_id: string
+  session_turn_id: string
+}
+
+export async function deleteAgentSessionTurn(input: DeleteAgentSessionTurnInput): Promise<void> {
+  return await invoke<void>('delete_agent_session_turn', { input })
+}
+
 export interface AgentTurnResult {
   scene_turn_id: string
   narrative_text: string

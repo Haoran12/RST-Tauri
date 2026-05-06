@@ -8,23 +8,29 @@ import {
   NIcon,
   NInput,
   NInputGroup,
+  NModal,
   NScrollbar,
   NSpin,
   NTag,
   NText,
+  useDialog,
   useMessage,
 } from 'naive-ui'
 import { ArrowBackOutline, SendOutline } from '@vicons/ionicons5'
+import ChatMessageItem from '@/components/shared/ChatMessageItem.vue'
 import type { AgentSession, SessionTurn } from '@/types/agent/session'
 import {
+  deleteAgentSessionTurn,
   getAgentSession,
   listAgentSessionTurns,
   processAgentTurn,
+  updateAgentSessionTurn,
 } from '@/services/agentApi'
 
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
+const dialog = useDialog()
 
 const worldId = computed(() => String(route.params.worldId || 'default'))
 const sessionId = computed(() => String(route.params.sessionId || ''))
@@ -36,6 +42,8 @@ const isLoading = ref(false)
 const isSending = ref(false)
 const error = ref<string | null>(null)
 const messagesContainer = ref<HTMLElement | null>(null)
+const editingTurnId = ref<string | null>(null)
+const editingContent = ref('')
 
 const canSend = computed(() => inputText.value.trim().length > 0 && !isSending.value && !!session.value)
 
@@ -107,8 +115,63 @@ function roleLabel(turn: SessionTurn) {
   return '系统'
 }
 
-function formatTime(dateStr: string) {
-  return new Date(dateStr).toLocaleTimeString()
+function turnRole(turn: SessionTurn): 'user' | 'assistant' | 'system' {
+  if (turn.role === 'User') return 'user'
+  if (turn.role === 'Assistant') return 'assistant'
+  return 'system'
+}
+
+async function copyTurn(content: string) {
+  try {
+    await navigator.clipboard.writeText(content)
+    message.success('已复制')
+  } catch (e) {
+    message.error(`复制失败: ${e}`)
+  }
+}
+
+function startEditTurn(turn: SessionTurn) {
+  editingTurnId.value = turn.session_turn_id
+  editingContent.value = turnText(turn)
+}
+
+async function saveEditedTurn() {
+  if (!editingTurnId.value) return
+  try {
+    const updated = await updateAgentSessionTurn({
+      world_id: worldId.value,
+      session_id: sessionId.value,
+      session_turn_id: editingTurnId.value,
+      content: editingContent.value,
+    })
+    const index = turns.value.findIndex(turn => turn.session_turn_id === updated.session_turn_id)
+    if (index !== -1) turns.value[index] = updated
+    editingTurnId.value = null
+    editingContent.value = ''
+  } catch (e) {
+    message.error(String(e))
+  }
+}
+
+function confirmDeleteTurn(turn: SessionTurn) {
+  dialog.warning({
+    title: '删除消息',
+    content: '确定删除这条 Agent 会话消息？这只删除会话可见记录，不回滚已经提交的世界状态。',
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await deleteAgentSessionTurn({
+          world_id: worldId.value,
+          session_id: sessionId.value,
+          session_turn_id: turn.session_turn_id,
+        })
+        turns.value = turns.value.filter(item => item.session_turn_id !== turn.session_turn_id)
+      } catch (e) {
+        message.error(String(e))
+      }
+    },
+  })
 }
 
 function scrollToBottom() {
@@ -162,18 +225,18 @@ onMounted(loadSession)
               <NEmpty description="还没有回合记录" />
             </div>
             <div v-else class="messages-list">
-              <div
-                v-for="turn in turns"
+              <ChatMessageItem
+                v-for="(turn, index) in turns"
                 :key="turn.session_turn_id"
-                :class="['message-row', turn.role.toLowerCase()]"
-              >
-                <div class="message-meta">
-                  <strong>{{ roleLabel(turn) }}</strong>
-                  <span>{{ formatTime(turn.created_at) }}</span>
-                  <NTag size="small" :bordered="false">{{ turn.canon_status }}</NTag>
-                </div>
-                <div class="message-text">{{ turnText(turn) }}</div>
-              </div>
+                :role="turnRole(turn)"
+                :name="roleLabel(turn)"
+                :content="turnText(turn)"
+                :created-at="turn.created_at"
+                :floor="index + 1"
+                @copy="copyTurn(turnText(turn))"
+                @edit="startEditTurn(turn)"
+                @delete="confirmDeleteTurn(turn)"
+              />
             </div>
           </NScrollbar>
         </div>
@@ -197,6 +260,25 @@ onMounted(loadSession)
         </div>
       </template>
     </NSpin>
+
+    <NModal
+      :show="editingTurnId !== null"
+      preset="card"
+      title="修改消息"
+      class="message-edit-modal"
+      @update:show="value => { if (!value) editingTurnId = null }"
+    >
+      <NInput
+        v-model:value="editingContent"
+        type="textarea"
+        :autosize="{ minRows: 8, maxRows: 16 }"
+        placeholder="消息内容"
+      />
+      <div class="modal-actions">
+        <NButton @click="editingTurnId = null">取消</NButton>
+        <NButton type="primary" @click="saveEditedTurn">保存</NButton>
+      </div>
+    </NModal>
   </div>
 </template>
 
@@ -267,41 +349,8 @@ onMounted(loadSession)
 
 .messages-list {
   padding: 18px;
-}
-
-.message-row {
-  max-width: min(760px, 88%);
-  margin-bottom: 16px;
-}
-
-.message-row.user {
-  margin-left: auto;
-}
-
-.message-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-  color: var(--n-text-color-3);
-  font-size: 12px;
-}
-
-.message-row.user .message-meta {
-  justify-content: flex-end;
-}
-
-.message-text {
-  white-space: pre-wrap;
-  word-break: break-word;
-  padding: 10px 12px;
-  border: 1px solid var(--n-border-color);
-  border-radius: 8px;
-  background: var(--n-color);
-}
-
-.message-row.user .message-text {
-  background: color-mix(in srgb, var(--n-primary-color) 14%, var(--n-color));
+  max-width: 900px;
+  margin: 0 auto;
 }
 
 .input-area {
@@ -316,5 +365,16 @@ onMounted(loadSession)
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.message-edit-modal {
+  width: min(720px, calc(100vw - 32px));
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
 }
 </style>

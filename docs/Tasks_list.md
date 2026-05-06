@@ -256,6 +256,7 @@
 
 | 日期 | 更新内容 |
 |------|----------|
+| 2026-05-06 | 改造 ST / Agent 通用聊天消息展示：新增共享气泡组件，恢复 User/Assistant/System 全角色逐条渲染；支持安全 Markdown 子集、楼层/日期/时间/估算 token 元数据、单条删除/修改/复制；新增气泡颜色透明度与 Markdown 段落/标题/斜体/粗体/双引号内容字体样式配置 |
 | 2026-05-06 | 修复 ST 发送时报 `LLM API contracts snapshot not initialized`：contracts 改为运行时文件 + 编译期内嵌兜底，发送前可惰性补齐快照；同时发送失败只移除助手占位消息，保留并持久化用户本地消息 |
 | 2026-05-06 | 修复 ST 会话实际发送失败：恢复内置预设条目后端构建、修复预设侧栏 TypeScript 阻断，OpenAI-compatible 文本请求改回字符串 `content` 以兼容 DeepSeek，并补齐会话/角色世界书稳定 ID 传递与发送错误提示 |
 | 2026-05-06 | 实现内置预设提示词条目：参考 SillyTavern 设计，定义 6 个内置条目（`builtin:system_prompt`/`character_description`/`character_personality`/`scenario`/`world_info`/`chat_history`），后端加载时自动合并，前端显示内置标签和描述，内置条目不可删除，支持禁用开关和排序位置 |

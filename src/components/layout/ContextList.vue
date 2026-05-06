@@ -426,7 +426,8 @@ async function deletePromptItem(identifier: string) {
   if (!presetsStore.currentPreset?.prompts) return
   const preset = presetsStore.currentPreset
   // Remove from prompts array
-  preset.prompts = preset.prompts.filter((p) => p.identifier !== identifier)
+  const prompts = (preset.prompts ?? []).filter((p) => p.identifier !== identifier)
+  preset.prompts = prompts
   // Remove from order array
   if (preset.prompt_order?.[0]?.order) {
     preset.prompt_order[0].order = preset.prompt_order[0].order.filter(
@@ -434,7 +435,7 @@ async function deletePromptItem(identifier: string) {
     )
   }
   if (presetsStore.currentPromptIdentifier === identifier) {
-    presetsStore.selectPromptItem(preset.prompts?.[0]?.identifier ?? null)
+    presetsStore.selectPromptItem(prompts[0]?.identifier ?? null)
   }
   await presetsStore.savePreset(preset)
 }

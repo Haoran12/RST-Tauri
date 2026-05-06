@@ -210,6 +210,8 @@ pub fn run() {
             commands::list_agent_sessions,
             commands::get_agent_session,
             commands::list_agent_session_turns,
+            commands::update_agent_session_turn,
+            commands::delete_agent_session_turn,
             commands::process_agent_turn,
             commands::update_session_player_mode,
             commands::get_world_mainline_cursor,

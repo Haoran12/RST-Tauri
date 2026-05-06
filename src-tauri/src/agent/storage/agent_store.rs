@@ -496,6 +496,188 @@ impl AgentStore {
             )
             .collect()
     }
+
+    /// Get one chat-visible turn by ID.
+    pub async fn get_session_turn(
+        &self,
+        session_id: &str,
+        session_turn_id: &str,
+    ) -> Result<Option<SessionTurn>, String> {
+        let row = sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                Option<String>,
+                i64,
+                String,
+                String,
+                String,
+                String,
+            ),
+        >(
+            r#"
+            SELECT session_turn_id, session_id, scene_turn_id, local_index,
+                   role, message_json, canon_status, created_at
+            FROM session_turns
+            WHERE session_id = ? AND session_turn_id = ?
+            "#,
+        )
+        .bind(session_id)
+        .bind(session_turn_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to get session turn: {}", e))?;
+
+        row.map(session_turn_from_row).transpose()
+    }
+
+    /// Update only the chat-visible message payload for a turn.
+    pub async fn update_session_turn_message(
+        &self,
+        session_id: &str,
+        session_turn_id: &str,
+        message_json: serde_json::Value,
+    ) -> Result<SessionTurn, String> {
+        let message_json = serde_json::to_string(&message_json)
+            .map_err(|e| format!("Failed to serialize session turn message: {}", e))?;
+
+        let result = sqlx::query(
+            r#"
+            UPDATE session_turns
+            SET message_json = ?
+            WHERE session_id = ? AND session_turn_id = ?
+            "#,
+        )
+        .bind(message_json)
+        .bind(session_id)
+        .bind(session_turn_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to update session turn: {}", e))?;
+
+        if result.rows_affected() == 0 {
+            return Err("Session turn not found".to_string());
+        }
+
+        sqlx::query("UPDATE agent_sessions SET updated_at = ? WHERE session_id = ?")
+            .bind(Utc::now().to_rfc3339())
+            .bind(session_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to update session timestamp: {}", e))?;
+
+        self.get_session_turn(session_id, session_turn_id)
+            .await?
+            .ok_or_else(|| "Session turn not found after update".to_string())
+    }
+
+    /// Delete one chat-visible turn and compact local floor indexes.
+    pub async fn delete_session_turn(
+        &self,
+        session_id: &str,
+        session_turn_id: &str,
+    ) -> Result<(), String> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| format!("Failed to begin session turn delete: {}", e))?;
+
+        let result = sqlx::query(
+            r#"
+            DELETE FROM session_turns
+            WHERE session_id = ? AND session_turn_id = ?
+            "#,
+        )
+        .bind(session_id)
+        .bind(session_turn_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("Failed to delete session turn: {}", e))?;
+
+        if result.rows_affected() == 0 {
+            return Err("Session turn not found".to_string());
+        }
+
+        let remaining: Vec<String> = sqlx::query_scalar(
+            r#"
+            SELECT session_turn_id
+            FROM session_turns
+            WHERE session_id = ?
+            ORDER BY local_index ASC
+            "#,
+        )
+        .bind(session_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|e| format!("Failed to list remaining session turns: {}", e))?;
+
+        for (index, turn_id) in remaining.iter().enumerate() {
+            sqlx::query(
+                r#"
+                UPDATE session_turns
+                SET local_index = ?
+                WHERE session_turn_id = ?
+                "#,
+            )
+            .bind(index as i64)
+            .bind(turn_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("Failed to compact session turn indexes: {}", e))?;
+        }
+
+        sqlx::query("UPDATE agent_sessions SET updated_at = ? WHERE session_id = ?")
+            .bind(Utc::now().to_rfc3339())
+            .bind(session_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("Failed to update session timestamp: {}", e))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| format!("Failed to commit session turn delete: {}", e))?;
+
+        Ok(())
+    }
+}
+
+fn session_turn_from_row(
+    (
+        session_turn_id,
+        session_id,
+        scene_turn_id,
+        local_index,
+        role,
+        message_json,
+        canon_status,
+        created_at,
+    ): (
+        String,
+        String,
+        Option<String>,
+        i64,
+        String,
+        String,
+        String,
+        String,
+    ),
+) -> Result<SessionTurn, String> {
+    Ok(SessionTurn {
+        session_turn_id,
+        session_id,
+        scene_turn_id,
+        local_index: u32::try_from(local_index)
+            .map_err(|e| format!("Invalid local_index: {}", e))?,
+        role: str_to_turn_role(&role)?,
+        message_json: serde_json::from_str(&message_json)
+            .map_err(|e| format!("Failed to parse session turn message: {}", e))?,
+        canon_status: str_to_session_turn_status(&canon_status)?,
+        created_at: created_at
+            .parse()
+            .map_err(|e| format!("Failed to parse session turn created_at: {}", e))?,
+    })
 }
 
 // ===== CharacterRecord operations =====

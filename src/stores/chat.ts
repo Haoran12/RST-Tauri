@@ -276,6 +276,23 @@ export const useChatStore = defineStore('chat', () => {
     await saveCurrentSession()
   }
 
+  async function updateMessageContent(messageId: string, content: string) {
+    if (!currentSession.value) return
+
+    const target = messages.value.find(msg => msg.id === messageId)
+    if (!target) return
+
+    target.content = content
+    await saveCurrentSession()
+  }
+
+  async function deleteMessage(messageId: string) {
+    if (!currentSession.value) return
+
+    messages.value = messages.value.filter(msg => msg.id !== messageId)
+    await saveCurrentSession()
+  }
+
   // Delete session
   async function deleteSession(id: string) {
     try {
@@ -355,6 +372,8 @@ export const useChatStore = defineStore('chat', () => {
     sendMessageStream,
     stopGeneration,
     clearMessages,
+    updateMessageContent,
+    deleteMessage,
     deleteSession,
     saveCurrentSession,
     setWorldbookDisabled,

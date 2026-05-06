@@ -6,10 +6,11 @@ import {
   NEmpty,
   NIcon,
   NInput,
+  NModal,
   NScrollbar,
   NSpin,
   NText,
-  NAvatar,
+  useDialog,
   useMessage,
 } from 'naive-ui'
 import {
@@ -18,19 +19,19 @@ import {
   SendOutline,
   StopOutline,
   TrashOutline,
-  PersonOutline,
-  SparklesOutline,
 } from '@vicons/ionicons5'
+import ChatMessageItem from '@/components/shared/ChatMessageItem.vue'
 import { useChatStore } from '@/stores/chat'
 import { useSettingsStore } from '@/stores/settings'
 import { useRuntimeStore } from '@/stores/runtime'
 import { useWorldbooksStore } from '@/stores/worldbooks'
-import type { CharacterCard, ChatAttachmentRef } from '@/types/st'
+import type { CharacterCard, ChatAttachmentRef, ChatMessage } from '@/types/st'
 import { getChatAttachmentBlob } from '@/services/storage'
 
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
+const dialog = useDialog()
 
 const chatStore = useChatStore()
 const settingsStore = useSettingsStore()
@@ -42,6 +43,8 @@ const messagesContainer = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const isInitialLoading = ref(false)
 const previewUrls = ref<Record<string, string>>({})
+const editingMessageId = ref<string | null>(null)
+const editingContent = ref('')
 
 const hasActiveApiConfig = computed(() => settingsStore.activeApiConfig !== null)
 const canSend = computed(() => {
@@ -94,22 +97,58 @@ async function onFileChange(e: Event) {
   }
 }
 
-function formatTime(dateStr: string) {
-  return new Date(dateStr).toLocaleTimeString()
-}
-
-const characterAvatar = computed(() => {
-  const avatarPath = chatStore.currentCharacter?.data.avatar
-  if (avatarPath) {
-    // 返回相对路径或base64，这里需要根据实际存储方式处理
-    return null // 暂时返回null，后续可以加载头像
-  }
-  return null
-})
-
 const characterName = computed(() => {
   return chatStore.currentCharacter?.data.name ?? 'AI'
 })
+
+const shouldShowGenerating = computed(() => {
+  return chatStore.isGenerating && chatStore.messages[chatStore.messages.length - 1]?.role !== 'assistant'
+})
+
+function messageRole(msg: ChatMessage): 'user' | 'assistant' | 'system' {
+  if (msg.role === 'user') return 'user'
+  if (msg.role === 'assistant') return 'assistant'
+  return 'system'
+}
+
+function messageName(msg: ChatMessage) {
+  if (msg.role === 'user') return '你'
+  if (msg.role === 'assistant') return characterName.value
+  return '系统'
+}
+
+async function copyMessage(content: string) {
+  try {
+    await navigator.clipboard.writeText(content)
+    message.success('已复制')
+  } catch (err) {
+    message.error(`复制失败: ${err}`)
+  }
+}
+
+function startEditMessage(msg: ChatMessage) {
+  editingMessageId.value = msg.id
+  editingContent.value = msg.content
+}
+
+async function saveEditedMessage() {
+  if (!editingMessageId.value) return
+  await chatStore.updateMessageContent(editingMessageId.value, editingContent.value)
+  editingMessageId.value = null
+  editingContent.value = ''
+}
+
+function confirmDeleteMessage(msg: ChatMessage) {
+  dialog.warning({
+    title: '删除消息',
+    content: '确定删除这条消息？此操作会立即保存到当前 ST 会话。',
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      await chatStore.deleteMessage(msg.id)
+    },
+  })
+}
 
 function getPreviewUrl(attachment: ChatAttachmentRef): string | null {
   return previewUrls.value[attachment.attachment_id] ?? null
@@ -275,58 +314,44 @@ onBeforeUnmount(() => {
               <NText depth="3">开始对话吧</NText>
             </div>
             <div v-else class="message-list">
-              <div v-for="msg in chatStore.messages" :key="msg.id" :class="['msg', msg.role]">
-                <!-- Avatar -->
-                <div class="msg-avatar">
-                  <template v-if="msg.role === 'user'">
-                    <NAvatar round size="small" color="var(--n-primary-color)">
-                      <NIcon :component="PersonOutline" />
-                    </NAvatar>
-                  </template>
-                  <template v-else>
-                    <NAvatar v-if="characterAvatar" round size="small" :src="characterAvatar" />
-                    <NAvatar v-else round size="small" color="var(--n-success-color)">
-                      <NIcon :component="SparklesOutline" />
-                    </NAvatar>
-                  </template>
-                </div>
-                <!-- Content -->
-                <div class="msg-body">
-                  <div class="msg-header">
-                    <span class="msg-name">{{ msg.role === 'user' ? '你' : characterName }}</span>
-                    <span class="msg-time">{{ formatTime(msg.created_at) }}</span>
+              <ChatMessageItem
+                v-for="(msg, index) in chatStore.messages"
+                :key="msg.id"
+                :role="messageRole(msg)"
+                :name="messageName(msg)"
+                :content="msg.content"
+                :created-at="msg.created_at"
+                :floor="index + 1"
+                @copy="copyMessage(msg.content)"
+                @edit="startEditMessage(msg)"
+                @delete="confirmDeleteMessage(msg)"
+              >
+                <template v-if="msg.attachments?.length" #attachments>
+                  <div class="msg-attachments">
+                    <img
+                      v-for="att in msg.attachments"
+                      :key="att.attachment_id"
+                      :src="getPreviewUrl(att) ?? ''"
+                      class="att-thumb"
+                    >
                   </div>
-                  <div class="msg-content">
-                    <div class="msg-text">{{ msg.content }}</div>
-                    <div v-if="msg.attachments?.length" class="msg-attachments">
-                      <img
-                        v-for="att in msg.attachments"
-                        :key="att.attachment_id"
-                        :src="getPreviewUrl(att) ?? ''"
-                        class="att-thumb"
-                      >
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div v-if="chatStore.isGenerating" class="msg assistant">
-                <div class="msg-avatar">
-                  <NAvatar v-if="characterAvatar" round size="small" :src="characterAvatar" />
-                  <NAvatar v-else round size="small" color="var(--n-success-color)">
-                    <NIcon :component="SparklesOutline" />
-                  </NAvatar>
-                </div>
-                <div class="msg-body">
-                  <div class="msg-header">
-                    <span class="msg-name">{{ characterName }}</span>
-                    <span class="msg-time">生成中...</span>
-                  </div>
-                  <div class="msg-content">
-                    <NSpin v-if="!chatStore.streamingContent" size="small" />
-                    <div v-else class="msg-text">{{ chatStore.streamingContent }}</div>
-                  </div>
-                </div>
-              </div>
+                </template>
+              </ChatMessageItem>
+              <ChatMessageItem
+                v-if="shouldShowGenerating"
+                role="assistant"
+                :name="characterName"
+                :content="chatStore.streamingContent || '...'"
+                :floor="chatStore.messages.length + 1"
+                pending
+                :editable="false"
+                :deletable="false"
+                @copy="copyMessage(chatStore.streamingContent)"
+              >
+                <template v-if="!chatStore.streamingContent" #attachments>
+                  <NSpin size="small" />
+                </template>
+              </ChatMessageItem>
             </div>
           </NScrollbar>
         </div>
@@ -367,6 +392,25 @@ onBeforeUnmount(() => {
         </footer>
       </template>
     </main>
+
+    <NModal
+      :show="editingMessageId !== null"
+      preset="card"
+      title="修改消息"
+      class="message-edit-modal"
+      @update:show="value => { if (!value) editingMessageId = null }"
+    >
+      <NInput
+        v-model:value="editingContent"
+        type="textarea"
+        :autosize="{ minRows: 8, maxRows: 16 }"
+        placeholder="消息内容"
+      />
+      <div class="modal-actions">
+        <NButton @click="editingMessageId = null">取消</NButton>
+        <NButton type="primary" @click="saveEditedMessage">保存</NButton>
+      </div>
+    </NModal>
   </div>
 </template>
 
@@ -465,81 +509,6 @@ onBeforeUnmount(() => {
   margin: 0 auto;
 }
 
-.msg {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
-.msg.user {
-  flex-direction: row-reverse;
-}
-
-.msg-avatar {
-  flex-shrink: 0;
-  margin-top: 4px;
-}
-
-.msg-body {
-  flex: 1;
-  min-width: 0;
-  max-width: 75%;
-}
-
-.msg.user .msg-body {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-}
-
-.msg-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
-.msg.user .msg-header {
-  flex-direction: row-reverse;
-}
-
-.msg-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--n-text-color);
-}
-
-.msg-time {
-  font-size: 11px;
-  color: var(--n-text-color-3);
-}
-
-.msg-content {
-  display: inline-block;
-}
-
-.msg-text {
-  padding: 12px 16px;
-  border-radius: 16px;
-  background: var(--n-color);
-  border: 1px solid var(--n-border-color);
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.6;
-  font-size: 14px;
-}
-
-.msg.user .msg-text {
-  background: var(--n-primary-color);
-  color: white;
-  border-color: transparent;
-  border-bottom-right-radius: 4px;
-}
-
-.msg.assistant .msg-text {
-  border-bottom-left-radius: 4px;
-}
-
 .msg-attachments {
   margin-top: 8px;
   display: flex;
@@ -614,5 +583,16 @@ onBeforeUnmount(() => {
 
 .input-row .n-input {
   flex: 1;
+}
+
+.message-edit-modal {
+  width: min(720px, calc(100vw - 32px));
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
 }
 </style>
