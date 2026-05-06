@@ -717,19 +717,25 @@ onMounted(refreshAll)
 }
 
 /* filter-panel NScrollbar 高度 - NScrollbar 默认 height:100%，需要父级有明确高度 */
-.filter-panel > :deep(*) {
+.filter-panel > :deep(.n-scrollbar) {
   flex: 1;
   min-height: 0;
+}
+
+.filter-panel :deep(.n-scrollbar-container) {
+  height: 100%;
 }
 
 /* record-list 高度链 */
 .record-list-spin {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .record-list-spin :deep(.n-spin-container) {
-  height: 100%;
+  flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -738,21 +744,29 @@ onMounted(refreshAll)
 .record-list-spin :deep(.n-spin-content) {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .record-list-scroll {
-  height: 100%;
+  flex: 1;
   min-height: 0;
+}
+
+.record-list-scroll :deep(.n-scrollbar-container) {
+  height: 100%;
 }
 
 /* detail-panel 高度链 */
 .detail-spin {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .detail-spin :deep(.n-spin-container) {
-  height: 100%;
+  flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -761,6 +775,8 @@ onMounted(refreshAll)
 .detail-spin :deep(.n-spin-content) {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .record-list-content {
@@ -842,7 +858,7 @@ onMounted(refreshAll)
 }
 
 .detail-content {
-  height: 100%;
+  flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;

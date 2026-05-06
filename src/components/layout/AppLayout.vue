@@ -108,7 +108,7 @@ const mainContentStyle = {
       <!-- Main Content -->
       <NLayoutContent
         class="main-content"
-        :native-scrollbar="true"
+        :native-scrollbar="false"
         :content-style="mainContentStyle"
       >
         <div class="route-host">
@@ -184,7 +184,6 @@ const mainContentStyle = {
 .main-content :deep(.n-layout-scroll-container) {
   height: 100%;
   width: 100%;
-  flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
