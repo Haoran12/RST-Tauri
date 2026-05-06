@@ -1,14 +1,23 @@
 <script setup lang="ts">
 import { NLayout, NLayoutSider, NLayoutContent } from 'naive-ui'
-import { computed } from 'vue'
+import { computed, defineAsyncComponent } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppShellStore } from '@/stores/appShell'
 import AppNav from './AppNav.vue'
-import ContextList from './ContextList.vue'
-import InspectPanel from './InspectPanel.vue'
+import PanelLoading from './PanelLoading.vue'
 
 const route = useRoute()
 const appShell = useAppShellStore()
+const ContextList = defineAsyncComponent({
+  loader: () => import('./ContextList.vue'),
+  loadingComponent: PanelLoading,
+  delay: 80,
+})
+const InspectPanel = defineAsyncComponent({
+  loader: () => import('./InspectPanel.vue'),
+  loadingComponent: PanelLoading,
+  delay: 80,
+})
 
 const showContextList = computed(() => {
   // Pages that show context list
@@ -76,7 +85,21 @@ const mainContentStyle = {
         :native-scrollbar="true"
         :content-style="mainContentStyle"
       >
-        <router-view />
+        <router-view v-slot="{ Component }">
+          <Suspense>
+            <component :is="Component" />
+            <template #fallback>
+              <div class="route-loading">
+                <div class="route-loading-header" />
+                <div class="route-loading-grid">
+                  <div class="route-loading-card route-loading-card-wide" />
+                  <div class="route-loading-card" />
+                  <div class="route-loading-card" />
+                </div>
+              </div>
+            </template>
+          </Suspense>
+        </router-view>
       </NLayoutContent>
 
       <!-- Inspect Panel -->
@@ -128,6 +151,54 @@ const mainContentStyle = {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+}
+
+.route-loading {
+  height: 100%;
+  min-height: 0;
+  padding: 18px 20px;
+  display: grid;
+  grid-template-rows: 74px 1fr;
+  gap: 16px;
+  background: var(--color-bg-app, #f0f2f5);
+}
+
+.route-loading-header,
+.route-loading-card {
+  border-radius: 8px;
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-surface, #fff),
+    var(--color-bg-subtle, #f5f7fa),
+    var(--color-bg-surface, #fff)
+  );
+  background-size: 220% 100%;
+  border: 1px solid var(--color-border-subtle, #e0e0e6);
+  animation: route-loading-shimmer 1.2s ease-in-out infinite;
+}
+
+.route-loading-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-content: start;
+}
+
+.route-loading-card {
+  min-height: 150px;
+}
+
+.route-loading-card-wide {
+  grid-column: 1 / -1;
+}
+
+@keyframes route-loading-shimmer {
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -120% 0;
+  }
 }
 
 .inspect-sider {

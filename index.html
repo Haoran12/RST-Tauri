@@ -5,9 +5,177 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RST</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --rst-bg: #f0f2f5;
+        --rst-surface: #ffffff;
+        --rst-subtle: #f5f7fa;
+        --rst-border: #e0e0e6;
+        --rst-text: #1f2937;
+        --rst-muted: #6b7280;
+        --rst-accent: #18a058;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --rst-bg: #16171d;
+          --rst-surface: #1f2028;
+          --rst-subtle: #2a2b35;
+          --rst-border: #2e303a;
+          --rst-text: #f3f4f6;
+          --rst-muted: #9ca3af;
+        }
+      }
+
+      html,
+      body,
+      #app {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        overflow: hidden;
+        background: var(--rst-bg);
+        color: var(--rst-text);
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+
+      .boot-shell {
+        height: 100%;
+        display: flex;
+      }
+
+      .boot-nav {
+        width: 72px;
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        padding: 16px 0;
+        background: var(--rst-surface);
+        border-right: 1px solid var(--rst-border);
+      }
+
+      .boot-logo {
+        width: 38px;
+        height: 38px;
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        color: #fff;
+        background: var(--rst-accent);
+        font-weight: 700;
+      }
+
+      .boot-dot {
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+        background: var(--rst-subtle);
+      }
+
+      .boot-main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .boot-header {
+        min-height: 82px;
+        box-sizing: border-box;
+        padding: 20px 24px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: var(--rst-surface);
+        border-bottom: 1px solid var(--rst-border);
+      }
+
+      .boot-title {
+        font-size: 20px;
+        font-weight: 700;
+      }
+
+      .boot-subtitle {
+        margin-top: 4px;
+        color: var(--rst-muted);
+        font-size: 14px;
+      }
+
+      .boot-progress,
+      .boot-card {
+        background: linear-gradient(90deg, var(--rst-subtle), rgba(24, 160, 88, 0.18), var(--rst-subtle));
+        background-size: 220% 100%;
+        animation: boot-shimmer 1.2s ease-in-out infinite;
+      }
+
+      .boot-progress {
+        width: 132px;
+        height: 30px;
+        border-radius: 8px;
+      }
+
+      .boot-content {
+        padding: 18px 20px;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .boot-card {
+        min-height: 142px;
+        border-radius: 8px;
+        border: 1px solid var(--rst-border);
+      }
+
+      .boot-card-wide {
+        grid-column: 1 / -1;
+      }
+
+      @keyframes boot-shimmer {
+        from {
+          background-position: 120% 0;
+        }
+        to {
+          background-position: -120% 0;
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div class="boot-shell" aria-label="RST 正在启动">
+        <aside class="boot-nav">
+          <div class="boot-logo">R</div>
+          <div class="boot-dot"></div>
+          <div class="boot-dot"></div>
+          <div class="boot-dot"></div>
+          <div class="boot-dot"></div>
+          <div class="boot-dot"></div>
+          <div class="boot-dot"></div>
+        </aside>
+        <main class="boot-main">
+          <header class="boot-header">
+            <div>
+              <div class="boot-title">RST</div>
+              <div class="boot-subtitle">正在启动应用...</div>
+            </div>
+            <div class="boot-progress"></div>
+          </header>
+          <section class="boot-content">
+            <div class="boot-card boot-card-wide"></div>
+            <div class="boot-card"></div>
+            <div class="boot-card"></div>
+            <div class="boot-card boot-card-wide"></div>
+          </section>
+        </main>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
