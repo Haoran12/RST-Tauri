@@ -1,6 +1,6 @@
 # 75 ST 运行时组装
 
-本文定义 ST 模式的全局状态、会话 metadata、运行时组装流程和 Provider 差异适配。角色卡见 [71_st_character_cards.md](71_st_character_cards.md)，世界书注入见 [73_st_worldbook_injection.md](73_st_worldbook_injection.md)，预设结构见 [74_st_presets.md](74_st_presets.md)，Regex 扩展见 [76_st_regex.md](76_st_regex.md)，图片 / PDF 附件见 [77_st_multimodal_attachments.md](77_st_multimodal_attachments.md)。
+本文定义 ST 模式的全局状态、会话 metadata、运行时组装流程和 Provider 差异适配。角色卡见 [71_st_character_cards.md](71_st_character_cards.md)，世界书注入见 [73_st_worldbook_injection.md](73_st_worldbook_injection.md)，预设结构见 [74_st_presets.md](74_st_presets.md)，Regex 扩展见 [76_st_regex.md](76_st_regex.md)，图片 / PDF 附件见 [77_st_multimodal_attachments.md](77_st_multimodal_attachments.md)，Extension 启用和主流程钩子见 [78_st_extensions.md](78_st_extensions.md)。
 
 ## 1. 全局应用状态
 
@@ -150,7 +150,14 @@ interface STChatMetadata {
 └──────────────────────────────────────┘
        ↓
 ┌──────────────────────────────────────┐
-│ 6. 解析附件与能力校验                  │
+│ 6. 应用 Extension 注入与拦截边界        │
+│    - setExtensionPrompt BEFORE/IN/CHAT │
+│    - generate_interceptor 修改 coreChat │
+│    - GENERATE_* 事件记录可变请求数据    │
+└──────────────────────────────────────┘
+       ↓
+┌──────────────────────────────────────┐
+│ 7. 解析附件与能力校验                  │
 │    - attachment_ref → 本地源文件       │
 │    - 从 ProviderContractCache 读取当前连接的已编译契约视图 │
 │    - 校验当前 Provider / model 是否支持 image / pdf │
@@ -158,7 +165,7 @@ interface STChatMetadata {
 └──────────────────────────────────────┘
        ↓
 ┌──────────────────────────────────────┐
-│ 7. 组装请求                           │
+│ 8. 组装请求                           │
 │    - API 配置 → 连接信息              │
 │    - 预设参数 → 请求体参数            │
 │    - 会话内容 + 注入结果 → message parts │

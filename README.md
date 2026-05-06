@@ -29,6 +29,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 | [75_st_runtime_assembly.md](docs/75_st_runtime_assembly.md) | ST 运行时组装：全局状态、会话 metadata、Provider 参数适配 | 实现生成请求组装 |
 | [77_st_multimodal_attachments.md](docs/77_st_multimodal_attachments.md) | ST 多模态附件：图片 / PDF 存储、聊天记录引用、请求组装与 Provider 差异适配 | 实现 ST 聊天附件 |
 | [76_st_regex.md](docs/76_st_regex.md) | ST 正则扩展：脚本数据模型、作用域、运行时替换和导入导出 | 实现 Regex 扩展兼容 |
+| [78_st_extensions.md](docs/78_st_extensions.md) | ST Extension：启用流程、manifest、事件接口、prompt 注入和主流程交互 | 复刻或约束 ST 扩展机制 |
 | [10_agent_data_model.md](docs/10_agent_data_model.md) | Agent 三层语义 + Layer 1/2/3 数据模型总览 | Agent 数据契约入口 |
 | [11_agent_runtime.md](docs/11_agent_runtime.md) | 三层运行时 + 主循环 + Active Set + 验证规则 + 调用预算 | Agent 运行时编排 |
 | [12_agent_simulation.md](docs/12_agent_simulation.md) | 环境 / 基础属性档位翻译 | Agent 程序化派生 |

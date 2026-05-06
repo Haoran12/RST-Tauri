@@ -258,6 +258,7 @@
 
 | 日期 | 更新内容 |
 |------|----------|
+| 2026-05-06 | 梳理 `E:\AIPlay\SillyTavern` Extension 启用和主流程交互：新增 `docs/78_st_extensions.md`，明确 manifest / hooks / eventSource / setExtensionPrompt / generate_interceptor，以及与世界书扫描、Regex、Prompt Manager 和 coreChat 提取过滤的关系 |
 | 2026-05-06 | 加固左侧主导航跳转：将主导航入口从 `button + router.push` 改为 `RouterLink` 真实 hash 链接，点击图标或 hover 名称都会走同一链接目标，避免 WebView 下部分入口点击后不触发页面切换 |
 | 2026-05-06 | 修复左侧主导航名称点击无响应：图标右侧 hover tooltip 改为可接收指针事件并冒泡到导航按钮，避免点击“角色卡 / 世界书 / API 配置”等名称时事件穿透到下层内容 |
 | 2026-05-06 | 规划前端全局模式选择与双壳层分离：在 `41_frontend_interaction.md` 中新增 `Mode Select`、`STShell` / `AgentShell` / `SharedShell`、新路由分区 `/st/**` `/agent/**`、模式切换确认与最近模式恢复规则；同步更新实现计划与阶段 8.3 任务备注 |
