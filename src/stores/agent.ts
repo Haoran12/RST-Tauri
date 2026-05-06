@@ -8,8 +8,8 @@ import type {
   PlayerMode,
 } from '@/types/agent/session'
 import type { CharacterRecord } from '@/types/agent/character'
-import type { AgentWorldListItem } from '@/types/agent/world'
-import { listAgentWorlds } from '@/services/agentApi'
+import type { AgentWorldListItem, CreateAgentWorldInput } from '@/types/agent/world'
+import { createAgentWorld, listAgentWorlds } from '@/services/agentApi'
 
 // ===== Input Types for Tauri Commands =====
 
@@ -89,6 +89,15 @@ export const useAgentStore = defineStore('agent', () => {
     } finally {
       isWorldListLoading.value = false
     }
+  }
+
+  async function createWorld(input: CreateAgentWorldInput): Promise<AgentWorldListItem> {
+    error.value = null
+    const world = await createAgentWorld(input)
+    worlds.value = [world, ...worlds.value.filter((item) => item.world_id !== world.world_id)]
+    currentWorldId.value = world.world_id
+    await loadWorld(world.world_id)
+    return world
   }
 
   /**
@@ -239,6 +248,7 @@ export const useAgentStore = defineStore('agent', () => {
 
     // Actions
     loadWorldList,
+    createWorld,
     loadWorld,
     loadMainlineCursor,
     loadSessions,

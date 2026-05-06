@@ -2,6 +2,7 @@
 import { computed, ref, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  NInput,
   NButton,
   NCard,
   NGrid,
@@ -55,6 +56,9 @@ const llmProfile = ref<AgentLlmProfile | null>(null)
 
 // Session creation modal
 const showSessionModal = ref(false)
+const showCreateWorldModal = ref(false)
+const newWorldName = ref('')
+const isCreatingWorld = ref(false)
 
 // Computed
 const mainlineCursor = computed(() => agentStore.mainlineCursor)
@@ -133,7 +137,35 @@ async function handleProfileSave() {
 }
 
 function openSessionModal() {
+  if (!worldId.value) {
+    message.warning('先创建一个 World')
+    return
+  }
   showSessionModal.value = true
+}
+
+function openCreateWorldModal() {
+  newWorldName.value = ''
+  showCreateWorldModal.value = true
+}
+
+async function handleCreateWorld() {
+  const name = newWorldName.value.trim()
+  if (!name) {
+    message.warning('先填写 World 名称')
+    return
+  }
+  isCreatingWorld.value = true
+  try {
+    const world = await agentStore.createWorld({ name })
+    showCreateWorldModal.value = false
+    message.success(`已创建 World：${world.world_id}`)
+    router.push({ name: 'agent-worlds', params: { worldId: world.world_id } })
+  } catch (e) {
+    message.error(`创建 World 失败: ${String(e)}`)
+  } finally {
+    isCreatingWorld.value = false
+  }
 }
 
 async function handleSessionCreate(session: AgentSession) {
@@ -202,6 +234,12 @@ onBeforeUnmount(() => {
         <div class="world-id">{{ worldId }}</div>
       </div>
       <NSpace>
+        <NButton secondary @click="openCreateWorldModal">
+          <template #icon>
+            <NIcon><AddOutline /></NIcon>
+          </template>
+          新建 World
+        </NButton>
         <NButton type="primary" @click="openSessionModal">
           <template #icon>
             <NIcon><AddOutline /></NIcon>
@@ -245,6 +283,14 @@ onBeforeUnmount(() => {
         <div v-if="agentStore.isLoading" class="loading-state">
           <NProgress type="line" :percentage="50" :show-indicator="false" status="info" />
           <span>加载中...</span>
+        </div>
+
+        <div v-else-if="!worldId">
+          <NEmpty description="当前还没有可用 World">
+            <template #extra>
+              <NButton type="primary" @click="openCreateWorldModal">创建第一个 World</NButton>
+            </template>
+          </NEmpty>
         </div>
 
         <div v-else-if="agentStore.sessions.length === 0">
@@ -446,6 +492,28 @@ onBeforeUnmount(() => {
         @cancel="handleSessionCancel"
       />
     </NModal>
+
+    <NModal
+      v-model:show="showCreateWorldModal"
+      preset="card"
+      title="新建 Agent World"
+      style="width: 460px; max-width: 90vw"
+      :mask-closable="!isCreatingWorld"
+    >
+      <div class="modal-form">
+        <p class="modal-copy">当前 Agent 模式的会话、主线和编辑器都依附于 World。没有 World 时，这里不该要求你先建会话。</p>
+        <NInput
+          v-model:value="newWorldName"
+          placeholder="例如：边境行省 / Demo World"
+          maxlength="80"
+          @keydown.enter.prevent="handleCreateWorld"
+        />
+      </div>
+      <div class="modal-actions">
+        <NButton @click="showCreateWorldModal = false">取消</NButton>
+        <NButton type="primary" :loading="isCreatingWorld" @click="handleCreateWorld">创建</NButton>
+      </div>
+    </NModal>
   </div>
 </template>
 
@@ -623,5 +691,23 @@ h1 {
   align-items: center;
   gap: 8px;
   font-weight: 500;
+}
+
+.modal-form {
+  display: grid;
+  gap: 12px;
+}
+
+.modal-copy {
+  margin: 0;
+  color: var(--color-text-secondary, #6b7280);
+  line-height: 1.6;
+}
+
+.modal-actions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
 }
 </style>

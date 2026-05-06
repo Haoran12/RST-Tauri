@@ -8,3 +8,7 @@ export interface AgentWorldListItem {
   mainline_time_anchor: TimeAnchor | null
   updated_at: string | null
 }
+
+export interface CreateAgentWorldInput {
+  name: string
+}

@@ -352,3 +352,4 @@
 | 2026-05-06 | 角色卡详情接入自动保存：字段变更标记 dirty，右侧编辑区整体失焦、切换角色或卸载离开时自动保存当前角色卡 |
 | 2026-05-06 | 依据 `E:\AIPlay\cccode` 源码修正 Claude Code Interface：契约改为 Messages API `/v1/messages` + `Authorization: Bearer`，实际 provider 改用顶层 system blocks、user/assistant messages、tool schema 结构化输出和 Anthropic Messages 响应解析 |
 | 2026-05-06 | 修复 ST 预设宏与世界书注入断链：新增统一 `st/macros` 替换层，恢复 `{{char}}` / `{{user}}` / `{0}` / `{{wi}}` 等宏在 preset、角色卡字段、Persona、世界书关键词与内容中的运行时展开；世界书扫描补上 role->角色/Persona 名回退；默认 prompt_order 将 `personaDescription` 重新纳入主链，并补 Rust 回归测试 |
+| 2026-05-06 | 补齐 Agent World 创建链路：新增 `create_agent_world` Tauri 命令，初始化 `data/worlds/<world_id>/`、`world.sqlite`、`world_base.yaml` 与主线光标；前端 Agent 首页 / World 页增加新建 World 入口与零 World 空状态修复，不再出现“以 World 为顶层却无法创建 World”的断头流程 |

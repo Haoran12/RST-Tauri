@@ -18,9 +18,10 @@ use crate::agent::simulation::{
     CanonStatusManager, HistoricalTruthResolver, ProvisionalTruthManager,
 };
 use crate::agent::storage::agent_store::AgentStore;
-use crate::storage::paths::{app_data_root, validate_path_component};
+use crate::storage::paths::{app_data_root, safe_join, validate_path_component};
 use crate::AppState;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
@@ -70,6 +71,11 @@ pub struct AgentWorldListItem {
     pub character_count: i64,
     pub mainline_time_anchor: Option<TimeAnchor>,
     pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateAgentWorldInput {
+    pub name: String,
 }
 
 /// 列出 Agent Worlds 及首页所需摘要。
@@ -157,6 +163,49 @@ pub async fn list_agent_worlds(
     });
 
     Ok(worlds)
+}
+
+/// 创建一个新的 Agent World，并初始化目录、world.sqlite 与 world_base.yaml。
+#[tauri::command]
+pub async fn create_agent_world(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    input: CreateAgentWorldInput,
+) -> Result<AgentWorldListItem, String> {
+    let trimmed_name = input.name.trim();
+    if trimmed_name.is_empty() {
+        return Err("World name must not be empty".to_string());
+    }
+
+    let data_dir = get_data_dir(&app)?;
+    let worlds_dir = data_dir.join("worlds");
+    std::fs::create_dir_all(&worlds_dir)
+        .map_err(|e| format!("Failed to create worlds directory: {}", e))?;
+
+    let existing_world_ids = collect_existing_world_ids(&worlds_dir)?;
+    let world_id = allocate_world_id(trimmed_name, &existing_world_ids)?;
+    let world_dir = safe_join(&data_dir, &format!("worlds/{}", world_id))?;
+    let assets_dir = safe_join(&world_dir, "assets")?;
+    std::fs::create_dir_all(&assets_dir)
+        .map_err(|e| format!("Failed to create world directory '{}': {}", world_id, e))?;
+
+    let world_base_path = safe_join(&world_dir, "world_base.yaml")?;
+    if !world_base_path.exists() {
+        std::fs::write(&world_base_path, default_world_base_yaml(trimmed_name))
+            .map_err(|e| format!("Failed to write world_base.yaml for '{}': {}", world_id, e))?;
+    }
+
+    let store = get_agent_store(&app, state.inner(), &world_id).await?;
+    let mainline_cursor = store.get_mainline_cursor().await?;
+
+    Ok(AgentWorldListItem {
+        world_id,
+        session_count: 0,
+        active_session_count: 0,
+        character_count: 0,
+        mainline_time_anchor: Some(mainline_cursor.mainline_time_anchor),
+        updated_at: Some(mainline_cursor.updated_at.to_rfc3339()),
+    })
 }
 
 // ============================================================================
@@ -884,9 +933,110 @@ pub async fn get_session_conflicts(
     manager.get_session_conflicts(&input.session_id).await
 }
 
+fn collect_existing_world_ids(worlds_dir: &PathBuf) -> Result<HashSet<String>, String> {
+    let mut ids = HashSet::new();
+    let entries = std::fs::read_dir(worlds_dir)
+        .map_err(|e| format!("Failed to read worlds directory: {}", e))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Failed to read world entry: {}", e))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|e| format!("Failed to read world entry type: {}", e))?;
+        if !file_type.is_dir() {
+            continue;
+        }
+        let world_id = entry.file_name().to_string_lossy().to_string();
+        if validate_path_component(&world_id).is_ok() {
+            ids.insert(world_id);
+        }
+    }
+    Ok(ids)
+}
+
+fn allocate_world_id(name: &str, existing: &HashSet<String>) -> Result<String, String> {
+    let base = slugify_world_name(name);
+    let candidate = if base.is_empty() {
+        "world".to_string()
+    } else {
+        format!("world_{}", base)
+    };
+    validate_path_component(&candidate)
+        .map_err(|e| format!("Generated invalid world_id '{}': {}", candidate, e))?;
+    if !existing.contains(&candidate) {
+        return Ok(candidate);
+    }
+
+    for index in 2..10_000 {
+        let next = format!("{}_{}", candidate, index);
+        validate_path_component(&next)
+            .map_err(|e| format!("Generated invalid world_id '{}': {}", next, e))?;
+        if !existing.contains(&next) {
+            return Ok(next);
+        }
+    }
+
+    Err("Failed to allocate a unique world_id".to_string())
+}
+
+fn slugify_world_name(name: &str) -> String {
+    let mut output = String::new();
+    let mut last_was_sep = false;
+
+    for ch in name.chars() {
+        let mapped = if ch.is_ascii_alphanumeric() {
+            Some(ch.to_ascii_lowercase())
+        } else if ch.is_ascii_whitespace() || matches!(ch, '-' | '_') {
+            Some('_')
+        } else if !ch.is_ascii() {
+            Some('_')
+        } else {
+            None
+        };
+
+        match mapped {
+            Some('_') => {
+                if !last_was_sep && !output.is_empty() {
+                    output.push('_');
+                    last_was_sep = true;
+                }
+            }
+            Some(value) => {
+                output.push(value);
+                last_was_sep = false;
+            }
+            None => {}
+        }
+    }
+
+    output.trim_matches('_').to_string()
+}
+
+fn default_world_base_yaml(world_name: &str) -> String {
+    format!(
+        concat!(
+            "schema_version: 1\n",
+            "world:\n",
+            "  display_name: \"{}\"\n",
+            "attribute_tiers:\n",
+            "  note: \"占位默认规则；后续接通真实 world_base 编译前保持最小模板。\"\n",
+            "mana_expression:\n",
+            "  default_tendency: Neutral\n",
+            "combat_resolution:\n",
+            "  profile: default\n"
+        ),
+        escape_yaml_double_quoted(world_name)
+    )
+}
+
+fn escape_yaml_double_quoted(input: &str) -> String {
+    input.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 #[cfg(test)]
 mod tests {
+    use super::{allocate_world_id, slugify_world_name};
     use crate::storage::paths::validate_path_component;
+    use std::collections::HashSet;
 
     #[test]
     fn rejects_world_id_with_parent_traversal() {
@@ -899,5 +1049,22 @@ mod tests {
         let error =
             validate_path_component("world/name").expect_err("separator payload should fail");
         assert!(error.contains("Invalid path component"));
+    }
+
+    #[test]
+    fn slugifies_world_name_into_safe_id_suffix() {
+        assert_eq!(slugify_world_name("My First World"), "my_first_world");
+        assert_eq!(slugify_world_name("仙侠 测试"), "");
+        assert_eq!(slugify_world_name("world!!!demo"), "worlddemo");
+    }
+
+    #[test]
+    fn allocates_incremental_world_ids_when_collision_exists() {
+        let existing = HashSet::from([
+            "world_demo".to_string(),
+            "world_demo_2".to_string(),
+        ]);
+        let world_id = allocate_world_id("Demo", &existing).expect("world id");
+        assert_eq!(world_id, "world_demo_3");
     }
 }

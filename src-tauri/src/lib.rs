@@ -207,6 +207,7 @@ pub fn run() {
             commands::map_request_to_provider,
             // Agent session commands
             commands::list_agent_worlds,
+            commands::create_agent_world,
             commands::create_agent_session,
             commands::list_agent_sessions,
             commands::get_agent_session,

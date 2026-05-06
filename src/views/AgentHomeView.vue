@@ -1,17 +1,21 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
+  NInput,
   NButton,
   NCard,
   NEmpty,
   NIcon,
   NList,
   NListItem,
+  NModal,
   NSpace,
   NTag,
+  useMessage,
 } from 'naive-ui'
 import {
+  AddOutline,
   GitBranchOutline,
   KeyOutline,
   MapOutline,
@@ -27,9 +31,13 @@ const router = useRouter()
 const agentStore = useAgentStore()
 const settingsStore = useSettingsStore()
 const appShell = useAppShellStore()
+const message = useMessage()
 
 const worldId = computed(() => agentStore.currentWorldId)
 const currentWorld = computed(() => agentStore.currentWorld)
+const showCreateWorldModal = ref(false)
+const newWorldName = ref('')
+const isCreatingWorld = ref(false)
 
 const summaryItems = computed(() => [
   {
@@ -77,6 +85,30 @@ async function selectWorld(nextWorldId: string) {
   await agentStore.loadWorld(nextWorldId)
 }
 
+function openCreateWorldModal() {
+  newWorldName.value = ''
+  showCreateWorldModal.value = true
+}
+
+async function submitCreateWorld() {
+  const name = newWorldName.value.trim()
+  if (!name) {
+    message.warning('先填写 World 名称')
+    return
+  }
+  isCreatingWorld.value = true
+  try {
+    const world = await agentStore.createWorld({ name })
+    showCreateWorldModal.value = false
+    message.success(`已创建 World：${world.world_id}`)
+    router.push({ name: 'agent-worlds', params: { worldId: world.world_id } })
+  } catch (error) {
+    message.error(`创建 World 失败: ${String(error)}`)
+  } finally {
+    isCreatingWorld.value = false
+  }
+}
+
 function openCurrentWorld() {
   if (!worldId.value) return
   router.push({ name: 'agent-worlds', params: { worldId: worldId.value } })
@@ -108,6 +140,10 @@ onMounted(() => {
       <NSpace>
         <NButton secondary @click="router.push({ name: 'mode-select' })">切换模式</NButton>
         <NButton secondary @click="router.push({ name: 'logs' })">查看日志</NButton>
+        <NButton secondary @click="openCreateWorldModal">
+          <template #icon><NIcon><AddOutline /></NIcon></template>
+          新建 World
+        </NButton>
         <NButton type="primary" :disabled="!worldId" @click="openCurrentWorld">打开当前 World</NButton>
       </NSpace>
     </header>
@@ -155,7 +191,11 @@ onMounted(() => {
             </div>
           </NListItem>
         </NList>
-        <NEmpty v-else description="还没有 Agent World 目录" />
+        <NEmpty v-else description="还没有 Agent World">
+          <template #extra>
+            <NButton type="primary" @click="openCreateWorldModal">创建第一个 World</NButton>
+          </template>
+        </NEmpty>
       </NCard>
 
       <NCard size="small" title="当前 World 摘要">
@@ -256,6 +296,11 @@ onMounted(() => {
             <strong>打开 World</strong>
             <span>进入当前选中 World 的会话、时间线和运行状态入口。</span>
           </button>
+          <button class="action-tile" type="button" @click="openCreateWorldModal">
+            <NIcon :size="22"><AddOutline /></NIcon>
+            <strong>新建 World</strong>
+            <span>创建新的 Agent 世界目录与最小初始主线。</span>
+          </button>
           <button
             class="action-tile"
             type="button"
@@ -274,6 +319,28 @@ onMounted(() => {
         </div>
       </NCard>
     </div>
+
+    <NModal
+      v-model:show="showCreateWorldModal"
+      preset="card"
+      title="新建 Agent World"
+      style="width: 460px; max-width: 90vw"
+      :mask-closable="!isCreatingWorld"
+    >
+      <div class="modal-form">
+        <p class="modal-copy">Agent 模式以 World 为顶层隔离单元。先建 World，后续会话、主线和编辑器都挂在它下面。</p>
+        <NInput
+          v-model:value="newWorldName"
+          placeholder="例如：北境裂谷 / Demo World"
+          maxlength="80"
+          @keydown.enter.prevent="submitCreateWorld"
+        />
+      </div>
+      <div class="modal-actions">
+        <NButton @click="showCreateWorldModal = false">取消</NButton>
+        <NButton type="primary" :loading="isCreatingWorld" @click="submitCreateWorld">创建</NButton>
+      </div>
+    </NModal>
   </div>
 </template>
 
@@ -385,6 +452,24 @@ onMounted(() => {
 .action-tile:disabled {
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+.modal-form {
+  display: grid;
+  gap: 12px;
+}
+
+.modal-copy {
+  margin: 0;
+  color: var(--color-text-secondary, #6b7280);
+  line-height: 1.6;
+}
+
+.modal-actions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
 }
 
 .session-name {
