@@ -242,51 +242,6 @@ export function createDefaultReasoningTemplate(name = ''): ReasoningTemplate {
 // Prompt Preset - 完整提示词组装配置
 // ============================================================================
 
-// ============================================================================
-// Built-in Prompt Items - 内置预设提示词条目
-// ============================================================================
-
-/**
- * 内置提示词条目内容来源类型
- */
-export type BuiltinPromptSource = 'static' | 'generated'
-
-/**
- * 内置提示词条目定义
- *
- * 内置条目由系统提供，不可删除，部分内容不可编辑。
- * - static: 静态内容，用户可查看但不可编辑内容
- * - generated: 系统动态生成内容，每次加载时由系统生成
- */
-export interface BuiltinPromptItemDefinition {
-  /** 内置条目标识符，以 'builtin:' 开头 */
-  identifier: string
-  /** 显示名称 */
-  name: string
-  /** 角色 */
-  role: 'system' | 'user' | 'assistant'
-  /** 内容来源类型 */
-  source: BuiltinPromptSource
-  /** 静态内容（source 为 static 时使用） */
-  content?: string
-  /** 内容生成器名称（source 为 generated 时使用） */
-  generator?: string
-  /** 默认是否启用 */
-  defaultEnabled?: boolean
-  /** 默认排序位置（数字越小越靠前） */
-  defaultPosition?: number
-  /** 是否为系统提示词 */
-  system_prompt?: boolean
-  /** 是否为标记条目 */
-  marker?: boolean
-  /** 描述说明 */
-  description?: string
-}
-
-// ============================================================================
-// Prompt Item - 提示词条目
-// ============================================================================
-
 /**
  * 提示词条目（运行时）
  *
@@ -311,12 +266,6 @@ export interface PromptItem {
   forbid_overrides?: boolean
   /** 触发条件列表 */
   injection_trigger?: string[]
-  /** 是否为内置条目 */
-  builtin?: boolean
-  /** 内置条目是否可编辑内容 */
-  editable?: boolean
-  /** 内置条目描述 */
-  description?: string
 }
 
 export interface PromptOrderItem {
@@ -349,91 +298,6 @@ export interface PromptPreset {
   continue_nudge_prompt?: string
   group_nudge_prompt?: string
   impersonation_prompt?: string
-}
-
-/**
- * 默认内置提示词条目定义列表
- *
- * 这些条目在每个预设中都存在，不可删除，但可以禁用或调整顺序。
- * 部分条目内容由系统动态生成，用户无法直接编辑。
- */
-export const BUILTIN_PROMPT_DEFINITIONS: BuiltinPromptItemDefinition[] = [
-  {
-    identifier: 'builtin:main_prompt',
-    name: 'Main Prompt',
-    role: 'system',
-    source: 'static',
-    content: '',
-    defaultEnabled: true,
-    defaultPosition: 0,
-    system_prompt: true,
-    description: '预设级系统提示词，定义 AI 的基本行为模式',
-  },
-  {
-    identifier: 'builtin:character_description',
-    name: 'Character Description',
-    role: 'system',
-    source: 'generated',
-    generator: 'character_description',
-    defaultEnabled: true,
-    defaultPosition: 10,
-    description: '角色描述，从当前角色卡动态提取',
-  },
-  {
-    identifier: 'builtin:character_personality',
-    name: 'Character Personality',
-    role: 'system',
-    source: 'generated',
-    generator: 'character_personality',
-    defaultEnabled: true,
-    defaultPosition: 20,
-    description: '角色性格，从当前角色卡动态提取',
-  },
-  {
-    identifier: 'builtin:scenario',
-    name: 'Scenario',
-    role: 'system',
-    source: 'generated',
-    generator: 'scenario',
-    defaultEnabled: true,
-    defaultPosition: 30,
-    description: '场景设定，从当前角色卡动态提取',
-  },
-  {
-    identifier: 'builtin:world_info',
-    name: 'World Info',
-    role: 'system',
-    source: 'generated',
-    generator: 'world_info',
-    defaultEnabled: true,
-    defaultPosition: 40,
-    description: '世界书内容，根据触发条件动态注入',
-  },
-  {
-    identifier: 'builtin:chat_history',
-    name: 'Chat History',
-    role: 'system',
-    source: 'generated',
-    generator: 'chat_history',
-    defaultEnabled: true,
-    defaultPosition: 100,
-    marker: true,
-    description: '聊天历史记录占位标记',
-  },
-]
-
-/**
- * 检查标识符是否为内置条目
- */
-export function isBuiltinPrompt(identifier: string): boolean {
-  return identifier.startsWith('builtin:')
-}
-
-/**
- * 获取内置条目定义
- */
-export function getBuiltinDefinition(identifier: string): BuiltinPromptItemDefinition | undefined {
-  return BUILTIN_PROMPT_DEFINITIONS.find((d) => d.identifier === identifier)
 }
 
 export function createDefaultPromptPreset(name = ''): PromptPreset {
@@ -572,8 +436,8 @@ const DEFAULT_PRESET_TEMPLATE: Omit<PresetFile, 'name'> = {
   top_k: 0,
   top_a: 0,
   min_p: 0,
-  typical_p: 1.0,
-  tfs: 1.0,
+  typical_p: 0,
+  tfs: 0,
   epsilon_cutoff: 0,
   eta_cutoff: 0,
   repetition_penalty: 1.0,
@@ -582,7 +446,7 @@ const DEFAULT_PRESET_TEMPLATE: Omit<PresetFile, 'name'> = {
   rep_pen_slope: 0,
   frequency_penalty: 0,
   presence_penalty: 0,
-  encoder_rep_pen: 1.0,
+  encoder_rep_pen: 0,
   dry_allowed_length: 0,
   dry_multiplier: 0,
   dry_base: 0,
@@ -596,24 +460,71 @@ const DEFAULT_PRESET_TEMPLATE: Omit<PresetFile, 'name'> = {
   sampler_priority: [],
   temperature_last: false,
   // 提示词配置
-  prompts: [],
-  prompt_order: [],
-  wi_format: '{{wi}}',
-  scenario_format: 'Scenario: {{scenario}}',
-  personality_format: 'Personality: {{personality}}',
+  prompts: [
+    { identifier: 'main', name: 'Main Prompt', role: 'system', content: 'Write {{char}}\'s next reply in a fictional chat between {{char}} and {{user}}.', system_prompt: true },
+    { identifier: 'nsfw', name: 'Auxiliary Prompt', role: 'system', content: '', system_prompt: true },
+    { identifier: 'dialogueExamples', name: 'Chat Examples', role: 'system', system_prompt: true, marker: true },
+    { identifier: 'jailbreak', name: 'Post-History Instructions', role: 'system', content: '', system_prompt: true },
+    { identifier: 'chatHistory', name: 'Chat History', role: 'system', system_prompt: true, marker: true },
+    { identifier: 'worldInfoAfter', name: 'World Info (after)', role: 'system', system_prompt: true, marker: true },
+    { identifier: 'worldInfoBefore', name: 'World Info (before)', role: 'system', system_prompt: true, marker: true },
+    { identifier: 'enhanceDefinitions', name: 'Enhance Definitions', role: 'system', content: 'If you have more knowledge of {{char}}, add to the character\'s lore and personality to enhance them but keep the Character Sheet\'s definitions absolute.', system_prompt: true },
+    { identifier: 'charDescription', name: 'Char Description', role: 'system', system_prompt: true, marker: true },
+    { identifier: 'charPersonality', name: 'Char Personality', role: 'system', system_prompt: true, marker: true },
+    { identifier: 'scenario', name: 'Scenario', role: 'system', system_prompt: true, marker: true },
+    { identifier: 'personaDescription', name: 'Persona Description', role: 'system', system_prompt: true, marker: true },
+  ],
+  prompt_order: [
+    {
+      character_id: 100000,
+      order: [
+        { identifier: 'main', enabled: true },
+        { identifier: 'worldInfoBefore', enabled: true },
+        { identifier: 'charDescription', enabled: true },
+        { identifier: 'charPersonality', enabled: true },
+        { identifier: 'scenario', enabled: true },
+        { identifier: 'enhanceDefinitions', enabled: false },
+        { identifier: 'nsfw', enabled: true },
+        { identifier: 'worldInfoAfter', enabled: true },
+        { identifier: 'dialogueExamples', enabled: true },
+        { identifier: 'chatHistory', enabled: true },
+        { identifier: 'jailbreak', enabled: true },
+      ],
+    },
+    {
+      character_id: 100001,
+      order: [
+        { identifier: 'main', enabled: true },
+        { identifier: 'worldInfoBefore', enabled: true },
+        { identifier: 'personaDescription', enabled: true },
+        { identifier: 'charDescription', enabled: true },
+        { identifier: 'charPersonality', enabled: true },
+        { identifier: 'scenario', enabled: true },
+        { identifier: 'enhanceDefinitions', enabled: false },
+        { identifier: 'nsfw', enabled: true },
+        { identifier: 'worldInfoAfter', enabled: true },
+        { identifier: 'dialogueExamples', enabled: true },
+        { identifier: 'chatHistory', enabled: true },
+        { identifier: 'jailbreak', enabled: true },
+      ],
+    },
+  ],
+  wi_format: '{0}',
+  scenario_format: '{{scenario}}',
+  personality_format: '{{personality}}',
   send_if_empty: '',
-  impersonation_prompt: '',
-  new_chat_prompt: '',
-  new_group_chat_prompt: '',
-  new_example_chat_prompt: '',
-  continue_nudge_prompt: '',
-  group_nudge_prompt: '',
+  impersonation_prompt: '[Write your next reply from the point of view of {{user}}, using the chat history so far as a guideline for the writing style of {{user}}. Don\'t write as {{char}} or system. Don\'t describe actions of {{char}}.]',
+  new_chat_prompt: '[Start a new Chat]',
+  new_group_chat_prompt: '[Start a new group chat. Group members: {{group}}]',
+  new_example_chat_prompt: '[Example Chat]',
+  continue_nudge_prompt: '[Continue your last message without repeating its original content.]',
+  group_nudge_prompt: '[Write the next reply only as {{char}}.]',
   // ST 兼容字段
   stream_openai: true,
-  use_sysprompt: true,
-  max_context_unlocked: true,
-  openai_max_context: 128000,
-  openai_max_tokens: 4096,
+  use_sysprompt: false,
+  max_context_unlocked: false,
+  openai_max_context: 4095,
+  openai_max_tokens: 300,
   names_behavior: 0,
   // RST 扩展
   instruct: {

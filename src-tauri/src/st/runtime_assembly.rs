@@ -343,54 +343,112 @@ impl RequestAssembler {
     fn build_system_prompt(context: &RuntimeContext) -> String {
         let mut parts: Vec<String> = Vec::new();
 
-        Self::push_prompt_preset_system_parts(context, &mut parts);
-
-        // 系统提示词预设
-        if let Some(sp) = &context.system_prompt {
-            if !sp.content.is_empty() {
-                parts.push(sp.content.clone());
+        if let Some(prompt_preset) = &context.prompt_preset {
+            for prompt in ordered_prompt_items(prompt_preset) {
+                match prompt.identifier.as_str() {
+                    "main" | "nsfw" | "enhanceDefinitions" => {
+                        if !prompt.content.is_empty() {
+                            parts.push(prompt.content.clone());
+                        }
+                    }
+                    "worldInfoBefore" => {
+                        if let Some(wi) = &context.world_info_result {
+                            if !wi.world_info_before.is_empty() {
+                                parts.push(Self::format_world_info(context, &wi.world_info_before));
+                            }
+                        }
+                    }
+                    "worldInfoAfter" => {
+                        if let Some(wi) = &context.world_info_result {
+                            if !wi.world_info_after.is_empty() {
+                                parts.push(Self::format_world_info(context, &wi.world_info_after));
+                            }
+                        }
+                    }
+                    "personaDescription" => {
+                        if let Some(formatted) = Self::format_user_persona(context) {
+                            parts.push(formatted);
+                        }
+                    }
+                    "charDescription" => {
+                        if let Some(formatted) = Self::format_character_description(context) {
+                            parts.push(formatted);
+                        }
+                    }
+                    "charPersonality" => {
+                        if let Some(char) = &context.character {
+                            if let Some(formatted) =
+                                Self::format_character_personality(context, char.data.personality.as_str())
+                            {
+                                parts.push(formatted);
+                            }
+                        }
+                    }
+                    "scenario" => {
+                        if let Some(char) = &context.character {
+                            if let Some(formatted) =
+                                Self::format_character_scenario(context, char.data.scenario.as_str())
+                            {
+                                parts.push(formatted);
+                            }
+                        }
+                    }
+                    "jailbreak" => {
+                        if !prompt.content.is_empty() {
+                            parts.push(prompt.content.clone());
+                        } else if let Some(char) = &context.character {
+                            if !char.data.post_history_instructions.is_empty() {
+                                parts.push(char.data.post_history_instructions.clone());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
             }
-        }
-
-        // 角色卡系统提示词
-        if let Some(char) = &context.character {
-            if !char.data.system_prompt.is_empty() {
-                parts.push(char.data.system_prompt.clone());
+        } else {
+            if let Some(sp) = &context.system_prompt {
+                if !sp.content.is_empty() {
+                    parts.push(sp.content.clone());
+                }
             }
-        }
 
-        // 世界书注入结果 - BEFORE_CHAR
-        if let Some(wi) = &context.world_info_result {
-            if !wi.world_info_before.is_empty() {
-                parts.push(Self::format_world_info(context, &wi.world_info_before));
+            if let Some(char) = &context.character {
+                if !char.data.system_prompt.is_empty() {
+                    parts.push(char.data.system_prompt.clone());
+                }
             }
-        }
 
-        if let Some(formatted) = Self::format_user_persona(context) {
-            parts.push(formatted);
-        }
-
-        // 角色描述
-        if let Some(char) = &context.character {
-            if !char.data.description.is_empty() {
-                parts.push(format!("Description: {}", char.data.description));
+            if let Some(wi) = &context.world_info_result {
+                if !wi.world_info_before.is_empty() {
+                    parts.push(Self::format_world_info(context, &wi.world_info_before));
+                }
             }
-            if let Some(formatted) =
-                Self::format_character_personality(context, char.data.personality.as_str())
-            {
+
+            if let Some(formatted) = Self::format_user_persona(context) {
                 parts.push(formatted);
             }
-            if let Some(formatted) =
-                Self::format_character_scenario(context, char.data.scenario.as_str())
-            {
+
+            if let Some(formatted) = Self::format_character_description(context) {
                 parts.push(formatted);
             }
-        }
 
-        // 世界书注入结果 - AFTER_CHAR
-        if let Some(wi) = &context.world_info_result {
-            if !wi.world_info_after.is_empty() {
-                parts.push(Self::format_world_info(context, &wi.world_info_after));
+            if let Some(char) = &context.character {
+                if let Some(formatted) =
+                    Self::format_character_personality(context, char.data.personality.as_str())
+                {
+                    parts.push(formatted);
+                }
+                if let Some(formatted) =
+                    Self::format_character_scenario(context, char.data.scenario.as_str())
+                {
+                    parts.push(formatted);
+                }
+            }
+
+            if let Some(wi) = &context.world_info_result {
+                if !wi.world_info_after.is_empty() {
+                    parts.push(Self::format_world_info(context, &wi.world_info_after));
+                }
             }
         }
 
@@ -420,6 +478,10 @@ impl RequestAssembler {
             messages.push(prompt);
         }
 
+        if let Some(prompt) = Self::dialogue_examples_message(context) {
+            messages.push(prompt);
+        }
+
         // 转换聊天历史
         for msg in &context.session.messages {
             let role = match msg.role.as_str() {
@@ -445,19 +507,6 @@ impl RequestAssembler {
         messages
     }
 
-    fn push_prompt_preset_system_parts(context: &RuntimeContext, parts: &mut Vec<String>) {
-        let Some(prompt_preset) = &context.prompt_preset else {
-            return;
-        };
-
-        for prompt in ordered_prompt_items(prompt_preset) {
-            if !prompt.system_prompt || prompt.content.is_empty() {
-                continue;
-            }
-            parts.push(prompt.content.clone());
-        }
-    }
-
     fn format_world_info(context: &RuntimeContext, content: &str) -> String {
         apply_prompt_format(
             context
@@ -467,6 +516,15 @@ impl RequestAssembler {
                 .unwrap_or(""),
             content,
         )
+    }
+
+    fn format_character_description(context: &RuntimeContext) -> Option<String> {
+        let char = context.character.as_ref()?;
+        let description = char.data.description.trim();
+        if description.is_empty() {
+            return None;
+        }
+        Some(format!("Description: {}", description))
     }
 
     fn format_character_scenario(context: &RuntimeContext, content: &str) -> Option<String> {
@@ -524,6 +582,28 @@ impl RequestAssembler {
         Some(AssembledMessage {
             role: "system".to_string(),
             content: preset.new_chat_prompt.clone(),
+            attachments: Vec::new(),
+        })
+    }
+
+    fn dialogue_examples_message(context: &RuntimeContext) -> Option<AssembledMessage> {
+        let prompt_preset = context.prompt_preset.as_ref()?;
+        let has_examples_enabled = ordered_prompt_items(prompt_preset)
+            .iter()
+            .any(|prompt| prompt.identifier == "dialogueExamples");
+        if !has_examples_enabled {
+            return None;
+        }
+
+        let char = context.character.as_ref()?;
+        let content = char.data.mes_example.trim();
+        if content.is_empty() {
+            return None;
+        }
+
+        Some(AssembledMessage {
+            role: "system".to_string(),
+            content: content.to_string(),
             attachments: Vec::new(),
         })
     }

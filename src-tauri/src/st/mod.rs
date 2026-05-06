@@ -16,8 +16,8 @@ pub use character::{
 };
 pub use keyword_matcher::{GlobalScanData, KeywordMatcher, MatchContext, MatchResult};
 pub use preset::{
-    AutoSelectConfig, ContextTemplate, InstructTemplate, PresetType, PromptPreset,
-    ReasoningTemplate, SamplerPreset, SystemPrompt,
+    AutoSelectConfig, ContextTemplate, InstructTemplate, PresetFile, PresetType,
+    PromptPreset, ReasoningTemplate, SamplerPreset, SystemPrompt,
 };
 pub use regex_engine::{
     RegexEngine, RegexExtensionSettings, RegexPlacement, RegexPreset, RegexRunOptions,

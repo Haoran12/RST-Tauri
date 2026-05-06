@@ -54,6 +54,21 @@ const isSavingSessionSettings = ref(false)
 const draggedItem = ref<PromptItem | null>(null)
 const dragOverItem = ref<PromptItem | null>(null)
 
+const fixedPromptIdentifiers = new Set([
+  'main',
+  'nsfw',
+  'dialogueExamples',
+  'jailbreak',
+  'chatHistory',
+  'worldInfoAfter',
+  'worldInfoBefore',
+  'enhanceDefinitions',
+  'charDescription',
+  'charPersonality',
+  'scenario',
+  'personaDescription',
+])
+
 type ContextItem = {
   id: string
   name: string
@@ -456,6 +471,10 @@ function getRoleType(role: string): 'default' | 'success' | 'info' | 'warning' |
   }
 }
 
+function isFixedPromptItem(identifier: string): boolean {
+  return fixedPromptIdentifiers.has(identifier)
+}
+
 // Check if prompt item is enabled
 function isPromptEnabled(identifier: string): boolean {
   const order = presetsStore.currentPreset?.prompt_order?.[0]?.order
@@ -484,6 +503,7 @@ async function togglePromptEnabled(identifier: string, enabled: boolean) {
 
 // Delete prompt item
 async function deletePromptItem(identifier: string) {
+  if (isFixedPromptItem(identifier)) return
   if (!presetsStore.currentPreset?.prompts) return
   const preset = presetsStore.currentPreset
   // Remove from prompts array
@@ -623,7 +643,6 @@ const sortedPromptItems = computed(() => {
   return sorted.filter((item) => {
     return item.name.toLowerCase().includes(query) ||
       item.identifier.toLowerCase().includes(query) ||
-      item.description?.toLowerCase().includes(query) ||
       (item.content?.toLowerCase().includes(query) ?? false)
   })
 })
@@ -925,7 +944,7 @@ watch(currentWorldId, async (worldId) => {
                   <div class="entry-header">
                     <span class="entry-name">{{ item.name }}</span>
                     <NTag
-                      v-if="item.builtin"
+                      v-if="isFixedPromptItem(item.identifier)"
                       size="tiny"
                       type="default"
                       :bordered="false"
@@ -944,7 +963,7 @@ watch(currentWorldId, async (worldId) => {
 
                 <!-- Delete button (only for non-builtin items) -->
                 <NPopconfirm
-                  v-if="!item.builtin"
+                  v-if="!isFixedPromptItem(item.identifier)"
                   @positive-click="deletePromptItem(item.identifier)"
                 >
                   <template #trigger>

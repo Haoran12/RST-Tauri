@@ -232,7 +232,7 @@
 | 8.9 | 日志管理 UI - 手动清理 / 导出 | ✅ | 2026-05-06 | 已支持当前筛选结果 JSON/CSV 导出；全局清理改为 preview plan + 用户确认后执行 retention |
 | 8.10 | 应用数据目录 C 盘写入边界收紧 | ✅ | 2026-05-06 | 默认业务数据与 WebView 数据均写入应用 `data/`；应用不在 C 盘时拒绝 `RST_DATA_DIR` 指向 C 盘 |
 | 8.11 | 日志页面规划 | ✅ | 2026-05-06 | 已补 `/logs` 页面信息架构、筛选/详情/Trace 跳转、容量清理、后端命令边界与 MVP 切片 |
-| 8.12 | 内置预设提示词条目 | ✅ | 2026-05-06 | 参考 SillyTavern 实现，定义 6 个内置条目（System Prompt/Character Description/Personality/Scenario/World Info/Chat History），支持禁用/排序，不可删除；部分条目内容由系统动态生成 |
+| 8.12 | 内置预设提示词条目 | ✅ | 2026-05-06 | 改为直接采用 SillyTavern 风格默认 prompt 预设：`main/nsfw/dialogueExamples/jailbreak/worldInfoBefore/worldInfoAfter/charDescription/charPersonality/scenario/personaDescription/chatHistory`，默认预设与新建预设都带完整内容，运行时按 `prompt_order` 实际组装 |
 | 8.13 | Tauri 生产构建样式稳定性 | ✅ | 2026-05-06 | Vite 生产构建改为单入口 CSS，首屏 Naive UI provider 不再异步拆分，CSP 明确允许运行时 style 注入，避免 build 产物退化为近似浏览器原生控件 |
 | 8.14 | ST 会话级角色卡、世界书与 User Persona 设置 | ✅ | 2026-05-06 | 会话保存 `character_id`、`enabled_world_info` 多选与 `user_persona`；ST 会话侧栏三点菜单可编辑名称、角色卡、世界书和 Persona Description，运行时组装读取这些字段 |
 
@@ -258,6 +258,7 @@
 
 | 日期 | 更新内容 |
 |------|----------|
+| 2026-05-06 | 修复 ST 预设默认内容与提示词组装脱节：统一 Rust/前端为扁平 `PresetFile`，默认预设与新建预设改用 SillyTavern `Default.json` 风格 prompt 列表与格式字段，运行时按 `prompt_order` 实际注入 `main/worldInfoBefore/charDescription/charPersonality/scenario/personaDescription/dialogueExamples/jailbreak`，恢复系统内置预设与会话预设装配 |
 | 2026-05-06 | 增加 ST 会话级角色卡绑定、世界书多选与 User Persona：会话文件保存 `character_id` / `enabled_world_info` / `user_persona`，侧栏三点菜单可编辑，会话发送与世界书匹配读取 Persona Description |
 | 2026-05-06 | 修复 Tauri 生产构建 Naive UI 样式退化：关闭 CSS 分包、取消首屏 provider 异步拆分、收敛 vendor 手动分包并明确 CSP style 注入策略；入口 CSS 不再全局清零所有元素 margin/padding |
 | 2026-05-06 | 继续修复生产构建页面布局异常：App Shell 新增 `route-host` 统一承载路由页面，补齐 `NLayout` / `NLayoutContent` 宽度与 flex 链路，并增加低优先级 Naive UI 按钮 / 卡片 / 输入控件结构兜底，避免内容区和按钮在 build 产物中按内容收缩 |

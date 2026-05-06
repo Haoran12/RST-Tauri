@@ -15,11 +15,11 @@ use crate::logging::context::{LlmNode, LogContext, LogMode};
 use crate::st::keyword_matcher::GlobalScanData;
 use crate::st::runtime_assembly::AssembledAttachmentRef;
 use crate::st::{
-    AssembledRequest, ContextTemplate, GlobalAppState, InstructTemplate, PromptPreset,
-    ProviderRequestMapper, ReasoningTemplate, RegexEngine, RegexPlacement, RegexRunOptions,
-    RequestAssembler, RuntimeContext, STChatMessage, STChatMetadata, STSessionData,
-    STWorldInfoSettings, SamplerPreset, SystemPrompt, WorldInfoInjectionResult, WorldInfoInjector,
-    WorldInfoSource,
+    AssembledRequest, ContextTemplate, GlobalAppState, InstructTemplate, PresetFile,
+    PromptPreset, ProviderRequestMapper, ReasoningTemplate, RegexEngine, RegexPlacement,
+    RegexRunOptions, RequestAssembler, RuntimeContext, STChatMessage, STChatMetadata,
+    STSessionData, STWorldInfoSettings, SamplerPreset, SystemPrompt, WorldInfoInjectionResult,
+    WorldInfoInjector, WorldInfoSource,
 };
 use crate::storage::json_store::JsonStore;
 use crate::storage::paths::{app_data_root, safe_join};
@@ -160,7 +160,37 @@ pub async fn load_sampler_preset(app: AppHandle, name: String) -> Result<Sampler
     ensure_default_presets(&store)?;
 
     let preset = load_combined_preset(&store, &name)?;
-    Ok(preset.sampler.unwrap_or_else(|| SamplerPreset::new(&name)))
+    let mut sampler = SamplerPreset::new(&name);
+    sampler.temperature = preset.temperature;
+    sampler.frequency_penalty = preset.frequency_penalty;
+    sampler.presence_penalty = preset.presence_penalty;
+    sampler.top_p = preset.top_p;
+    sampler.top_k = preset.top_k;
+    sampler.top_a = preset.top_a;
+    sampler.min_p = preset.min_p;
+    sampler.repetition_penalty = preset.repetition_penalty;
+    sampler.rep_pen_range = preset.rep_pen_range;
+    sampler.rep_pen_decay = preset.rep_pen_decay;
+    sampler.rep_pen_slope = preset.rep_pen_slope;
+    sampler.typical_p = preset.typical_p;
+    sampler.tfs = preset.tfs;
+    sampler.epsilon_cutoff = preset.epsilon_cutoff;
+    sampler.eta_cutoff = preset.eta_cutoff;
+    sampler.guidance_scale = preset.guidance_scale;
+    sampler.negative_prompt = preset.negative_prompt;
+    sampler.dry_allowed_length = preset.dry_allowed_length;
+    sampler.dry_multiplier = preset.dry_multiplier;
+    sampler.dry_base = preset.dry_base;
+    sampler.dry_sequence_breakers = preset.dry_sequence_breakers;
+    sampler.mirostat_mode = preset.mirostat_mode;
+    sampler.mirostat_tau = preset.mirostat_tau;
+    sampler.mirostat_eta = preset.mirostat_eta;
+    sampler.no_repeat_ngram_size = preset.no_repeat_ngram_size;
+    sampler.encoder_rep_pen = preset.encoder_rep_pen;
+    sampler.sampler_priority = preset.sampler_priority;
+    sampler.temperature_last = preset.temperature_last;
+    sampler.source_api_id = preset.source_api_id.clone();
+    Ok(sampler)
 }
 
 /// 加载 Instruct 模板
@@ -228,27 +258,25 @@ pub async fn load_prompt_preset(app: AppHandle, name: String) -> Result<PromptPr
     ensure_default_presets(&store)?;
 
     let preset = load_combined_preset(&store, &name)?;
-    Ok(preset.prompt.unwrap_or_else(|| PromptPreset::new(&name)))
+    Ok(PromptPreset {
+        name: preset.name.clone(),
+        prompts: preset.prompts,
+        prompt_order: preset.prompt_order,
+        wi_format: preset.wi_format,
+        scenario_format: preset.scenario_format,
+        personality_format: preset.personality_format,
+        new_chat_prompt: preset.new_chat_prompt,
+        new_group_chat_prompt: preset.new_group_chat_prompt,
+        continue_nudge_prompt: preset.continue_nudge_prompt,
+        group_nudge_prompt: preset.group_nudge_prompt,
+        impersonation_prompt: preset.impersonation_prompt,
+        extensions: std::collections::HashMap::new(),
+    })
 }
 
 // ============================================================================
 // 预设管理命令
 // ============================================================================
-
-/// 预设文件结构（包含所有类型）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PresetFile {
-    pub name: String,
-    pub sampler: Option<SamplerPreset>,
-    pub instruct: Option<InstructTemplate>,
-    pub context: Option<ContextTemplate>,
-    pub sysprompt: Option<SystemPrompt>,
-    pub reasoning: Option<ReasoningTemplate>,
-    pub prompt: Option<PromptPreset>,
-    pub source_api_id: Option<String>,
-    #[serde(default)]
-    pub extensions: serde_json::Map<String, serde_json::Value>,
-}
 
 /// 预设列表项
 #[derive(Debug, Serialize, Deserialize)]
@@ -273,95 +301,40 @@ fn load_combined_preset(store: &JsonStore, name: &str) -> Result<PresetFile, Str
 
 /// 合并内置提示词条目到预设
 fn merge_builtin_prompt_items(preset: &mut PresetFile) {
-    use crate::st::preset::{
-        get_builtin_prompt_definitions, BuiltinPromptSource, PromptItem, PromptOrder,
-        PromptOrderItem,
-    };
-
-    let builtin_defs = get_builtin_prompt_definitions();
-
-    // 确保 prompt 字段存在
-    if preset.prompt.is_none() {
-        preset.prompt = Some(crate::st::preset::PromptPreset::new(&preset.name));
+    let defaults = create_default_preset_file(&preset.name);
+    if preset.prompts.is_empty() {
+        preset.prompts = defaults.prompts;
     }
-    let prompt = preset.prompt.as_mut().unwrap();
-
-    // 确保 prompt_order 存在
-    if prompt.prompt_order.is_empty() {
-        prompt.prompt_order.push(PromptOrder {
-            character_id: 100000,
-            order: Vec::new(),
-        });
+    if preset.prompt_order.is_empty() {
+        preset.prompt_order = defaults.prompt_order;
     }
-
-    // 获取现有的 order map
-    let order = &mut prompt.prompt_order[0].order;
-    let order_map: std::collections::HashMap<String, (bool, Option<i32>)> = order
-        .iter()
-        .map(|item| {
-            (
-                item.identifier.clone(),
-                (item.enabled, item.position),
-            )
-        })
-        .collect();
-
-    // 清空并重建 prompts 列表，先添加内置条目
-    let mut new_prompts: Vec<PromptItem> = Vec::new();
-    let mut new_order: Vec<PromptOrderItem> = Vec::new();
-
-    for def in builtin_defs {
-        let (enabled, position) = order_map
-            .get(&def.identifier)
-            .copied()
-            .unwrap_or((def.default_enabled, None));
-
-        let editable = def.source == BuiltinPromptSource::Static;
-
-        new_prompts.push(PromptItem {
-            identifier: def.identifier.clone(),
-            name: def.name.clone(),
-            role: def.role.clone(),
-            content: def.content.clone(),
-            system_prompt: def.system_prompt,
-            marker: def.marker,
-            enabled: Some(enabled),
-            injection_position: None,
-            injection_depth: None,
-            injection_order: None,
-            forbid_overrides: None,
-            injection_trigger: Vec::new(),
-            builtin: true,
-            editable,
-            description: def.description.clone(),
-        });
-
-        new_order.push(PromptOrderItem {
-            identifier: def.identifier.clone(),
-            enabled,
-            position,
-        });
+    if preset.wi_format.trim().is_empty() {
+        preset.wi_format = defaults.wi_format;
     }
-
-    // 添加用户自定义条目（非内置）
-    for item in &prompt.prompts {
-        if !item.identifier.starts_with("builtin:") {
-            let (enabled, position) = order_map
-                .get(&item.identifier)
-                .copied()
-                .unwrap_or((true, None));
-
-            new_prompts.push(item.clone());
-            new_order.push(PromptOrderItem {
-                identifier: item.identifier.clone(),
-                enabled,
-                position,
-            });
-        }
+    if preset.scenario_format.trim().is_empty() {
+        preset.scenario_format = defaults.scenario_format;
     }
-
-    prompt.prompts = new_prompts;
-    prompt.prompt_order[0].order = new_order;
+    if preset.personality_format.trim().is_empty() {
+        preset.personality_format = defaults.personality_format;
+    }
+    if preset.impersonation_prompt.trim().is_empty() {
+        preset.impersonation_prompt = defaults.impersonation_prompt;
+    }
+    if preset.new_chat_prompt.trim().is_empty() {
+        preset.new_chat_prompt = defaults.new_chat_prompt;
+    }
+    if preset.new_group_chat_prompt.trim().is_empty() {
+        preset.new_group_chat_prompt = defaults.new_group_chat_prompt;
+    }
+    if preset.new_example_chat_prompt.trim().is_empty() {
+        preset.new_example_chat_prompt = defaults.new_example_chat_prompt;
+    }
+    if preset.continue_nudge_prompt.trim().is_empty() {
+        preset.continue_nudge_prompt = defaults.continue_nudge_prompt;
+    }
+    if preset.group_nudge_prompt.trim().is_empty() {
+        preset.group_nudge_prompt = defaults.group_nudge_prompt;
+    }
 }
 
 /// 列出所有预设
@@ -429,21 +402,6 @@ pub async fn save_preset(app: AppHandle, preset: PresetFile) -> Result<(), Strin
 /// 1. 用户自定义的 prompts 条目
 /// 2. 内置条目的启用状态和排序位置
 fn filter_builtin_items_for_save(mut preset: PresetFile) -> PresetFile {
-    if let Some(prompt) = &mut preset.prompt {
-        // 过滤 prompts，只保留非内置条目
-        prompt.prompts.retain(|item| !item.identifier.starts_with("builtin:"));
-
-        // 过滤 prompt_order，只保留启用状态和排序位置
-        for order in &mut prompt.prompt_order {
-            for item in &mut order.order {
-                // 内置条目只保留 enabled 和 position，清除其他字段
-                if item.identifier.starts_with("builtin:") {
-                    // 保持 enabled 和 position 即可
-                }
-            }
-        }
-    }
-
     preset
 }
 
@@ -563,11 +521,7 @@ pub async fn assemble_st_request(
     let active_preset_name = resolve_active_preset_name(input.preset_name.as_deref(), &global_state);
     let preset: Option<PresetFile> = if let Some(name) = active_preset_name.as_deref() {
         if !name.is_empty() {
-            let value = store.read(&format!("presets/{}.json", name))?;
-            Some(
-                serde_json::from_value(value)
-                    .map_err(|e| format!("Failed to parse preset '{}': {}", name, e))?,
-            )
+            Some(load_combined_preset(&store, name)?)
         } else {
             None
         }
@@ -576,12 +530,57 @@ pub async fn assemble_st_request(
     };
 
     // 从预设中提取各类型配置
-    let sampler_preset = preset.as_ref().and_then(|p| p.sampler.clone());
+    let sampler_preset = preset.as_ref().map(|p| {
+        let mut sampler = SamplerPreset::new(&p.name);
+        sampler.temperature = p.temperature;
+        sampler.frequency_penalty = p.frequency_penalty;
+        sampler.presence_penalty = p.presence_penalty;
+        sampler.top_p = p.top_p;
+        sampler.top_k = p.top_k;
+        sampler.top_a = p.top_a;
+        sampler.min_p = p.min_p;
+        sampler.repetition_penalty = p.repetition_penalty;
+        sampler.rep_pen_range = p.rep_pen_range;
+        sampler.rep_pen_decay = p.rep_pen_decay;
+        sampler.rep_pen_slope = p.rep_pen_slope;
+        sampler.typical_p = p.typical_p;
+        sampler.tfs = p.tfs;
+        sampler.epsilon_cutoff = p.epsilon_cutoff;
+        sampler.eta_cutoff = p.eta_cutoff;
+        sampler.guidance_scale = p.guidance_scale;
+        sampler.negative_prompt = p.negative_prompt.clone();
+        sampler.dry_allowed_length = p.dry_allowed_length;
+        sampler.dry_multiplier = p.dry_multiplier;
+        sampler.dry_base = p.dry_base;
+        sampler.dry_sequence_breakers = p.dry_sequence_breakers.clone();
+        sampler.mirostat_mode = p.mirostat_mode;
+        sampler.mirostat_tau = p.mirostat_tau;
+        sampler.mirostat_eta = p.mirostat_eta;
+        sampler.no_repeat_ngram_size = p.no_repeat_ngram_size;
+        sampler.encoder_rep_pen = p.encoder_rep_pen;
+        sampler.sampler_priority = p.sampler_priority.clone();
+        sampler.temperature_last = p.temperature_last;
+        sampler.source_api_id = p.source_api_id.clone();
+        sampler
+    });
     let instruct_template = preset.as_ref().and_then(|p| p.instruct.clone());
     let context_template = preset.as_ref().and_then(|p| p.context.clone());
     let system_prompt = preset.as_ref().and_then(|p| p.sysprompt.clone());
     let reasoning_template = preset.as_ref().and_then(|p| p.reasoning.clone());
-    let prompt_preset = preset.as_ref().and_then(|p| p.prompt.clone());
+    let prompt_preset = preset.as_ref().map(|p| PromptPreset {
+        name: p.name.clone(),
+        prompts: p.prompts.clone(),
+        prompt_order: p.prompt_order.clone(),
+        wi_format: p.wi_format.clone(),
+        scenario_format: p.scenario_format.clone(),
+        personality_format: p.personality_format.clone(),
+        new_chat_prompt: p.new_chat_prompt.clone(),
+        new_group_chat_prompt: p.new_group_chat_prompt.clone(),
+        continue_nudge_prompt: p.continue_nudge_prompt.clone(),
+        group_nudge_prompt: p.group_nudge_prompt.clone(),
+        impersonation_prompt: p.impersonation_prompt.clone(),
+        extensions: std::collections::HashMap::new(),
+    });
 
     // 5. 构建全局扫描数据
     let global_scan_data = GlobalScanData {
@@ -976,22 +975,303 @@ fn ensure_default_presets(store: &JsonStore) -> Result<(), String> {
 }
 
 fn create_default_preset_file(name: &str) -> PresetFile {
-    let mut prompt = PromptPreset::new(name);
-    prompt.wi_format = "{{wi}}".to_string();
-    prompt.scenario_format = "Scenario: {{scenario}}".to_string();
-    prompt.personality_format = "Personality: {{personality}}".to_string();
-    prompt.new_chat_prompt = String::new();
+    use crate::st::preset::{PromptItem, PromptOrder, PromptOrderItem};
 
     PresetFile {
         name: name.to_string(),
-        sampler: Some(SamplerPreset::new(name)),
+        temperature: 1.0,
+        frequency_penalty: 0.0,
+        presence_penalty: 0.0,
+        top_p: 1.0,
+        top_k: 0,
+        top_a: 0.0,
+        min_p: 0.0,
+        repetition_penalty: 1.0,
+        rep_pen_range: 0,
+        rep_pen_decay: 0.0,
+        rep_pen_slope: 0.0,
+        typical_p: 0.0,
+        tfs: 0.0,
+        epsilon_cutoff: 0.0,
+        eta_cutoff: 0.0,
+        guidance_scale: 1.0,
+        negative_prompt: String::new(),
+        dry_allowed_length: 0,
+        dry_multiplier: 0.0,
+        dry_base: 0.0,
+        dry_sequence_breakers: String::new(),
+        mirostat_mode: 0,
+        mirostat_tau: 5.0,
+        mirostat_eta: 0.1,
+        no_repeat_ngram_size: 0,
+        encoder_rep_pen: 0.0,
+        sampler_priority: Vec::new(),
+        temperature_last: false,
+        prompts: vec![
+            PromptItem {
+                identifier: "main".to_string(),
+                name: "Main Prompt".to_string(),
+                role: "system".to_string(),
+                content: "Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.".to_string(),
+                system_prompt: true,
+                marker: false,
+                enabled: None,
+                injection_position: None,
+                injection_depth: None,
+                injection_order: None,
+                forbid_overrides: None,
+                injection_trigger: Vec::new(),
+                builtin: false,
+                editable: true,
+                description: String::new(),
+            },
+            PromptItem {
+                identifier: "nsfw".to_string(),
+                name: "Auxiliary Prompt".to_string(),
+                role: "system".to_string(),
+                content: String::new(),
+                system_prompt: true,
+                marker: false,
+                enabled: None,
+                injection_position: None,
+                injection_depth: None,
+                injection_order: None,
+                forbid_overrides: None,
+                injection_trigger: Vec::new(),
+                builtin: false,
+                editable: true,
+                description: String::new(),
+            },
+            PromptItem {
+                identifier: "dialogueExamples".to_string(),
+                name: "Chat Examples".to_string(),
+                role: "system".to_string(),
+                content: String::new(),
+                system_prompt: true,
+                marker: true,
+                enabled: None,
+                injection_position: None,
+                injection_depth: None,
+                injection_order: None,
+                forbid_overrides: None,
+                injection_trigger: Vec::new(),
+                builtin: false,
+                editable: true,
+                description: String::new(),
+            },
+            PromptItem {
+                identifier: "jailbreak".to_string(),
+                name: "Post-History Instructions".to_string(),
+                role: "system".to_string(),
+                content: String::new(),
+                system_prompt: true,
+                marker: false,
+                enabled: None,
+                injection_position: None,
+                injection_depth: None,
+                injection_order: None,
+                forbid_overrides: None,
+                injection_trigger: Vec::new(),
+                builtin: false,
+                editable: true,
+                description: String::new(),
+            },
+            PromptItem {
+                identifier: "chatHistory".to_string(),
+                name: "Chat History".to_string(),
+                role: "system".to_string(),
+                content: String::new(),
+                system_prompt: true,
+                marker: true,
+                enabled: None,
+                injection_position: None,
+                injection_depth: None,
+                injection_order: None,
+                forbid_overrides: None,
+                injection_trigger: Vec::new(),
+                builtin: false,
+                editable: true,
+                description: String::new(),
+            },
+            PromptItem {
+                identifier: "worldInfoAfter".to_string(),
+                name: "World Info (after)".to_string(),
+                role: "system".to_string(),
+                content: String::new(),
+                system_prompt: true,
+                marker: true,
+                enabled: None,
+                injection_position: None,
+                injection_depth: None,
+                injection_order: None,
+                forbid_overrides: None,
+                injection_trigger: Vec::new(),
+                builtin: false,
+                editable: true,
+                description: String::new(),
+            },
+            PromptItem {
+                identifier: "worldInfoBefore".to_string(),
+                name: "World Info (before)".to_string(),
+                role: "system".to_string(),
+                content: String::new(),
+                system_prompt: true,
+                marker: true,
+                enabled: None,
+                injection_position: None,
+                injection_depth: None,
+                injection_order: None,
+                forbid_overrides: None,
+                injection_trigger: Vec::new(),
+                builtin: false,
+                editable: true,
+                description: String::new(),
+            },
+            PromptItem {
+                identifier: "enhanceDefinitions".to_string(),
+                name: "Enhance Definitions".to_string(),
+                role: "system".to_string(),
+                content: "If you have more knowledge of {{char}}, add to the character's lore and personality to enhance them but keep the Character Sheet's definitions absolute.".to_string(),
+                system_prompt: true,
+                marker: false,
+                enabled: None,
+                injection_position: None,
+                injection_depth: None,
+                injection_order: None,
+                forbid_overrides: None,
+                injection_trigger: Vec::new(),
+                builtin: false,
+                editable: true,
+                description: String::new(),
+            },
+            PromptItem {
+                identifier: "charDescription".to_string(),
+                name: "Char Description".to_string(),
+                role: "system".to_string(),
+                content: String::new(),
+                system_prompt: true,
+                marker: true,
+                enabled: None,
+                injection_position: None,
+                injection_depth: None,
+                injection_order: None,
+                forbid_overrides: None,
+                injection_trigger: Vec::new(),
+                builtin: false,
+                editable: true,
+                description: String::new(),
+            },
+            PromptItem {
+                identifier: "charPersonality".to_string(),
+                name: "Char Personality".to_string(),
+                role: "system".to_string(),
+                content: String::new(),
+                system_prompt: true,
+                marker: true,
+                enabled: None,
+                injection_position: None,
+                injection_depth: None,
+                injection_order: None,
+                forbid_overrides: None,
+                injection_trigger: Vec::new(),
+                builtin: false,
+                editable: true,
+                description: String::new(),
+            },
+            PromptItem {
+                identifier: "scenario".to_string(),
+                name: "Scenario".to_string(),
+                role: "system".to_string(),
+                content: String::new(),
+                system_prompt: true,
+                marker: true,
+                enabled: None,
+                injection_position: None,
+                injection_depth: None,
+                injection_order: None,
+                forbid_overrides: None,
+                injection_trigger: Vec::new(),
+                builtin: false,
+                editable: true,
+                description: String::new(),
+            },
+            PromptItem {
+                identifier: "personaDescription".to_string(),
+                name: "Persona Description".to_string(),
+                role: "system".to_string(),
+                content: String::new(),
+                system_prompt: true,
+                marker: true,
+                enabled: None,
+                injection_position: None,
+                injection_depth: None,
+                injection_order: None,
+                forbid_overrides: None,
+                injection_trigger: Vec::new(),
+                builtin: false,
+                editable: true,
+                description: String::new(),
+            },
+        ],
+        prompt_order: vec![
+            PromptOrder {
+                character_id: 100000,
+                order: vec![
+                    PromptOrderItem { identifier: "main".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "worldInfoBefore".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "charDescription".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "charPersonality".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "scenario".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "enhanceDefinitions".to_string(), enabled: false, position: None },
+                    PromptOrderItem { identifier: "nsfw".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "worldInfoAfter".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "dialogueExamples".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "chatHistory".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "jailbreak".to_string(), enabled: true, position: None },
+                ],
+            },
+            PromptOrder {
+                character_id: 100001,
+                order: vec![
+                    PromptOrderItem { identifier: "main".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "worldInfoBefore".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "personaDescription".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "charDescription".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "charPersonality".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "scenario".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "enhanceDefinitions".to_string(), enabled: false, position: None },
+                    PromptOrderItem { identifier: "nsfw".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "worldInfoAfter".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "dialogueExamples".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "chatHistory".to_string(), enabled: true, position: None },
+                    PromptOrderItem { identifier: "jailbreak".to_string(), enabled: true, position: None },
+                ],
+            },
+        ],
+        wi_format: "{0}".to_string(),
+        scenario_format: "{{scenario}}".to_string(),
+        personality_format: "{{personality}}".to_string(),
+        send_if_empty: String::new(),
+        impersonation_prompt: "[Write your next reply from the point of view of {{user}}, using the chat history so far as a guideline for the writing style of {{user}}. Don't write as {{char}} or system. Don't describe actions of {{char}}.]".to_string(),
+        new_chat_prompt: "[Start a new Chat]".to_string(),
+        new_group_chat_prompt: "[Start a new group chat. Group members: {{group}}]".to_string(),
+        new_example_chat_prompt: "[Example Chat]".to_string(),
+        continue_nudge_prompt: "[Continue your last message without repeating its original content.]".to_string(),
+        group_nudge_prompt: "[Write the next reply only as {{char}}.]".to_string(),
+        stream_openai: true,
+        use_sysprompt: false,
+        assistant_prefill: String::new(),
+        reasoning_effort: String::new(),
+        max_context_unlocked: false,
+        openai_max_context: 4095,
+        openai_max_tokens: 300,
+        names_behavior: 0,
         instruct: Some(InstructTemplate::new(name)),
         context: Some(ContextTemplate::new(name)),
         sysprompt: Some(SystemPrompt::new(name)),
         reasoning: Some(ReasoningTemplate::new(name)),
-        prompt: Some(prompt),
         source_api_id: None,
-        extensions: serde_json::Map::new(),
+        extensions: std::collections::HashMap::new(),
     }
 }
 
@@ -1376,12 +1656,14 @@ mod tests {
 
         let preset = load_combined_preset(&store, "Default").expect("load default preset");
         assert_eq!(preset.name, "Default");
-        assert!(preset.sampler.is_some());
+        assert!(!preset.prompts.is_empty());
+        assert!(!preset.prompt_order.is_empty());
+        assert_eq!(preset.new_chat_prompt, "[Start a new Chat]");
+        assert_eq!(preset.wi_format, "{0}");
         assert!(preset.instruct.is_some());
         assert!(preset.context.is_some());
         assert!(preset.sysprompt.is_some());
         assert!(preset.reasoning.is_some());
-        assert!(preset.prompt.is_some());
         assert!(preset.source_api_id.is_none());
     }
 
