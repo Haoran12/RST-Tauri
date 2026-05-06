@@ -2,17 +2,15 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { NButton, NCard, NEmpty, NIcon, NTag } from 'naive-ui'
-import { CloseOutline, KeyOutline, LayersOutline, SparklesOutline } from '@vicons/ionicons5'
+import { CloseOutline, SparklesOutline } from '@vicons/ionicons5'
 import { useAppShellStore } from '@/stores/appShell'
 import { useChatStore } from '@/stores/chat'
-import { useAgentStore } from '@/stores/agent'
 import { useSettingsStore } from '@/stores/settings'
 import { useWorldbooksStore } from '@/stores/worldbooks'
 
 const appShell = useAppShellStore()
 const route = useRoute()
 const chatStore = useChatStore()
-const agentStore = useAgentStore()
 const settingsStore = useSettingsStore()
 const worldbooksStore = useWorldbooksStore()
 
@@ -38,57 +36,13 @@ const stSummaryItems = computed(() => {
   ]
 })
 
-const agentSummaryItems = computed(() => [
-  {
-    label: '当前 World',
-    value: agentStore.currentWorldId ?? '未选择',
-  },
-  {
-    label: '主线时间',
-    value: agentStore.mainlineCursor?.mainline_time_anchor.display_text ?? '未加载',
-  },
-  {
-    label: '会话数量',
-    value: String(agentStore.sessions.length),
-  },
-  {
-    label: '角色数量',
-    value: String(agentStore.characters.length),
-  },
-])
-
-const apiSummaryItems = computed(() => [
-  {
-    label: '激活配置',
-    value: settingsStore.activeApiConfig?.name ?? '未选择',
-  },
-  {
-    label: 'Provider',
-    value: settingsStore.activeApiConfig?.provider ?? '-',
-  },
-  {
-    label: '模型',
-    value: settingsStore.activeApiConfig?.model ?? '-',
-  },
-  {
-    label: '配置数量',
-    value: String(settingsStore.apiConfigs.length),
-  },
-])
-
 const panelTitle = computed(() => {
   switch (route.name) {
     case 'st-chat':
       return 'ST 摘要'
-    case 'agent-worlds':
-      return 'Agent 摘要'
-    case 'agent-world-editor':
-      return 'Editor 摘要'
-    case 'logs':
-      return '日志规划'
     default:
       return '检查面板'
-  }
+    }
 })
 
 const currentSummary = computed(() => {
@@ -100,30 +54,9 @@ const currentSummary = computed(() => {
         tip: '切换当前 API 配置只影响下一次请求的连接与 Provider 映射，不会改写会话世界书绑定。',
         items: stSummaryItems.value,
       }
-    case 'agent-worlds':
-      return {
-        icon: LayersOutline,
-        tone: 'info' as const,
-        tip: 'Agent 工作区只展示入口和只读摘要；结构化 Truth 编辑仍需进入 World Editor。',
-        items: agentSummaryItems.value,
-      }
-    case 'agent-world-editor':
-      return {
-        icon: LayersOutline,
-        tone: 'warning' as const,
-        tip: 'World Editor 提交遵守 paused-only 边界；右侧只读摘要不参与 validation 或提交。',
-        items: agentSummaryItems.value,
-      }
-    case 'logs':
-      return {
-        icon: KeyOutline,
-        tone: 'default' as const,
-        tip: '日志页后续会拆分全局 Logs、World Logs 与 Agent Trace，并提供 request / trace 双向跳转。',
-        items: apiSummaryItems.value,
-      }
     default:
       return null
-  }
+    }
 })
 </script>
 
@@ -161,28 +94,6 @@ const currentSummary = computed(() => {
             >
               <span>{{ item.label }}</span>
               <strong>{{ item.value }}</strong>
-            </div>
-          </div>
-        </NCard>
-
-        <NCard
-          v-if="route.name === 'agent-world-editor'"
-          size="small"
-          title="结构边界"
-          class="summary-card"
-        >
-          <div class="summary-list">
-            <div class="summary-row">
-              <span>Truth 编辑</span>
-              <strong>World Editor</strong>
-            </div>
-            <div class="summary-row">
-              <span>运行时提交</span>
-              <strong>StateCommitter</strong>
-            </div>
-            <div class="summary-row">
-              <span>只读摘要</span>
-              <strong>InspectPanel</strong>
             </div>
           </div>
         </NCard>

@@ -21,7 +21,6 @@ import {
 import { computed, ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { SearchOutline, AddOutline, TrashOutline, SettingsOutline, ReorderFourOutline, EllipsisHorizontalOutline } from '@vicons/ionicons5'
-import { useAgentStore } from '@/stores/agent'
 import { useAppShellStore } from '@/stores/appShell'
 import { useCharactersStore } from '@/stores/characters'
 import { useChatStore } from '@/stores/chat'
@@ -35,7 +34,6 @@ import type { PromptItem } from '@/types/preset'
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
-const agentStore = useAgentStore()
 const appShellStore = useAppShellStore()
 const charactersStore = useCharactersStore()
 const chatStore = useChatStore()
@@ -91,7 +89,6 @@ const presetSectionLabels: Record<PresetSectionKey, string> = {
 // Computed page type
 const isWorldbooksPage = computed(() => route.name === 'resources-worldbooks')
 const isPresetsPage = computed(() => route.name === 'resources-presets')
-const currentWorldId = computed(() => String(route.params.worldId || 'default'))
 
 // Worldbook file options for selector
 const worldbookOptions = computed(() => {
@@ -133,8 +130,6 @@ const pageTitle = computed(() => {
   const titles: Record<string, string> = {
     'st-home': 'ST',
     'st-chat': '会话',
-    'agent-home': 'Agent',
-    'agent-worlds': 'Worlds',
     'resources-characters': '角色卡',
     'resources-worldbooks': '世界书',
     'resources-presets': '预设',
@@ -166,23 +161,6 @@ const contextItems = computed<ContextItem[]>(() => {
           action: () => undefined,
         })),
       ]
-    case 'agent-home':
-      return agentStore.sessions
-        .slice()
-        .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-        .map((session) => ({
-          id: session.session_id,
-          name: session.title,
-          type: session.session_kind,
-          meta: session.period_anchor.display_text,
-          action: () => router.push({
-            name: 'agent-chat',
-            params: {
-              worldId: session.world_id,
-              sessionId: session.session_id,
-            },
-          }),
-        }))
     case 'st-chat':
       return chatStore.sessions
         .slice()
@@ -195,24 +173,6 @@ const contextItems = computed<ContextItem[]>(() => {
           active: route.params.sessionId === session.id,
           session,
           action: () => router.push({ name: 'st-chat', params: { sessionId: session.id } }),
-        }))
-    case 'agent-worlds':
-      return agentStore.sessions
-        .slice()
-        .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-        .map((session) => ({
-          id: session.session_id,
-          name: session.title,
-          type: session.session_kind,
-          meta: session.period_anchor.display_text,
-          active: route.params.sessionId === session.session_id,
-          action: () => router.push({
-            name: 'agent-chat',
-            params: {
-              worldId: session.world_id,
-              sessionId: session.session_id,
-            },
-          }),
         }))
     case 'resources-characters':
       return charactersStore.characters.map((item) => ({
@@ -260,10 +220,6 @@ const filteredItems = computed(() => {
 
 const isDefaultLoading = computed(() => {
   switch (route.name) {
-    case 'agent-home':
-      return agentStore.isLoading
-    case 'agent-worlds':
-      return agentStore.isLoading
     case 'resources-characters':
       return charactersStore.isLoading
     case 'resources-presets':
@@ -274,17 +230,13 @@ const isDefaultLoading = computed(() => {
 })
 
 const showDefaultAddButton = computed(() => {
-  return ['st-chat', 'agent-home', 'agent-worlds', 'resources-characters', 'resources-presets'].includes(route.name as string)
+  return ['st-chat', 'resources-characters', 'resources-presets'].includes(route.name as string)
 })
 
 const defaultEmptyDescription = computed(() => {
   switch (route.name) {
     case 'st-chat':
       return '暂无会话，点击上方按钮创建'
-    case 'agent-home':
-      return '暂无 Agent 会话'
-    case 'agent-worlds':
-      return '暂无 Agent 会话'
     case 'resources-characters':
       return '暂无角色卡，请导入'
     case 'resources-presets':
@@ -306,10 +258,6 @@ async function handleDefaultAdd() {
       }
       break
     }
-    case 'agent-home':
-    case 'agent-worlds':
-      window.dispatchEvent(new CustomEvent('open-agent-session-create'))
-      break
     case 'resources-characters':
       window.dispatchEvent(new CustomEvent('open-character-import'))
       break
@@ -687,8 +635,6 @@ watch(() => route.name, async (newName) => {
       charactersStore.loadCharacters(),
       presetsStore.loadPresetList(),
     ])
-  } else if (newName === 'agent-home') {
-    await agentStore.loadWorld(currentWorldId.value)
   } else if (newName === 'resources-characters') {
     await charactersStore.loadCharacters()
   } else if (newName === 'resources-presets') {
@@ -696,20 +642,12 @@ watch(() => route.name, async (newName) => {
     if (!presetsStore.currentPreset && presetsStore.presetList[0]) {
       await presetsStore.loadPreset(presetsStore.presetList[0].name)
     }
-  } else if (newName === 'agent-worlds') {
-    await agentStore.loadWorld(currentWorldId.value)
   }
 }, { immediate: true })
 
 onMounted(async () => {
   if (isWorldbooksPage.value) {
     await worldbooksStore.loadWorldbooks()
-  }
-})
-
-watch(currentWorldId, async (worldId) => {
-  if (route.name === 'agent-worlds') {
-    await agentStore.loadWorld(worldId)
   }
 })
 </script>
