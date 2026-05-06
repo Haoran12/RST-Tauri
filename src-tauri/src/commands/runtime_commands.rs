@@ -751,8 +751,14 @@ pub async fn send_assembled_st_chat_message(
     };
 
     let store_guard = state.sqlite_store.read().await;
+    tracing::info!(
+        "[ST Chat Log] sqlite_store present: {}, request_id: {}",
+        store_guard.is_some(),
+        request_id
+    );
     if let Some(sqlite_store) = store_guard.as_ref() {
         let request_json = serde_json::to_value(&request).unwrap_or(serde_json::Value::Null);
+        tracing::info!("[ST Chat Log] Calling log_start for request_id: {}", request_id);
         sqlite_store
             .llm_logger()
             .log_start(
@@ -765,11 +771,15 @@ pub async fn send_assembled_st_chat_message(
                 None,
             )
             .await;
+    } else {
+        tracing::warn!("[ST Chat Log] sqlite_store is None, log_start skipped");
     }
 
     match provider.chat(request).await {
         Ok(resp) => {
+            tracing::info!("[ST Chat Log] LLM call succeeded, request_id: {}", request_id);
             if let Some(sqlite_store) = store_guard.as_ref() {
+                tracing::info!("[ST Chat Log] Calling log_success for request_id: {}", request_id);
                 sqlite_store
                     .llm_logger()
                     .log_success(
@@ -785,6 +795,8 @@ pub async fn send_assembled_st_chat_message(
                         }),
                     )
                     .await;
+            } else {
+                tracing::warn!("[ST Chat Log] sqlite_store is None, log_success skipped");
             }
 
             Ok(ChatResponseData {

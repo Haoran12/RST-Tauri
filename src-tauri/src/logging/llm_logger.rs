@@ -244,7 +244,12 @@ impl LlmCallLogger {
             chunk_count: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
         };
 
+        tracing::info!(
+            "[LlmLogger] log_start called, request_id: {}, inserting into in_progress",
+            request_id
+        );
         self.in_progress.write().await.insert(request_id, call);
+        tracing::info!("[LlmLogger] log_start completed, request_id: {}", context.request_id);
     }
 
     /// Log a stream chunk for an in-progress call
@@ -312,7 +317,12 @@ impl LlmCallLogger {
         reasoning_text: Option<&str>,
         token_usage: Option<serde_json::Value>,
     ) {
+        tracing::info!("[LlmLogger] log_success called, request_id: {}", request_id);
         let call = self.in_progress.read().await.get(request_id).cloned();
+        tracing::info!(
+            "[LlmLogger] log_success found in_progress call: {}",
+            call.is_some()
+        );
         if let Some(call) = call {
             self.in_progress.write().await.remove(request_id);
 
@@ -324,7 +334,12 @@ impl LlmCallLogger {
             let readable_text = assemble_readable_text(&call.request_json, &response_json);
             let redaction_applied = call.redaction_applied || response_redacted;
 
-            sqlx::query(
+            tracing::info!(
+                "[LlmLogger] log_success inserting into database, request_id: {}, latency_ms: {}",
+                request_id,
+                latency_ms
+            );
+            let result = sqlx::query(
                 r#"
                 INSERT INTO llm_call_logs (
                     request_id, mode, world_id, session_id, scene_turn_id, trace_id,
@@ -363,8 +378,16 @@ impl LlmCallLogger {
             .bind(call.started_at.to_rfc3339())
             .bind(completed_at.to_rfc3339())
             .execute(&self.pool)
-            .await
-            .ok();
+            .await;
+            tracing::info!(
+                "[LlmLogger] log_success database insert result: {:?}",
+                result.map(|r| r.rows_affected())
+            );
+        } else {
+            tracing::warn!(
+                "[LlmLogger] log_success request_id {} not found in in_progress",
+                request_id
+            );
         }
     }
 
