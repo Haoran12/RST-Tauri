@@ -64,6 +64,7 @@ export interface LogRecordPage {
   offset: number
   limit: number
   has_more: boolean
+  total_count?: number
 }
 
 export interface LlmLogDetail {
