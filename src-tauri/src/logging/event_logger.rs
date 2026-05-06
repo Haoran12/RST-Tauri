@@ -79,6 +79,18 @@ impl EventLogger {
                 protected INTEGER DEFAULT 0,
                 created_at TEXT NOT NULL
             );
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to create app_event_logs table: {}", e))?;
+
+        // Migration: add missing columns if table already exists
+        self.migrate_add_column("protected", "INTEGER DEFAULT 0").await?;
+
+        // Create indexes
+        sqlx::query(
+            r#"
             CREATE INDEX IF NOT EXISTS idx_event_logs_event_id ON app_event_logs(event_id);
             CREATE INDEX IF NOT EXISTS idx_event_logs_level ON app_event_logs(level);
             CREATE INDEX IF NOT EXISTS idx_event_logs_event_type ON app_event_logs(event_type);
@@ -88,7 +100,30 @@ impl EventLogger {
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| format!("Failed to create app_event_logs table: {}", e))?;
+        .map_err(|e| format!("Failed to create app_event_logs indexes: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Add a column if it doesn't exist
+    async fn migrate_add_column(&self, column: &str, definition: &str) -> Result<(), String> {
+        use sqlx::Row;
+        let row = sqlx::query(
+            "SELECT COUNT(*) AS count FROM pragma_table_info('app_event_logs') WHERE name = ?",
+        )
+        .bind(column)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to check column existence: {}", e))?;
+        let has_column: bool = row.get::<i64, _>("count") != 0;
+
+        if !has_column {
+            let sql = format!("ALTER TABLE app_event_logs ADD COLUMN {} {}", column, definition);
+            sqlx::query(&sql)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| format!("Failed to add column {}: {}", column, e))?;
+        }
 
         Ok(())
     }

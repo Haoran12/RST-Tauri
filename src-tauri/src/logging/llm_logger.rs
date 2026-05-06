@@ -123,12 +123,33 @@ impl LlmCallLogger {
                 created_at TEXT NOT NULL,
                 completed_at TEXT
             );
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to create llm_call_logs table: {}", e))?;
+
+        // Migration: add missing columns if table already exists
+        self.migrate_add_column("protected", "INTEGER DEFAULT 0").await?;
+        self.migrate_add_column("redaction_applied", "INTEGER DEFAULT 0").await?;
+
+        // Create indexes
+        sqlx::query(
+            r#"
             CREATE INDEX IF NOT EXISTS idx_llm_logs_request_id ON llm_call_logs(request_id);
             CREATE INDEX IF NOT EXISTS idx_llm_logs_world_id ON llm_call_logs(world_id);
             CREATE INDEX IF NOT EXISTS idx_llm_logs_trace_id ON llm_call_logs(trace_id);
             CREATE INDEX IF NOT EXISTS idx_llm_logs_created_at ON llm_call_logs(created_at);
             CREATE INDEX IF NOT EXISTS idx_llm_logs_protected ON llm_call_logs(protected);
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to create llm_call_logs indexes: {}", e))?;
 
+        // Create stream chunks table
+        sqlx::query(
+            r#"
             CREATE TABLE IF NOT EXISTS llm_stream_chunks (
                 chunk_id TEXT PRIMARY KEY,
                 request_id TEXT NOT NULL,
@@ -142,7 +163,30 @@ impl LlmCallLogger {
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| format!("Failed to create llm_call_logs table: {}", e))?;
+        .map_err(|e| format!("Failed to create llm_stream_chunks table: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Add a column if it doesn't exist
+    async fn migrate_add_column(&self, column: &str, definition: &str) -> Result<(), String> {
+        use sqlx::Row;
+        let row = sqlx::query(
+            "SELECT COUNT(*) AS count FROM pragma_table_info('llm_call_logs') WHERE name = ?",
+        )
+        .bind(column)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to check column existence: {}", e))?;
+        let has_column: bool = row.get::<i64, _>("count") != 0;
+
+        if !has_column {
+            let sql = format!("ALTER TABLE llm_call_logs ADD COLUMN {} {}", column, definition);
+            sqlx::query(&sql)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| format!("Failed to add column {}: {}", column, e))?;
+        }
 
         Ok(())
     }
