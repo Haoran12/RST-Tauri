@@ -257,7 +257,7 @@ function switchMode(mode: AppMode) {
   border-radius: 6px;
   background: var(--n-popover-color, var(--color-bg-surface, #fff));
   box-shadow: var(--n-box-shadow2, 0 6px 18px rgba(0, 0, 0, 0.14));
-  color: var(--n-text-color, #1f2937);
+  color: var(--n-text-color-1, var(--color-text-primary, #1f2937));
   font-size: 12px;
   line-height: 1.2;
   white-space: nowrap;
