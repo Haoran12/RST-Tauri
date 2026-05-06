@@ -1406,7 +1406,7 @@ onMounted(async () => {
 }
 
 .session-settings-modal {
-  width: min(640px, calc(100vw - 32px));
+  width: min(420px, 60vw, calc(100vw - 32px));
 }
 
 .session-switch-modal {
