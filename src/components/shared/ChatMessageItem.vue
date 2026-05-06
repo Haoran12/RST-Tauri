@@ -200,16 +200,18 @@ function escapeHtml(raw: string) {
 <template>
   <article :class="['chat-message-item', role]">
     <div class="message-shell">
-      <div class="message-author">{{ name }}</div>
+      <div class="message-header">
+        <span class="message-author">{{ name }}</span>
+        <span class="message-meta">
+          <span>#{{ floor }}</span>
+          <span v-if="dateLabel">{{ dateLabel }}</span>
+          <span v-if="timeLabel">{{ timeLabel }}</span>
+          <span>~{{ tokenEstimate }}t</span>
+        </span>
+      </div>
       <div class="message-bubble">
         <div class="message-markdown" v-html="markdownHtml" />
         <slot name="attachments" />
-      </div>
-      <div class="message-meta">
-        <span>楼层 {{ floor }}</span>
-        <span v-if="dateLabel">{{ dateLabel }}</span>
-        <span v-if="timeLabel">{{ timeLabel }}</span>
-        <span>约 {{ tokenEstimate }} tokens</span>
       </div>
       <div class="message-actions">
         <NTooltip trigger="hover">
@@ -274,11 +276,29 @@ function escapeHtml(raw: string) {
   align-items: center;
 }
 
-.message-author {
+.message-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin-bottom: 5px;
+}
+
+.chat-message-item.user .message-header {
+  flex-direction: row-reverse;
+}
+
+.message-author {
   font-size: 12px;
   font-weight: 600;
   color: var(--n-text-color-2);
+}
+
+.message-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 11px;
+  color: var(--n-text-color-3);
 }
 
 .message-bubble {
@@ -306,24 +326,13 @@ function escapeHtml(raw: string) {
   border-color: color-mix(in srgb, var(--chat-system-bubble-color, var(--n-text-color-3)) var(--chat-system-bubble-border-opacity, 18%), var(--n-border-color));
 }
 
-.message-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 9px;
-  margin-top: 6px;
-  font-size: 11px;
-  color: var(--n-text-color-3);
-}
-
 .message-actions {
   display: flex;
   gap: 2px;
   margin-top: 4px;
 }
 
-.chat-message-item.assistant .message-meta,
 .chat-message-item.assistant .message-actions,
-.chat-message-item.system .message-meta,
 .chat-message-item.system .message-actions {
   justify-content: center;
 }
