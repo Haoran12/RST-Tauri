@@ -153,10 +153,6 @@ const userName = computed(() => {
   return chatStore.currentSession?.chat_metadata?.user_persona?.name || 'User'
 })
 
-const shouldShowGenerating = computed(() => {
-  return chatStore.isGenerating && chatStore.messages[chatStore.messages.length - 1]?.role !== 'assistant'
-})
-
 function messageRole(msg: ChatMessage): 'user' | 'assistant' | 'system' {
   if (msg.role === 'user') return 'user'
   if (msg.role === 'assistant') return 'assistant'
@@ -435,10 +431,6 @@ onBeforeUnmount(() => {
                   </div>
                 </template>
               </ChatMessageItem>
-              <div v-if="shouldShowGenerating" class="generating-indicator">
-                <NSpin size="small" />
-                <span>正在生成...</span>
-              </div>
             </div>
           </NScrollbar>
         </div>
@@ -637,19 +629,9 @@ onBeforeUnmount(() => {
   border: 1px solid var(--n-border-color);
 }
 
-.generating-indicator {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 16px;
-  color: var(--n-text-color-3);
-  font-size: 13px;
-}
-
 /* Input */
 .input-bar {
-  padding: 12px 14px;
+  padding: 16px 14px;
   border-top: 1px solid var(--n-border-color);
   flex-shrink: 0;
   min-width: 0;
