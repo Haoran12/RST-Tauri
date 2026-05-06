@@ -10,7 +10,6 @@ import {
   NEmpty,
   NIcon,
   NInput,
-  NInputNumber,
   NPagination,
   NSelect,
   NScrollbar,
