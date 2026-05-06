@@ -637,8 +637,18 @@ async function onDrop(event: DragEvent, targetItem: PromptItem) {
     delete item.position
   })
 
-  // 更新 preset.prompt_order（触发响应式更新）
-  preset.prompt_order = [{ character_id: 100000, order: newOrder }]
+  // 更新所有 prompt_order 条目（保持一致性）
+  preset.prompt_order = preset.prompt_order.map((orderEntry) => ({
+    ...orderEntry,
+    order: newOrder.map((item) => {
+      // 保留原有的 enabled 状态
+      const existing = orderEntry.order?.find((o) => o.identifier === item.identifier)
+      return {
+        identifier: item.identifier,
+        enabled: existing?.enabled ?? true,
+      }
+    }),
+  }))
 
   await presetsStore.savePreset(preset)
 
