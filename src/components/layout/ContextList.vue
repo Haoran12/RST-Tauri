@@ -17,10 +17,11 @@ import {
   NText,
   NTag,
   useMessage,
+  useDialog,
 } from 'naive-ui'
-import { computed, ref, watch, onMounted } from 'vue'
+import { computed, ref, watch, onMounted, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { SearchOutline, AddOutline, TrashOutline, SettingsOutline, ReorderFourOutline, EllipsisHorizontalOutline } from '@vicons/ionicons5'
+import { SearchOutline, AddOutline, TrashOutline, SettingsOutline, ReorderFourOutline, EllipsisHorizontalOutline, SwapHorizontalOutline } from '@vicons/ionicons5'
 import { useAppShellStore } from '@/stores/appShell'
 import { useCharactersStore } from '@/stores/characters'
 import { useChatStore } from '@/stores/chat'
@@ -34,6 +35,7 @@ import type { PromptItem } from '@/types/preset'
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
+const dialog = useDialog()
 const appShellStore = useAppShellStore()
 const charactersStore = useCharactersStore()
 const chatStore = useChatStore()
@@ -47,6 +49,7 @@ const editSessionWorldbooks = ref<string[]>([])
 const editPersonaName = ref('')
 const editPersonaDescription = ref('')
 const isSavingSessionSettings = ref(false)
+const switchingSessionId = ref<string | null>(null)
 
 // Drag and drop state for prompt items
 const draggedItem = ref<PromptItem | null>(null)
@@ -300,9 +303,65 @@ async function saveSessionSettings() {
 }
 
 function handleSessionMenuSelect(key: string, session: ChatSession) {
-  if (key === 'edit') {
-    openSessionSettings(session)
+  if (key === 'switch') {
+    switchingSessionId.value = session.id
+  } else if (key === 'delete') {
+    confirmDeleteSession(session)
   }
+}
+
+function canSwitchSession(session: ChatSession): boolean {
+  // 如果点击的是当前会话，不需要检查
+  if (route.params.sessionId === session.id) return true
+  // 检查当前会话是否有未完成的操作
+  return !chatStore.isGenerating && !editingStSessionId.value
+}
+
+async function confirmSwitchSession() {
+  if (!switchingSessionId.value) return
+  const session = chatStore.sessions.find(s => s.id === switchingSessionId.value)
+  if (!session) {
+    switchingSessionId.value = null
+    return
+  }
+  if (!canSwitchSession(session)) {
+    message.warning('当前会话有未完成的操作，无法切换')
+    switchingSessionId.value = null
+    return
+  }
+  switchingSessionId.value = null
+  await router.push({ name: 'st-chat', params: { sessionId: session.id } })
+}
+
+async function confirmDeleteSession(session: ChatSession) {
+  dialog.warning({
+    title: '删除会话',
+    content: `确定删除会话「${session.name || '未命名会话'}」？此操作不可恢复。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      await chatStore.deleteSession(session.id)
+      message.success('会话已删除')
+    },
+  })
+}
+
+function getSessionMenuOptions(session: ChatSession) {
+  const isCurrentSession = route.params.sessionId === session.id
+  const canSwitch = canSwitchSession(session)
+  return [
+    {
+      label: isCurrentSession ? '当前会话' : '切换会话',
+      key: 'switch',
+      disabled: isCurrentSession || !canSwitch,
+      icon: () => h(NIcon, null, { default: () => h(SwapHorizontalOutline) }),
+    },
+    {
+      label: '删除会话',
+      key: 'delete',
+      icon: () => h(NIcon, null, { default: () => h(TrashOutline) }),
+    },
+  ]
 }
 
 function formatShortTime(value: string) {
@@ -990,31 +1049,32 @@ onMounted(async () => {
               :key="item.id"
               class="context-item"
               :class="{ 'context-item-active': item.active }"
-              @click="item.action"
+              @click="item.session ? openSessionSettings(item.session) : item.action()"
             >
               <div class="context-item-row">
                 <div class="context-item-main">
                   <span class="context-item-name">{{ item.name }}</span>
                   <NTag size="tiny" :bordered="false">{{ item.type }}</NTag>
                 </div>
-                <NDropdown
-                  v-if="route.name === 'st-chat' && item.session"
-                  trigger="click"
-                  :options="[{ label: '编辑会话', key: 'edit' }]"
-                  @select="(key: string) => handleSessionMenuSelect(key, item.session!)"
-                >
-                  <NButton
-                    quaternary
-                    circle
-                    size="tiny"
-                    class="context-item-menu"
-                    @click.stop
+                <div v-if="route.name === 'st-chat' && item.session" class="context-item-actions">
+                  <NDropdown
+                    trigger="click"
+                    :options="getSessionMenuOptions(item.session)"
+                    @select="(key: string) => handleSessionMenuSelect(key, item.session!)"
                   >
-                    <template #icon>
-                      <NIcon><EllipsisHorizontalOutline /></NIcon>
-                    </template>
-                  </NButton>
-                </NDropdown>
+                    <NButton
+                      quaternary
+                      circle
+                      size="tiny"
+                      class="context-item-menu"
+                      @click.stop
+                    >
+                      <template #icon>
+                        <NIcon><EllipsisHorizontalOutline /></NIcon>
+                      </template>
+                    </NButton>
+                  </NDropdown>
+                </div>
               </div>
               <NText v-if="item.meta" depth="3" class="context-item-meta">
                 {{ item.meta }}
@@ -1072,6 +1132,26 @@ onMounted(async () => {
         <NButton @click="editingStSessionId = null">取消</NButton>
         <NButton type="primary" :loading="isSavingSessionSettings" @click="saveSessionSettings">
           保存
+        </NButton>
+      </div>
+    </NModal>
+
+    <!-- 切换会话确认弹窗 -->
+    <NModal
+      :show="switchingSessionId !== null"
+      preset="card"
+      title="切换会话"
+      class="session-switch-modal"
+      @update:show="value => { if (!value) switchingSessionId = null }"
+    >
+      <NText>确定切换到该会话？</NText>
+      <NText v-if="chatStore.isGenerating" depth="3" class="switch-warning">
+        当前会话正在生成回复，切换将中断当前操作。
+      </NText>
+      <div class="modal-actions">
+        <NButton @click="switchingSessionId = null">取消</NButton>
+        <NButton type="primary" @click="confirmSwitchSession">
+          切换
         </NButton>
       </div>
     </NModal>
@@ -1190,11 +1270,12 @@ onMounted(async () => {
 
 .context-item-menu {
   flex: 0 0 auto;
-  opacity: 0;
+  opacity: 1;
 }
 
-.context-item:hover .context-item-menu {
-  opacity: 1;
+.context-item-actions {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .context-item-meta {
@@ -1326,6 +1407,17 @@ onMounted(async () => {
 
 .session-settings-modal {
   width: min(640px, calc(100vw - 32px));
+}
+
+.session-switch-modal {
+  width: min(400px, calc(100vw - 32px));
+}
+
+.switch-warning {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--n-warning-color);
 }
 
 .modal-actions {
