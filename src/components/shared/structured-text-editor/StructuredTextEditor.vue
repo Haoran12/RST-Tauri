@@ -28,12 +28,14 @@ const props = withDefaults(
     mode?: StructuredTextLanguageId
     readonly?: boolean
     minHeight?: number
+    maxHeight?: number
     useBackendValidation?: boolean
   }>(),
   {
     mode: undefined,
     readonly: false,
     minHeight: 220,
+    maxHeight: undefined,
     useBackendValidation: false,
   },
 )
@@ -93,6 +95,7 @@ async function ensureController() {
     languageExtensions,
     readOnly: props.readonly,
     minHeight: props.minHeight,
+    maxHeight: props.maxHeight,
     diagnosticsProvider: () => diagnostics.value,
     onDocChange: text => {
       emit('update:modelValue', text)
@@ -313,10 +316,14 @@ onBeforeUnmount(() => {
 <style scoped>
 .structured-editor {
   display: grid;
+  grid-template-rows: auto 1fr auto;
   gap: 10px;
+  min-height: v-bind('props.minHeight + "px"');
+  max-height: v-bind('props.maxHeight ? props.maxHeight + "px" : "60vh"');
 }
 
 .editor-host {
   min-height: 220px;
+  overflow: hidden;
 }
 </style>

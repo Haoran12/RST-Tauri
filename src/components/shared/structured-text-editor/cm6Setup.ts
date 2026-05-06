@@ -34,6 +34,7 @@ interface CreateStructuredTextEditorOptions {
   languageExtensions: Extension[]
   readOnly?: boolean
   minHeight?: number
+  maxHeight?: number
   onDocChange: (text: string) => void
   onBlur?: () => void
   diagnosticsProvider: () => StructuredTextDiagnostic[]
@@ -50,6 +51,7 @@ export function createStructuredTextEditor(
     '&': {
       height: '100%',
       minHeight: `${options.minHeight ?? 220}px`,
+      maxHeight: options.maxHeight ? `${options.maxHeight}px` : '60vh',
       backgroundColor: 'var(--color-bg-surface)',
       color: 'var(--color-text-primary)',
       borderRadius: '10px',
