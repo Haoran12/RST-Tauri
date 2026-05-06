@@ -27,7 +27,6 @@ import { CheckmarkCircleOutline, KeyOutline, RadioButtonOnOutline, RefreshOutlin
 import StructuredTextEditor from '@/components/shared/structured-text-editor/StructuredTextEditor.vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useRuntimeStore } from '@/stores/runtime'
-import { useSaveHandler } from '@/composables/useSaveHandler'
 import type { ApiConfig } from '@/types/st'
 import { DEFAULT_BINDINGS } from '@/types/structuredText'
 import type { StructuredTextDiagnostic } from '@/types/structuredText'
@@ -273,9 +272,6 @@ async function handleSave() {
     isSaving.value = false
   }
 }
-
-// Register Ctrl+S save handler
-useSaveHandler(handleSave)
 
 async function persistDraftConnectionForModelFetch() {
   if (!draft.value) return

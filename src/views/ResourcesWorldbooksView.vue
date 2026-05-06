@@ -17,7 +17,6 @@ import {
 } from 'naive-ui'
 import { useWorldbooksStore } from '@/stores/worldbooks'
 import { useRuntimeStore } from '@/stores/runtime'
-import { useSaveHandler } from '@/composables/useSaveHandler'
 import WorldbookEntryEditor from '@/components/st/worldbook/WorldbookEntryEditor.vue'
 import type { WorldInfoEntry } from '@/types/st'
 
@@ -144,20 +143,6 @@ async function saveMeta() {
     message.error(String(e))
   }
 }
-
-// Save current worldbook
-async function handleSave() {
-  if (!store.currentWorldbook || !store.currentWorldbookId) return
-  try {
-    await store.saveCurrentWorldbook()
-    message.success('世界书已保存')
-  } catch (e) {
-    message.error(String(e))
-  }
-}
-
-// Register Ctrl+S save handler
-useSaveHandler(handleSave)
 
 // Update entry
 async function updateEntry(uid: number, entry: WorldInfoEntry) {

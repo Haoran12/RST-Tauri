@@ -15,7 +15,6 @@ import {
 import { useCharactersStore } from '@/stores/characters'
 import { getCharacter, saveCharacter } from '@/services/storage'
 import { logFrontendError } from '@/services/logs'
-import { useSaveHandler } from '@/composables/useSaveHandler'
 import type { TavernCardV3 } from '@/types/st'
 import type {
   StructuredTextBinding,
@@ -240,9 +239,6 @@ async function persistCurrentCharacter(options: {
 async function handleSave() {
   await persistCurrentCharacter({ silent: false })
 }
-
-// Register Ctrl+S save handler
-useSaveHandler(handleSave)
 
 function handleEditorFocusOut(event: FocusEvent) {
   const nextTarget = event.relatedTarget

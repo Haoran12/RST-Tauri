@@ -19,7 +19,6 @@ import {
 } from 'naive-ui'
 import { usePresetsStore, type PresetSectionKey } from '@/stores/presets'
 import { useRuntimeStore } from '@/stores/runtime'
-import { useSaveHandler } from '@/composables/useSaveHandler'
 import type { PromptItem, PromptOrder, PromptOrderItem } from '@/types/preset'
 
 const store = usePresetsStore()
@@ -182,9 +181,6 @@ async function persistCurrentPreset(successText = '预设已保存') {
     message.error(String(e))
   }
 }
-
-// Register Ctrl+S save handler
-useSaveHandler(() => persistCurrentPreset())
 
 function setPresetField<K extends keyof NonNullable<typeof store.currentPreset>>(key: K, value: NonNullable<typeof store.currentPreset>[K]) {
   if (!store.currentPreset) return
