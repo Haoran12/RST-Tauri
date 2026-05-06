@@ -27,10 +27,13 @@ export function inferInitialStructuredTextMode(
   binding: StructuredTextBinding,
   explicitMode?: StructuredTextLanguageId,
 ): StructuredTextLanguageId {
-  if (explicitMode && binding.allowedModes.includes(explicitMode)) {
+  // 如果显式指定了非默认模式，优先使用
+  if (explicitMode && explicitMode !== binding.defaultMode && binding.allowedModes.includes(explicitMode)) {
     return explicitMode
   }
 
+  // 如果显式指定的是默认模式（通常是 plain），允许推断覆盖
+  // 这样可以自动识别已有的 JSON/YAML 内容并应用正确高亮
   const fallback = binding.allowedModes.includes(binding.defaultMode)
     ? binding.defaultMode
     : binding.allowedModes[0] ?? 'plain'
