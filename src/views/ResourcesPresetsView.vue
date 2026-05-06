@@ -32,6 +32,13 @@ const editIdentifier = ref('')
 const editName = ref('')
 const editRole = ref<'system' | 'user' | 'assistant'>('system')
 const editContent = ref('')
+const editSystemPrompt = ref(false)
+const editMarker = ref(false)
+const editInjectionPosition = ref<number | null>(0)
+const editInjectionDepth = ref<number | null>(4)
+const editInjectionOrder = ref<number | null>(100)
+const editForbidOverrides = ref(false)
+const editInjectionTrigger = ref('')
 
 const sectionLabels: Record<PresetSectionKey, string> = {
   sampler: 'Sampler',
@@ -43,12 +50,12 @@ const sectionLabels: Record<PresetSectionKey, string> = {
 }
 
 const sectionDescriptions: Record<PresetSectionKey, string> = {
-  sampler: '采样、惩罚、DRY、Mirostat 与 Provider 字段覆盖。',
-  instruct: '用户/助手/系统消息序列、停止符和名称行为。',
-  context: '角色故事串、示例分隔、上下文插入位置和裁剪选项。',
-  sysprompt: '预设级系统提示词，不包含 API 连接、模型或鉴权信息。',
-  reasoning: '推理参数模板和扩展字段，最终由 Provider 映射层裁剪。',
-  prompt: 'Prompt 条目、排序和世界书/角色字段格式化模板。',
+  sampler: 'ST 扁平预设顶层采样字段：采样、惩罚、DRY、Mirostat、流式开关与 token 上限。',
+  instruct: '兼容扩展：保留 instruct 模板字段；当前运行时只消费停止符与少量格式字段。',
+  context: '兼容扩展：保留 context 模板字段；当前运行时主要消费 story_string。',
+  sysprompt: '兼容扩展：保留旧 sysprompt 字段；实际标准应优先使用 prompts/prompt_order。',
+  reasoning: '兼容扩展与 ST 顶层推理字段；运行时优先使用扁平 preset 中的 reasoning_effort。',
+  prompt: 'ST 扁平预设主链：prompts、prompt_order、格式模板与特殊提示词。',
 }
 
 const fixedPromptIdentifiers = new Set([
@@ -78,10 +85,29 @@ const roleOptions = [
   { label: 'Assistant', value: 'assistant' },
 ]
 
+const injectionPositionOptions = [
+  { label: '历史前 (0)', value: 0 },
+  { label: '历史后 (1)', value: 1 },
+]
+
 const namesBehaviorOptions = [
   { label: 'None', value: 'none' },
   { label: 'Force', value: 'force' },
   { label: 'Always', value: 'always' },
+]
+
+const namesBehaviorNumberOptions = [
+  { label: 'None (0)', value: 0 },
+  { label: 'Force (1)', value: 1 },
+  { label: 'Always (2)', value: 2 },
+]
+
+const reasoningEffortOptions = [
+  { label: '空 / 默认', value: '' },
+  { label: 'low', value: 'low' },
+  { label: 'medium', value: 'medium' },
+  { label: 'high', value: 'high' },
+  { label: 'max', value: 'max' },
 ]
 
 const editablePromptItems = computed(() => {
@@ -136,6 +162,13 @@ function openEditModal(item: PromptItem) {
   editName.value = item.name
   editRole.value = item.role
   editContent.value = item.content || ''
+  editSystemPrompt.value = item.system_prompt ?? false
+  editMarker.value = item.marker ?? false
+  editInjectionPosition.value = item.injection_position ?? 0
+  editInjectionDepth.value = item.injection_depth ?? 4
+  editInjectionOrder.value = item.injection_order ?? 100
+  editForbidOverrides.value = item.forbid_overrides ?? false
+  editInjectionTrigger.value = (item.injection_trigger ?? []).join('\n')
   showEditModal.value = true
 }
 
@@ -190,6 +223,16 @@ async function savePromptItem() {
       name: editName.value,
       role: editRole.value,
       content: editContent.value,
+      system_prompt: editSystemPrompt.value,
+      marker: editMarker.value,
+      injection_position: editInjectionPosition.value ?? 0,
+      injection_depth: editInjectionDepth.value ?? 4,
+      injection_order: editInjectionOrder.value ?? 100,
+      forbid_overrides: editForbidOverrides.value,
+      injection_trigger: editInjectionTrigger.value
+        .split(/\r?\n/)
+        .map(item => item.trim())
+        .filter(Boolean),
     }
     await persistCurrentPreset('提示词已保存')
     showEditModal.value = false
@@ -396,6 +439,46 @@ onBeforeUnmount(() => {
                 <NInputNumber
                   :value="store.currentPreset.openai_max_tokens"
                   @update:value="value => setPresetField('openai_max_tokens', value ?? 300)"
+                />
+              </NFormItem>
+              <NFormItem label="Rep Pen Range">
+                <NInputNumber
+                  :value="store.currentPreset.rep_pen_range"
+                  @update:value="value => setPresetField('rep_pen_range', value ?? 0)"
+                />
+              </NFormItem>
+              <NFormItem label="Rep Pen Decay">
+                <NInputNumber
+                  :value="store.currentPreset.rep_pen_decay"
+                  :step="0.05"
+                  @update:value="value => setPresetField('rep_pen_decay', value ?? 0)"
+                />
+              </NFormItem>
+              <NFormItem label="Rep Pen Slope">
+                <NInputNumber
+                  :value="store.currentPreset.rep_pen_slope"
+                  :step="0.05"
+                  @update:value="value => setPresetField('rep_pen_slope', value ?? 0)"
+                />
+              </NFormItem>
+              <NFormItem label="Names Behavior">
+                <NSelect
+                  :value="store.currentPreset.names_behavior"
+                  :options="namesBehaviorNumberOptions"
+                  @update:value="value => setPresetField('names_behavior', value ?? 0)"
+                />
+              </NFormItem>
+              <NFormItem label="Reasoning Effort">
+                <NSelect
+                  :value="store.currentPreset.reasoning_effort"
+                  :options="reasoningEffortOptions"
+                  @update:value="value => setPresetField('reasoning_effort', value ?? '')"
+                />
+              </NFormItem>
+              <NFormItem label="Assistant Prefill">
+                <NInput
+                  :value="store.currentPreset.assistant_prefill"
+                  @update:value="value => setPresetField('assistant_prefill', value)"
                 />
               </NFormItem>
             </div>
@@ -678,6 +761,12 @@ onBeforeUnmount(() => {
                   @update:value="value => setPresetField('personality_format', value)"
                 />
               </NFormItem>
+              <NFormItem label="Send If Empty">
+                <NInput
+                  :value="store.currentPreset.send_if_empty"
+                  @update:value="value => setPresetField('send_if_empty', value)"
+                />
+              </NFormItem>
             </div>
 
             <NFormItem label="New Chat Prompt">
@@ -754,6 +843,14 @@ onBeforeUnmount(() => {
                   </NSpace>
                 </div>
                 <div class="prompt-item-preview">{{ item.content || '动态内容 / 空内容' }}</div>
+                <div class="prompt-item-flags">
+                  <NTag size="small" :bordered="false">
+                    {{ item.system_prompt ? 'system_prompt' : 'inline_message' }}
+                  </NTag>
+                  <NTag size="small" :bordered="false">pos={{ item.injection_position ?? 0 }}</NTag>
+                  <NTag size="small" :bordered="false">depth={{ item.injection_depth ?? 4 }}</NTag>
+                  <NTag size="small" :bordered="false">order={{ item.injection_order ?? 100 }}</NTag>
+                </div>
               </div>
             </div>
           </NForm>
@@ -798,6 +895,34 @@ onBeforeUnmount(() => {
             type="textarea"
             placeholder="提示词内容"
             :autosize="{ minRows: 6, maxRows: 16 }"
+          />
+        </NFormItem>
+        <div class="form-grid">
+          <NFormItem label="System Prompt">
+            <NSwitch v-model:value="editSystemPrompt" />
+          </NFormItem>
+          <NFormItem label="Marker">
+            <NSwitch v-model:value="editMarker" />
+          </NFormItem>
+          <NFormItem label="Forbid Overrides">
+            <NSwitch v-model:value="editForbidOverrides" />
+          </NFormItem>
+          <NFormItem label="Injection Position">
+            <NSelect v-model:value="editInjectionPosition" :options="injectionPositionOptions" />
+          </NFormItem>
+          <NFormItem label="Injection Depth">
+            <NInputNumber v-model:value="editInjectionDepth" />
+          </NFormItem>
+          <NFormItem label="Injection Order">
+            <NInputNumber v-model:value="editInjectionOrder" />
+          </NFormItem>
+        </div>
+        <NFormItem label="Injection Trigger">
+          <NInput
+            v-model:value="editInjectionTrigger"
+            type="textarea"
+            placeholder="每行一个 trigger"
+            :autosize="{ minRows: 3, maxRows: 8 }"
           />
         </NFormItem>
       </NForm>
@@ -956,5 +1081,12 @@ onBeforeUnmount(() => {
   word-break: break-word;
   font-size: 13px;
   color: var(--color-text-secondary, #4b5563);
+}
+
+.prompt-item-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
 }
 </style>

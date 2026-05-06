@@ -25,7 +25,7 @@ SillyTavern 原设计中，预设按 API 类型（kobold / novel / openai / text
 
 ## 2. 预设文件结构
 
-一个预设文件包含所有预设类型，存储在 `./data/presets/` 目录下，每个预设一个 JSON 文件。RST 不再使用 `presets/samplers/`、`presets/instruct/` 等分目录作为运行时持久化来源：
+本应用以 `E:\AIPlay\cards\夏瑾DS预设v0.40.json` 所代表的 ST 扁平 `PresetFile` 作为创建 / 编辑 / 导入 / 导出 / 运行时的实际标准。`./data/presets/` 下每个预设直接保存一个扁平 JSON 文件；RST 不再使用 `presets/samplers/`、`presets/instruct/` 等分目录作为运行时持久化来源：
 
 ```
 ./data/presets/
@@ -40,30 +40,52 @@ SillyTavern 原设计中，预设按 API 类型（kobold / novel / openai / text
 ```typescript
 interface PresetFile {
   name: string;
-  
-  // 采样参数
-  sampler?: SamplerPreset;
-  
-  // 对话格式模板
+
+  // 顶层采样参数（与 ST 保持一致）
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  top_a?: number;
+  min_p?: number;
+  repetition_penalty?: number;
+  frequency_penalty?: number;
+  presence_penalty?: number;
+  openai_max_context?: number;
+  openai_max_tokens?: number;
+  stream_openai?: boolean;
+  reasoning_effort?: string;
+
+  // 顶层 prompt 装配字段（与 ST 保持一致）
+  prompts?: PromptItem[];
+  prompt_order?: PromptOrder[];
+  wi_format?: string;
+  scenario_format?: string;
+  personality_format?: string;
+  send_if_empty?: string;
+  new_chat_prompt?: string;
+  new_group_chat_prompt?: string;
+  new_example_chat_prompt?: string;
+  continue_nudge_prompt?: string;
+  group_nudge_prompt?: string;
+  impersonation_prompt?: string;
+
+  // 兼容扩展：保留旧 RST 分段字段，但不再作为运行时主标准
   instruct?: InstructTemplate;
-  
-  // 上下文组装模板
   context?: ContextTemplate;
-  
-  // 系统提示词
   sysprompt?: SystemPrompt;
-  
-  // 思维链格式
   reasoning?: ReasoningTemplate;
-  
-  // 完整提示词组装
-  prompt?: PromptPreset;
-  
-  // 元数据
+
   source_api_id?: string;
   extensions?: Record<string, any>;
 }
 ```
+
+运行时主规则：
+
+- `prompts + prompt_order` 是提示词组装唯一主链。
+- `chatHistory` 之前且 `system_prompt=true` 的 PromptItem 合并为 provider-level system prompt。
+- `chatHistory` 之后的 PromptItem 作为内联消息加入聊天消息链。
+- `instruct/context/sysprompt/reasoning` 仅作兼容扩展字段保留；当前仅少量字段会被运行时消费。
 
 ## 3. 数据结构
 
@@ -117,7 +139,17 @@ Sampler 编辑规划：
 - `openai_max_context` / `openai_max_tokens` 保留 ST 兼容字段名，但 UI 显示为通用最大上下文 / 最大输出 tokens。运行时必须把最大输出 tokens 写入中立 `ChatRequest.max_tokens`，再由 Provider adapter 映射为 `max_tokens`、`max_output_tokens` 或 `generationConfig.maxOutputTokens`。
 - 不同 Provider 不支持的采样字段由 `llm_api_contract` 驱动屏蔽或转换；UI 后续应在选择了主 API 配置时标记“当前连接会忽略 / 近似映射”的字段，但保存的预设仍保持 ST 兼容字段完整。
 
-### 3.2 Instruct Template（对话格式模板）
+### 3.2 Instruct / Context / SystemPrompt / Reasoning（兼容扩展）
+
+以下字段继续保留在 `PresetFile` 中，目的是：
+
+- 兼容旧版 RST 预设文件
+- 兼容 ST master import 转换
+- 为未来更完整的 ST 模板链路保留字段
+
+它们不是创建 / 编辑 / 运行时的主标准，运行时当前只会选择性消费其中的个别字段。
+
+#### Instruct Template（对话格式模板）
 
 ```typescript
 interface InstructTemplate {
@@ -150,7 +182,7 @@ interface InstructTemplate {
 }
 ```
 
-### 3.3 Context Template（上下文模板）
+#### Context Template（上下文模板）
 
 ```typescript
 interface ContextTemplate {
@@ -172,7 +204,7 @@ interface ContextTemplate {
 }
 ```
 
-### 3.4 System Prompt（系统提示词）
+#### System Prompt（系统提示词）
 
 ```typescript
 interface SystemPrompt {
@@ -181,7 +213,7 @@ interface SystemPrompt {
 }
 ```
 
-### 3.5 Reasoning Template（思维链格式）
+#### Reasoning Template（思维链格式）
 
 ```typescript
 interface ReasoningTemplate {
@@ -192,7 +224,7 @@ interface ReasoningTemplate {
 }
 ```
 
-### 3.6 Prompt Preset（提示词组装）
+### 3.3 Prompt Preset（提示词组装主链）
 
 ```typescript
 interface PromptPreset {
@@ -218,6 +250,11 @@ interface PromptItem {
   content: string;
   system_prompt?: boolean;
   marker?: boolean;
+  injection_position?: number;
+  injection_depth?: number;
+  injection_order?: number;
+  forbid_overrides?: boolean;
+  injection_trigger?: string[];
 }
 
 interface PromptOrderItem {
@@ -277,6 +314,21 @@ function autoSelectPreset(characterName: string, group: string | null): void;
 应用启动或首次列出 / 读取预设时，若 `./data/presets/Default.json` 缺失，存储层必须自动创建默认预设：
 
 ```
+
+当前编辑器与运行时以这些字段为核心：
+
+- `identifier`
+- `content`
+- `role`
+- `system_prompt`
+- `marker`
+- `injection_position`
+- `injection_depth`
+- `injection_order`
+- `forbid_overrides`
+- `injection_trigger`
+
+其中 `injection_position/depth/order/trigger` 必须在文件中原样保留；运行时现阶段已开始消费 `injection_position` 的历史前/后分段语义，其余字段先作为标准字段保存，不得在导入导出时丢失。
 ./data/presets/
 └── Default.json
 ```

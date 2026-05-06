@@ -25,8 +25,8 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 | [71_st_character_cards.md](docs/71_st_character_cards.md) | ST 角色卡：TavernCard V3 + 角色卡导入导出边界 | 实现角色卡管理 |
 | [72_st_worldbook_model.md](docs/72_st_worldbook_model.md) | ST 世界书数据模型：外部世界书 + CharacterBook + 转换规则 | 实现世界书存储和编辑 |
 | [73_st_worldbook_injection.md](docs/73_st_worldbook_injection.md) | ST 世界书注入流程：来源合并、排序、扫描、递归、预算和落槽 | 实现世界书运行时 |
-| [74_st_presets.md](docs/74_st_presets.md) | ST 预设系统：预设类型、导入导出、自动选择、Master Export | 实现预设管理 |
-| [75_st_runtime_assembly.md](docs/75_st_runtime_assembly.md) | ST 运行时组装：全局状态、会话 metadata、Provider 参数适配 | 实现生成请求组装 |
+| [74_st_presets.md](docs/74_st_presets.md) | ST 预设系统：以 ST 扁平 `PresetFile` 为实际标准，覆盖创建 / 编辑 / 导入导出与兼容扩展边界 | 实现预设管理 |
+| [75_st_runtime_assembly.md](docs/75_st_runtime_assembly.md) | ST 运行时组装：全局状态、会话 metadata、`prompts + prompt_order` 主链与 Provider 参数适配 | 实现生成请求组装 |
 | [77_st_multimodal_attachments.md](docs/77_st_multimodal_attachments.md) | ST 多模态附件：图片 / PDF 存储、聊天记录引用、请求组装与 Provider 差异适配 | 实现 ST 聊天附件 |
 | [76_st_regex.md](docs/76_st_regex.md) | ST 正则扩展：脚本数据模型、作用域、运行时替换和导入导出 | 实现 Regex 扩展兼容 |
 | [78_st_extensions.md](docs/78_st_extensions.md) | ST Extension：启用流程、manifest、事件接口、prompt 注入和主流程交互 | 复刻或约束 ST 扩展机制 |

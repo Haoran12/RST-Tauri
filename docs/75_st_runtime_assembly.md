@@ -50,7 +50,7 @@ interface STWorldInfoSettings {
 
 `active_api_config_id` 只选择连接配置。它不得作为 preset、world_info、charLore、Regex allow list、聊天 metadata 或角色卡扩展字段的命名空间，也不得参与这些资源的自动选择和持久化身份。
 
-`active_preset` 只选择一个完整 `PresetFile`。一个文件内同时包含 sampler / instruct / context / sysprompt / reasoning / prompt 六个 section；运行时不得再按 API 类型或 section 类型拆分持久化路径。
+`active_preset` 只选择一个完整 `PresetFile`。运行时主标准是 ST 扁平 preset JSON：采样参数、`prompts`、`prompt_order`、`wi_format`、`scenario_format`、`personality_format`、特殊 prompt 字段全部位于顶层；`instruct/context/sysprompt/reasoning` 仅作为兼容扩展保留，不得再把它们当作独立持久化 section。
 
 ## 2. 会话数据
 
@@ -123,7 +123,7 @@ interface STChatMetadata {
 ┌──────────────────────────────────────┐
 │ 2. 加载预设（生成参数）               │
 │    - 来源：active_preset              │
-│    - 单个 PresetFile 内提取六个 section │
+│    - 以 ST flat PresetFile 为主：顶层采样字段 + prompts/prompt_order │
 │    - 缺失时回退 ./data/presets/Default.json │
 └──────────────────────────────────────┘
        ↓
@@ -195,6 +195,15 @@ interface STChatMetadata {
 - `CapabilityResolver` 负责从 `LlmApiContractsSnapshot` / `ProviderContractCache` 读取当前连接的能力视图，校验 image / pdf 输入与优选 transport。
 - `ProviderRequestMapper` 负责依据 `config/llm_api_contracts.json` 编译出的字段白名单和连接级契约视图，把中立请求映射到具体 Provider 参数，并处理不支持字段。
 - `AIProvider` 只负责真实 API 调用，不参与世界书扫描、Prompt 片段选择或预设自动选择。
+
+Prompt 组装主规则：
+
+- `RequestAssembler` 必须把 `prompt_order` 视为提示词顺序主来源。
+- `chatHistory` 之前的 PromptItem 代表历史前注入。
+- `chatHistory` 之后的 PromptItem 代表历史后注入。
+- `system_prompt=true` 的历史前 PromptItem 合并为 provider-level system prompt。
+- 历史后 PromptItem 以消息形式附加到聊天消息链。
+- 未出现在 `prompt_order` 中的 PromptItem 不得因保存/导入而丢失；运行时可按尾部回退顺序补齐。
 
 运行时性能规则：
 

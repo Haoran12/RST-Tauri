@@ -359,3 +359,4 @@
 | 2026-05-06 | 补齐 Agent World 创建链路：新增 `create_agent_world` Tauri 命令，初始化 `data/worlds/<world_id>/`、`world.sqlite`、`world_base.yaml` 与主线光标；前端 Agent 首页 / World 页增加新建 World 入口与零 World 空状态修复，不再出现“以 World 为顶层却无法创建 World”的断头流程 |
 | 2026-05-07 | 修复 ST 会话流式发送路径：补充 Tauri event listen/unlisten capability，发送 store 等待真实 stream end 后再结束生成状态，并用响应式替换方式更新 assistant 消息气泡内容与滚动位置 |
 | 2026-05-07 | 修复 ST 聊天响应为空与配置选择问题：provider 流式请求补 `stream` 字段并改用带缓冲 SSE 解码，ST 会话页可直接选择当前预设 / 主 API，发送时尊重预设流式开关，运行时按当前 API 契约过滤和近似映射采样参数 |
+| 2026-05-07 | 将 `E:\AIPlay\cards\夏瑾DS预设v0.40.json` 对齐为本应用预设实际标准：文档改为 ST 扁平 `PresetFile` 主标准，预设编辑页补齐顶层 ST 字段与 PromptItem 注入元数据编辑，运行时改为按 `prompts + prompt_order + chatHistory` 前后切分装配 system prompt 与消息链 |

@@ -341,73 +341,25 @@ impl RequestAssembler {
     }
 
     /// 构建系统提示词
+    ///
+    /// 在 ST 扁平预设格式中，`chatHistory` 之前的条目视为历史前注入，
+    /// 其中 `system_prompt=true` 的条目合并为 provider-level system prompt。
     fn build_system_prompt(context: &RuntimeContext) -> String {
         let mut parts: Vec<String> = Vec::new();
         let macro_context = Self::macro_context(context);
 
         if let Some(prompt_preset) = &context.prompt_preset {
             for prompt in ordered_prompt_items(prompt_preset) {
-                match prompt.identifier.as_str() {
-                    "main" | "nsfw" | "enhanceDefinitions" => {
-                        if !prompt.content.is_empty() {
-                            parts.push(substitute_params(&prompt.content, &macro_context));
-                        }
+                if prompt.identifier == "chatHistory" {
+                    break;
+                }
+                if prompt.identifier == "dialogueExamples" || !prompt.system_prompt {
+                    continue;
+                }
+                if let Some(content) = Self::resolve_prompt_item_content(context, prompt) {
+                    if !content.trim().is_empty() {
+                        parts.push(content);
                     }
-                    "worldInfoBefore" => {
-                        if let Some(wi) = &context.world_info_result {
-                            if !wi.world_info_before.is_empty() {
-                                parts.push(Self::format_world_info(context, &wi.world_info_before));
-                            }
-                        }
-                    }
-                    "worldInfoAfter" => {
-                        if let Some(wi) = &context.world_info_result {
-                            if !wi.world_info_after.is_empty() {
-                                parts.push(Self::format_world_info(context, &wi.world_info_after));
-                            }
-                        }
-                    }
-                    "personaDescription" => {
-                        if let Some(formatted) = Self::format_user_persona(context) {
-                            parts.push(formatted);
-                        }
-                    }
-                    "charDescription" => {
-                        if let Some(formatted) = Self::format_character_description(context) {
-                            parts.push(formatted);
-                        }
-                    }
-                    "charPersonality" => {
-                        if let Some(char) = &context.character {
-                            if let Some(formatted) =
-                                Self::format_character_personality(context, char.data.personality.as_str())
-                            {
-                                parts.push(formatted);
-                            }
-                        }
-                    }
-                    "scenario" => {
-                        if let Some(char) = &context.character {
-                            if let Some(formatted) =
-                                Self::format_character_scenario(context, char.data.scenario.as_str())
-                            {
-                                parts.push(formatted);
-                            }
-                        }
-                    }
-                    "jailbreak" => {
-                        if !prompt.content.is_empty() {
-                            parts.push(substitute_params(&prompt.content, &macro_context));
-                        } else if let Some(char) = &context.character {
-                            if !char.data.post_history_instructions.is_empty() {
-                                parts.push(substitute_params(
-                                    char.data.post_history_instructions.as_str(),
-                                    &macro_context,
-                                ));
-                            }
-                        }
-                    }
-                    _ => {}
                 }
             }
         } else {
@@ -514,7 +466,34 @@ impl RequestAssembler {
                     .iter()
                     .map(to_assembled_attachment)
                     .collect(),
-            });
+                });
+        }
+
+        if let Some(prompt_preset) = &context.prompt_preset {
+            let mut seen_chat_history = false;
+            for prompt in ordered_prompt_items(prompt_preset) {
+                match prompt.identifier.as_str() {
+                    "dialogueExamples" => continue,
+                    "chatHistory" => {
+                        seen_chat_history = true;
+                        continue;
+                    }
+                    _ => {}
+                }
+                if !seen_chat_history {
+                    continue;
+                }
+                if let Some(content) = Self::resolve_prompt_item_content(context, prompt) {
+                    if content.trim().is_empty() {
+                        continue;
+                    }
+                    messages.push(AssembledMessage {
+                        role: Self::effective_prompt_role(prompt),
+                        content,
+                        attachments: Vec::new(),
+                    });
+                }
+            }
         }
 
         messages
@@ -674,6 +653,52 @@ impl RequestAssembler {
             effort,
             budget_tokens,
         })
+    }
+
+    fn effective_prompt_role(prompt: &PromptItem) -> String {
+        if prompt.system_prompt {
+            "system".to_string()
+        } else {
+            match prompt.role.as_str() {
+                "assistant" => "assistant".to_string(),
+                "system" => "system".to_string(),
+                _ => "user".to_string(),
+            }
+        }
+    }
+
+    fn resolve_prompt_item_content(context: &RuntimeContext, prompt: &PromptItem) -> Option<String> {
+        let macro_context = Self::macro_context(context);
+        match prompt.identifier.as_str() {
+            "worldInfoBefore" => context
+                .world_info_result
+                .as_ref()
+                .and_then(|wi| (!wi.world_info_before.is_empty()).then(|| {
+                    Self::format_world_info(context, &wi.world_info_before)
+                })),
+            "worldInfoAfter" => context
+                .world_info_result
+                .as_ref()
+                .and_then(|wi| (!wi.world_info_after.is_empty()).then(|| {
+                    Self::format_world_info(context, &wi.world_info_after)
+                })),
+            "personaDescription" => Self::format_user_persona(context),
+            "charDescription" => Self::format_character_description(context),
+            "charPersonality" => context.character.as_ref().and_then(|char| {
+                Self::format_character_personality(context, char.data.personality.as_str())
+            }),
+            "scenario" => context.character.as_ref().and_then(|char| {
+                Self::format_character_scenario(context, char.data.scenario.as_str())
+            }),
+            "jailbreak" if prompt.content.is_empty() => context.character.as_ref().and_then(|char| {
+                (!char.data.post_history_instructions.is_empty()).then(|| {
+                    substitute_params(char.data.post_history_instructions.as_str(), &macro_context)
+                })
+            }),
+            "dialogueExamples" | "chatHistory" => None,
+            _ => (!prompt.content.is_empty())
+                .then(|| substitute_params(prompt.content.as_str(), &macro_context)),
+        }
     }
 }
 

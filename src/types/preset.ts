@@ -1,8 +1,8 @@
 /**
  * ST Preset system
  *
- * 预设系统，一个预设文件包含六类配置：Sampler/Instruct/Context/SystemPrompt/Reasoning/Prompt。
- * 预设与 API 配置解耦，可跨 Provider 共享。
+ * 预设系统以 ST 扁平 PresetFile JSON 作为唯一主格式。
+ * instruct/context/sysprompt/reasoning 仅作为兼容扩展保留，不是运行时主标准。
  * 参考: docs/74_st_presets.md
  */
 
