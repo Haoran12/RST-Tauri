@@ -290,7 +290,7 @@ export interface BuiltinPromptItemDefinition {
 /**
  * 提示词条目（运行时）
  *
- * 包含内置条目的元信息，用于前端区分显示和交互。
+ * 兼容 SillyTavern 预设格式，支持注入位置控制。
  */
 export interface PromptItem {
   identifier: string
@@ -299,6 +299,18 @@ export interface PromptItem {
   content?: string
   system_prompt?: boolean
   marker?: boolean
+  /** 是否启用（ST 格式，本项目优先使用 prompt_order 中的 enabled） */
+  enabled?: boolean
+  /** 注入位置：0=chat_history 之前，1=chat_history 之后 */
+  injection_position?: number
+  /** 注入深度（从底部往上数） */
+  injection_depth?: number
+  /** 注入顺序（同位置内的排序） */
+  injection_order?: number
+  /** 禁止被角色卡覆盖 */
+  forbid_overrides?: boolean
+  /** 触发条件列表 */
+  injection_trigger?: string[]
   /** 是否为内置条目 */
   builtin?: boolean
   /** 内置条目是否可编辑内容 */

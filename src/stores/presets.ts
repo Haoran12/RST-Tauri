@@ -22,7 +22,27 @@ export const usePresetsStore = defineStore('presets', () => {
   const presetList = ref<PresetListItem[]>([])
   const currentPreset = ref<PresetFile | null>(null)
   const currentSection = ref<PresetSectionKey>('sampler')
+  const currentPromptIdentifier = ref<string | null>(null)
   const isLoading = ref(false)
+
+  function firstPromptIdentifier(preset: PresetFile | null) {
+    return preset?.prompt?.prompts?.[0]?.identifier ?? null
+  }
+
+  function ensureCurrentPromptSelection() {
+    const prompts = currentPreset.value?.prompt?.prompts ?? []
+    if (prompts.length === 0) {
+      currentPromptIdentifier.value = null
+      return
+    }
+
+    if (
+      !currentPromptIdentifier.value ||
+      !prompts.some((item) => item.identifier === currentPromptIdentifier.value)
+    ) {
+      currentPromptIdentifier.value = prompts[0].identifier
+    }
+  }
 
   // Actions
   async function loadPresetList() {
@@ -43,9 +63,11 @@ export const usePresetsStore = defineStore('presets', () => {
     try {
       const preset = await storage.loadPreset(name)
       currentPreset.value = preset
+      ensureCurrentPromptSelection()
     } catch (e) {
       console.error(`Failed to load preset "${name}":`, e)
       currentPreset.value = null
+      currentPromptIdentifier.value = null
     } finally {
       isLoading.value = false
     }
@@ -62,11 +84,13 @@ export const usePresetsStore = defineStore('presets', () => {
     await loadPresetList()
     if (currentPreset.value?.name === name) {
       currentPreset.value = null
+      currentPromptIdentifier.value = null
     }
   }
 
   function createNewPreset(name: string) {
     currentPreset.value = createDefaultPresetFile(name)
+    currentPromptIdentifier.value = firstPromptIdentifier(currentPreset.value)
   }
 
   async function renamePreset(oldName: string, newName: string) {
@@ -78,6 +102,7 @@ export const usePresetsStore = defineStore('presets', () => {
       await loadPresetList()
       if (currentPreset.value?.name === oldName) {
         currentPreset.value = preset
+        ensureCurrentPromptSelection()
       }
     }
   }
@@ -105,6 +130,7 @@ export const usePresetsStore = defineStore('presets', () => {
     await storage.savePreset(preset)
     await loadPresetList()
     currentPreset.value = preset
+    ensureCurrentPromptSelection()
   }
 
   /**
@@ -113,8 +139,9 @@ export const usePresetsStore = defineStore('presets', () => {
    * 支持以下格式：
    * 1. RST 新格式（PresetFile）- 包含 sampler/instruct/context 等字段
    * 2. ST Master 格式 - 包含 instruct/context/sysprompt/reasoning 等 section
-   * 3. ST 单类型格式 - 单独的 sampler/instruct/context 等文件
-   * 4. Text Completion 预设 - temp/top_k/top_p/rep_pen 等字段
+   * 3. ST 预设扁平格式 - 顶层有 prompts 数组和采样参数
+   * 4. ST 单类型格式 - 单独的 sampler/instruct/context 等文件
+   * 5. Text Completion 预设 - temp/top_k/top_p/rep_pen 等字段
    */
   function convertToPresetFile(data: Record<string, unknown>): PresetFile {
     // 1. RST 新格式：已有 name 且包含预设类型字段
@@ -122,13 +149,18 @@ export const usePresetsStore = defineStore('presets', () => {
       return data as unknown as PresetFile
     }
 
-    // 2. ST Master 格式：包含多个 section
+    // 2. ST 预设扁平格式：顶层有 prompts 数组
+    if (isSTPresetFlatFormat(data)) {
+      return convertFromSTPresetFlat(data)
+    }
+
+    // 3. ST Master 格式：包含多个 section
     if (isSTMasterFormat(data)) {
       return convertFromSTMaster(data)
     }
 
-    // 3. ST 单类型格式检测
-    // 3.1 Instruct Template
+    // 4. ST 单类型格式检测
+    // 4.1 Instruct Template
     if (isPossiblyInstructData(data)) {
       return {
         name: (data.name as string) || 'Imported Instruct',
@@ -136,7 +168,7 @@ export const usePresetsStore = defineStore('presets', () => {
       }
     }
 
-    // 3.2 Context Template
+    // 4.2 Context Template
     if (isPossiblyContextData(data)) {
       return {
         name: (data.name as string) || 'Imported Context',
@@ -144,7 +176,7 @@ export const usePresetsStore = defineStore('presets', () => {
       }
     }
 
-    // 3.3 System Prompt
+    // 4.3 System Prompt
     if (isPossiblySystemPromptData(data)) {
       return {
         name: (data.name as string) || 'Imported System Prompt',
@@ -152,7 +184,7 @@ export const usePresetsStore = defineStore('presets', () => {
       }
     }
 
-    // 3.4 Reasoning Template
+    // 4.4 Reasoning Template
     if (isPossiblyReasoningData(data)) {
       return {
         name: (data.name as string) || 'Imported Reasoning',
@@ -160,7 +192,7 @@ export const usePresetsStore = defineStore('presets', () => {
       }
     }
 
-    // 3.5 Text Completion / Sampler 预设
+    // 5. Text Completion / Sampler 预设
     if (isPossiblySamplerData(data)) {
       return {
         name: (data.name as string) || 'Imported Sampler',
@@ -169,7 +201,7 @@ export const usePresetsStore = defineStore('presets', () => {
       }
     }
 
-    // 4. 无法识别，尝试作为新格式处理
+    // 6. 无法识别，尝试作为新格式处理
     if (data.name && typeof data.name === 'string') {
       console.warn('Unrecognized preset format, treating as PresetFile')
       return data as unknown as PresetFile
@@ -195,6 +227,11 @@ export const usePresetsStore = defineStore('presets', () => {
         data.prompt
       )
     )
+  }
+
+  function isSTPresetFlatFormat(data: Record<string, unknown>): boolean {
+    // ST 预设扁平格式：顶层有 prompts 数组
+    return Array.isArray(data.prompts)
   }
 
   function isSTMasterFormat(data: Record<string, unknown>): boolean {
@@ -264,6 +301,79 @@ export const usePresetsStore = defineStore('presets', () => {
   // ============================================================================
   // 格式转换函数
   // ============================================================================
+
+  /**
+   * 转换 ST 预设扁平格式
+   *
+   * ST 预设文件结构：
+   * - 顶层采样参数：temperature, top_p, repetition_penalty 等
+   * - prompts[]: 提示词条目数组
+   * - prompt_order[]: 提示词排序
+   * - 格式化模板：wi_format, scenario_format, personality_format
+   * - 特殊提示词：new_chat_prompt, continue_nudge_prompt 等
+   * - extensions.regex_scripts[]: 正则脚本
+   */
+  function convertFromSTPresetFlat(data: Record<string, unknown>): PresetFile {
+    const result: PresetFile = {
+      name: (data.name as string) || 'Imported ST Preset',
+    }
+
+    // 提取采样参数
+    result.sampler = extractSamplerPreset(data)
+
+    // 提取提示词配置
+    const prompt: import('@/types/preset').PromptPreset = {
+      prompts: [],
+      prompt_order: [],
+    }
+
+    // 提取 prompts 数组
+    if (Array.isArray(data.prompts)) {
+      prompt.prompts = data.prompts.map((p: Record<string, unknown>) => ({
+        identifier: p.identifier as string || '',
+        name: p.name as string || '',
+        role: (p.role as 'system' | 'user' | 'assistant') || 'system',
+        content: p.content as string || '',
+        system_prompt: p.system_prompt as boolean || false,
+        marker: p.marker as boolean || false,
+        enabled: p.enabled as boolean | undefined,
+        injection_position: p.injection_position as number | undefined,
+        injection_depth: p.injection_depth as number | undefined,
+        injection_order: p.injection_order as number | undefined,
+        forbid_overrides: p.forbid_overrides as boolean | undefined,
+        injection_trigger: (p.injection_trigger as string[]) || [],
+      }))
+    }
+
+    // 提取 prompt_order
+    if (Array.isArray(data.prompt_order)) {
+      prompt.prompt_order = data.prompt_order.map((order: Record<string, unknown>) => ({
+        character_id: order.character_id as number | undefined,
+        order: Array.isArray(order.order)
+          ? order.order.map((item: Record<string, unknown>) => ({
+              identifier: item.identifier as string,
+              enabled: item.enabled as boolean | undefined,
+            }))
+          : [],
+      }))
+    }
+
+    // 提取格式化模板
+    if (data.wi_format) prompt.wi_format = data.wi_format as string
+    if (data.scenario_format) prompt.scenario_format = data.scenario_format as string
+    if (data.personality_format) prompt.personality_format = data.personality_format as string
+
+    // 提取特殊提示词
+    if (data.new_chat_prompt) prompt.new_chat_prompt = data.new_chat_prompt as string
+    if (data.new_group_chat_prompt) prompt.new_group_chat_prompt = data.new_group_chat_prompt as string
+    if (data.continue_nudge_prompt) prompt.continue_nudge_prompt = data.continue_nudge_prompt as string
+    if (data.group_nudge_prompt) prompt.group_nudge_prompt = data.group_nudge_prompt as string
+    if (data.impersonation_prompt) prompt.impersonation_prompt = data.impersonation_prompt as string
+
+    result.prompt = prompt
+
+    return result
+  }
 
   function convertFromSTMaster(data: Record<string, unknown>): PresetFile {
     const result: PresetFile = {
@@ -402,16 +512,28 @@ export const usePresetsStore = defineStore('presets', () => {
 
   function clearCurrentPreset() {
     currentPreset.value = null
+    currentPromptIdentifier.value = null
   }
 
   function selectSection(section: PresetSectionKey) {
     currentSection.value = section
+    if (section === 'prompt') {
+      ensureCurrentPromptSelection()
+    }
+  }
+
+  function selectPromptItem(identifier: string | null) {
+    currentPromptIdentifier.value = identifier
+    if (identifier) {
+      currentSection.value = 'prompt'
+    }
   }
 
   return {
     presetList,
     currentPreset,
     currentSection,
+    currentPromptIdentifier,
     isLoading,
     loadPresetList,
     loadPreset,
@@ -423,5 +545,6 @@ export const usePresetsStore = defineStore('presets', () => {
     importPreset,
     clearCurrentPreset,
     selectSection,
+    selectPromptItem,
   }
 })

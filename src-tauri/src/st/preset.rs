@@ -510,7 +510,7 @@ pub fn is_builtin_prompt(identifier: &str) -> bool {
 
 /// Prompt 条目（运行时）
 ///
-/// 包含内置条目的元信息，用于前端区分显示和交互。
+/// 兼容 SillyTavern 预设格式，支持注入位置控制。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptItem {
     pub identifier: String,
@@ -522,6 +522,24 @@ pub struct PromptItem {
     pub system_prompt: bool,
     #[serde(default)]
     pub marker: bool,
+    /// 是否启用（ST 格式）
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    /// 注入位置：0=chat_history 之前，1=chat_history 之后
+    #[serde(default)]
+    pub injection_position: Option<i32>,
+    /// 注入深度（从底部往上数）
+    #[serde(default)]
+    pub injection_depth: Option<i32>,
+    /// 注入顺序（同位置内的排序）
+    #[serde(default)]
+    pub injection_order: Option<i32>,
+    /// 禁止被角色卡覆盖
+    #[serde(default)]
+    pub forbid_overrides: Option<bool>,
+    /// 触发条件列表
+    #[serde(default)]
+    pub injection_trigger: Vec<String>,
     /// 是否为内置条目
     #[serde(default)]
     pub builtin: bool,

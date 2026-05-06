@@ -98,17 +98,6 @@ const promptItems = computed(() => {
   return prompts
 })
 
-// Filtered prompt items
-const filteredPromptItems = computed(() => {
-  if (!searchQuery.value) return promptItems.value
-  const query = searchQuery.value.toLowerCase()
-  return promptItems.value.filter((item) => {
-    return item.name.toLowerCase().includes(query) ||
-      item.identifier.toLowerCase().includes(query) ||
-      (item.content?.toLowerCase().includes(query) ?? false)
-  })
-})
-
 // Page title
 const pageTitle = computed(() => {
   const titles: Record<string, string> = {
@@ -378,6 +367,11 @@ async function handlePresetSelect(name: string | null) {
   }
 }
 
+// Select prompt item for right-side editing
+function selectPromptItem(identifier: string) {
+  presetsStore.selectPromptItem(identifier)
+}
+
 // Create new preset
 function createPreset() {
   window.dispatchEvent(new CustomEvent('open-preset-create'))
@@ -450,6 +444,9 @@ async function deletePromptItem(identifier: string) {
       (o) => o.identifier !== identifier
     )
   }
+  if (presetsStore.currentPromptIdentifier === identifier) {
+    presetsStore.selectPromptItem(promptData.prompts?.[0]?.identifier ?? null)
+  }
   await presetsStore.savePreset(preset)
 }
 
@@ -476,6 +473,7 @@ async function createPromptItem() {
     role: 'system',
     content: '',
   })
+  presetsStore.selectPromptItem(newIdentifier)
   await presetsStore.savePreset(preset)
 }
 
@@ -556,21 +554,28 @@ const sortedPromptItems = computed(() => {
   if (!prompts) return []
 
   const order = presetsStore.currentPreset?.prompt?.prompt_order?.[0]?.order
-  if (!order) return prompts
-
-  // Create a map of identifier to position
   const positionMap = new Map<string, number>()
-  order.forEach(item => {
+  order?.forEach(item => {
     if (item.position !== undefined) {
       positionMap.set(item.identifier, item.position)
     }
   })
-
-  // Sort prompts by position, fallback to original order
-  return [...prompts].sort((a, b) => {
+  const sorted = !order ? [...prompts] : [...prompts].sort((a, b) => {
     const posA = positionMap.get(a.identifier) ?? prompts.indexOf(a)
     const posB = positionMap.get(b.identifier) ?? prompts.indexOf(b)
     return posA - posB
+  })
+
+  if (!searchQuery.value) {
+    return sorted
+  }
+
+  const query = searchQuery.value.toLowerCase()
+  return sorted.filter((item) => {
+    return item.name.toLowerCase().includes(query) ||
+      item.identifier.toLowerCase().includes(query) ||
+      item.description?.toLowerCase().includes(query) ||
+      (item.content?.toLowerCase().includes(query) ?? false)
   })
 })
 
@@ -836,7 +841,8 @@ watch(currentWorldId, async (worldId) => {
                 class="entry-item"
                 :class="{
                   'entry-item-dragging': draggedItem?.identifier === item.identifier,
-                  'entry-item-drag-over': dragOverItem?.identifier === item.identifier
+                  'entry-item-drag-over': dragOverItem?.identifier === item.identifier,
+                  'entry-selected': presetsStore.currentPromptIdentifier === item.identifier
                 }"
                 draggable="true"
                 @dragstart="(e) => onDragStart(e, item)"
@@ -862,9 +868,17 @@ watch(currentWorldId, async (worldId) => {
                 </div>
 
                 <!-- Prompt info -->
-                <div class="entry-info">
+                <div class="entry-info" @click="selectPromptItem(item.identifier)">
                   <div class="entry-header">
                     <span class="entry-name">{{ item.name }}</span>
+                    <NTag
+                      v-if="item.builtin"
+                      size="tiny"
+                      type="default"
+                      :bordered="false"
+                    >
+                      内置
+                    </NTag>
                     <NTag
                       size="tiny"
                       :type="getRoleType(item.role)"
