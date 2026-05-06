@@ -697,6 +697,7 @@ onMounted(refreshAll)
 .filter-panel,
 .record-list,
 .detail-panel {
+  height: 100%;
   min-height: 0;
   overflow: hidden;
   border-right: 1px solid var(--n-border-color);
@@ -713,13 +714,38 @@ onMounted(refreshAll)
   padding: 12px;
 }
 
-.record-list-spin,
-.detail-spin {
+/* filter-panel NScrollbar 高度 */
+.filter-panel :deep(.n-scrollbar) {
+  height: 100%;
+}
+
+/* record-list 高度链 */
+.record-list-spin {
+  height: 100%;
+  min-height: 0;
+}
+
+.record-list-spin :deep(.n-spin-container) {
   height: 100%;
   min-height: 0;
 }
 
 .record-list-scroll {
+  height: 100%;
+  min-height: 0;
+}
+
+.record-list-scroll :deep(.n-scrollbar) {
+  height: 100%;
+}
+
+/* detail-panel 高度链 */
+.detail-spin {
+  height: 100%;
+  min-height: 0;
+}
+
+.detail-spin :deep(.n-spin-container) {
   height: 100%;
   min-height: 0;
 }
@@ -852,8 +878,9 @@ onMounted(refreshAll)
   flex-direction: column;
 }
 
+/* TabPane 内 NScrollbar 高度链 */
 .tab-scroll {
-  flex: 1;
+  height: 100%;
   min-height: 0;
 }
 
