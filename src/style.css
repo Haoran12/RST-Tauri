@@ -56,6 +56,27 @@ html.dark {
   padding: 0;
 }
 
+/* Naive UI injects icon sizing at runtime. Keep a static fallback for
+   production WebView startup so SVG icons never expand to their viewBox size. */
+.n-icon,
+.n-base-icon {
+  width: 1em;
+  height: 1em;
+  line-height: 1em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: -0.125em;
+  fill: currentColor;
+}
+
+.n-icon > svg,
+.n-base-icon > svg {
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+}
+
 html,
 body {
   height: 100%;

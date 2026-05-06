@@ -46,7 +46,7 @@ export const useAppShellStore = defineStore('appShell', () => {
   type RecentResourceItem = { id: string; type: string; name: string; updatedAt: string }
 
   // Navigation state
-  const navCollapsed = ref(false)
+  const navCollapsed = ref(true)
   const contextListWidth = ref(280)
   const inspectPanelWidth = ref(340)
   const inspectPanelOpen = ref(false)
