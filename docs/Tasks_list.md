@@ -235,7 +235,7 @@
 | 8.12 | 内置预设提示词条目 | ✅ | 2026-05-06 | 改为直接采用 SillyTavern 风格默认 prompt 预设：`main/nsfw/dialogueExamples/jailbreak/worldInfoBefore/worldInfoAfter/charDescription/charPersonality/scenario/personaDescription/chatHistory`，默认预设与新建预设都带完整内容，运行时按 `prompt_order` 实际组装 |
 | 8.13 | Tauri 生产构建样式稳定性 | ✅ | 2026-05-06 | Vite 生产构建改为单入口 CSS，首屏 Naive UI provider 不再异步拆分，CSP 明确允许运行时 style 注入，避免 build 产物退化为近似浏览器原生控件 |
 | 8.14 | ST 会话级角色卡、世界书与 User Persona 设置 | ✅ | 2026-05-06 | 会话保存 `character_id`、`enabled_world_info` 多选与 `user_persona`；ST 会话侧栏三点菜单可编辑名称、角色卡、世界书和 Persona Description，运行时组装读取这些字段 |
-| 8.15 | ST 流式生成后台持久化与工具浮层 | ✅ | 2026-05-07 | ST stream 结束由后端按 `session_id + assistant_message_id` 写回会话并记录 stream chunks；前端生成状态持续到 stream end，ST Shell 改为聊天常驻底层 + 工具浮层，切到资源 / API / 日志页时聊天消息始终可见 |
+| 8.15 | ST 流式生成后台持久化与固定聊天分栏 | ✅ | 2026-05-07 | ST stream 结束由后端按 `session_id + assistant_message_id` 写回会话并记录 stream chunks；前端生成状态持续到 stream end，ST Shell 改为固定聊天分栏 + 工具分栏，切到资源 / API / 日志页时聊天消息始终可见 |
 
 ---
 
@@ -259,7 +259,7 @@
 
 | 日期 | 更新内容 |
 |------|----------|
-| 2026-05-07 | 完成 ST 流式生成可靠性与工具浮层布局：后端 stream task 累计响应后写回 ST 会话、补写 `llm_stream_chunks`，前端直到 stream end 才释放生成状态；App Shell 在 ST 工作区内保持聊天底层常驻可见，资源 / API / 日志以浮层方式打开 |
+| 2026-05-07 | 完成 ST 流式生成可靠性与固定分栏布局：后端 stream task 累计响应后写回 ST 会话、补写 `llm_stream_chunks`，前端直到 stream end 才释放生成状态；App Shell 在 ST 工作区内保持聊天分栏常驻可见，资源 / API / 日志在工具分栏中切换 |
 | 2026-05-06 | 梳理 `E:\AIPlay\SillyTavern` Extension 启用和主流程交互：新增 `docs/78_st_extensions.md`，明确 manifest / hooks / eventSource / setExtensionPrompt / generate_interceptor，以及与世界书扫描、Regex、Prompt Manager 和 coreChat 提取过滤的关系 |
 | 2026-05-06 | 加固左侧主导航跳转：将主导航入口从 `button + router.push` 改为 `RouterLink` 真实 hash 链接，点击图标或 hover 名称都会走同一链接目标，避免 WebView 下部分入口点击后不触发页面切换 |
 | 2026-05-06 | 修复左侧主导航名称点击无响应：图标右侧 hover tooltip 改为可接收指针事件并冒泡到导航按钮，避免点击“角色卡 / 世界书 / API 配置”等名称时事件穿透到下层内容 |
