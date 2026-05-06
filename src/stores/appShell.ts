@@ -57,7 +57,7 @@ export const useAppShellStore = defineStore('appShell', () => {
   const inspectPanelOpen = ref(false)
 
   // Theme
-  const theme = ref<'system' | 'light' | 'dark'>('system')
+  const theme = ref<'system' | 'light' | 'dark'>(loadTheme())
   const chatBubbleAppearance = ref<ChatBubbleAppearance>(loadChatBubbleAppearance())
   const chatMarkdownAppearance = ref<ChatMarkdownAppearance>(loadChatMarkdownAppearance())
 
@@ -96,6 +96,7 @@ export const useAppShellStore = defineStore('appShell', () => {
 
   function setTheme(newTheme: 'system' | 'light' | 'dark') {
     theme.value = newTheme
+    persistTheme(newTheme)
   }
 
   function setChatBubbleAppearance(next: ChatBubbleAppearance) {
@@ -180,6 +181,23 @@ function loadAppMode(): AppMode {
 function persistAppMode(mode: AppMode) {
   if (typeof localStorage === 'undefined') return
   localStorage.setItem('rst.currentMode', mode)
+}
+
+function loadTheme(): 'system' | 'light' | 'dark' {
+  if (typeof localStorage === 'undefined') {
+    return 'system'
+  }
+
+  const raw = localStorage.getItem('rst.theme')
+  if (raw === 'light' || raw === 'dark' || raw === 'system') {
+    return raw
+  }
+  return 'system'
+}
+
+function persistTheme(theme: 'system' | 'light' | 'dark') {
+  if (typeof localStorage === 'undefined') return
+  localStorage.setItem('rst.theme', theme)
 }
 
 function loadStoredRoute(key: string, fallback: string) {
