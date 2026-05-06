@@ -8,6 +8,8 @@ import type {
   PlayerMode,
 } from '@/types/agent/session'
 import type { CharacterRecord } from '@/types/agent/character'
+import type { AgentWorldListItem } from '@/types/agent/world'
+import { listAgentWorlds } from '@/services/agentApi'
 
 // ===== Input Types for Tauri Commands =====
 
@@ -30,11 +32,13 @@ export interface CreateTimeAnchorInput {
 
 export const useAgentStore = defineStore('agent', () => {
   // State
+  const worlds = ref<AgentWorldListItem[]>([])
   const currentWorldId = ref<string | null>(null)
   const mainlineCursor = ref<WorldMainlineCursor | null>(null)
   const sessions = ref<AgentSession[]>([])
   const characters = ref<CharacterRecord[]>([])
   const isLoading = ref(false)
+  const isWorldListLoading = ref(false)
   const error = ref<string | null>(null)
 
   // Computed
@@ -54,6 +58,10 @@ export const useAgentStore = defineStore('agent', () => {
     sessions.value.filter((s) => s.status === 'Active')
   )
 
+  const currentWorld = computed(() =>
+    worlds.value.find((world) => world.world_id === currentWorldId.value) ?? null
+  )
+
   const characterOptions = computed(() =>
     characters.value.map((c) => ({
       id: c.character_id,
@@ -63,6 +71,25 @@ export const useAgentStore = defineStore('agent', () => {
   )
 
   // Actions
+
+  async function loadWorldList(): Promise<AgentWorldListItem[]> {
+    isWorldListLoading.value = true
+    error.value = null
+
+    try {
+      const list = await listAgentWorlds()
+      worlds.value = list
+      if (!currentWorldId.value && list.length > 0) {
+        currentWorldId.value = list[0].world_id
+      }
+      return list
+    } catch (e) {
+      error.value = String(e)
+      throw e
+    } finally {
+      isWorldListLoading.value = false
+    }
+  }
 
   /**
    * Load world data: cursor, sessions, characters
@@ -193,14 +220,17 @@ export const useAgentStore = defineStore('agent', () => {
 
   return {
     // State
+    worlds,
     currentWorldId,
     mainlineCursor,
     sessions,
     characters,
     isLoading,
+    isWorldListLoading,
     error,
 
     // Computed
+    currentWorld,
     mainlineSessions,
     retrospectiveSessions,
     futurePreviewSessions,
@@ -208,6 +238,7 @@ export const useAgentStore = defineStore('agent', () => {
     characterOptions,
 
     // Actions
+    loadWorldList,
     loadWorld,
     loadMainlineCursor,
     loadSessions,

@@ -17,6 +17,13 @@ import type {
   ConflictReport,
 } from '@/types/agent/session'
 import type { CharacterRecord } from '@/types/agent/character'
+import type { AgentWorldListItem } from '@/types/agent/world'
+
+// ===== World List =====
+
+export async function listAgentWorlds(): Promise<AgentWorldListItem[]> {
+  return await invoke<AgentWorldListItem[]>('list_agent_worlds')
+}
 
 // ===== Session Management =====
 

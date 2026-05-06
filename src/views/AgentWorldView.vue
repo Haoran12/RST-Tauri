@@ -44,7 +44,11 @@ const router = useRouter()
 const message = useMessage()
 const agentStore = useAgentStore()
 
-const worldId = computed(() => String(route.params.worldId || 'default'))
+const worldId = computed(() => {
+  const routeWorldId = route.params.worldId
+  if (typeof routeWorldId === 'string' && routeWorldId.length > 0) return routeWorldId
+  return agentStore.currentWorldId ?? ''
+})
 
 // Agent LLM Profile state
 const llmProfile = ref<AgentLlmProfile | null>(null)

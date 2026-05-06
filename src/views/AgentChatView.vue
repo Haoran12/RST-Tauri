@@ -17,6 +17,7 @@ import {
 } from 'naive-ui'
 import { ArrowBackOutline, SendOutline } from '@vicons/ionicons5'
 import ChatMessageItem from '@/components/shared/ChatMessageItem.vue'
+import { useAgentStore } from '@/stores/agent'
 import type { AgentSession, SessionTurn } from '@/types/agent/session'
 import {
   deleteAgentSessionTurn,
@@ -30,8 +31,13 @@ const route = useRoute()
 const router = useRouter()
 const message = useMessage()
 const dialog = useDialog()
+const agentStore = useAgentStore()
 
-const worldId = computed(() => String(route.params.worldId || 'default'))
+const worldId = computed(() => {
+  const routeWorldId = route.params.worldId
+  if (typeof routeWorldId === 'string' && routeWorldId.length > 0) return routeWorldId
+  return agentStore.currentWorldId ?? ''
+})
 const sessionId = computed(() => String(route.params.sessionId || ''))
 
 const session = ref<AgentSession | null>(null)

@@ -10,7 +10,11 @@ const router = useRouter()
 const agentStore = useAgentStore()
 const searchQuery = ref('')
 
-const currentWorldId = computed(() => String(route.params.worldId || agentStore.currentWorldId || 'default'))
+const currentWorldId = computed(() => {
+  const routeWorldId = route.params.worldId
+  if (typeof routeWorldId === 'string' && routeWorldId.length > 0) return routeWorldId
+  return agentStore.currentWorldId
+})
 
 const pageTitle = computed(() => {
   switch (route.name) {
@@ -58,6 +62,10 @@ function openCreateSession() {
 }
 
 watch(currentWorldId, async (worldId) => {
+  if (!worldId) {
+    agentStore.clearWorld()
+    return
+  }
   await agentStore.loadWorld(worldId)
 }, { immediate: true })
 </script>

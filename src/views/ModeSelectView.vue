@@ -28,9 +28,10 @@ const stSummary = computed(() => ({
 }))
 
 const agentSummary = computed(() => ({
-  recentSessions: agentStore.sessions.length,
-  activeSessions: agentStore.activeSessions.length,
-  currentWorld: agentStore.currentWorldId ?? 'default',
+  recentSessions: agentStore.currentWorld?.session_count ?? agentStore.sessions.length,
+  activeSessions: agentStore.currentWorld?.active_session_count ?? agentStore.activeSessions.length,
+  currentWorld: agentStore.currentWorldId ?? '未选择',
+  worldCount: agentStore.worlds.length,
 }))
 
 const apiSummary = computed(() => {
@@ -46,7 +47,14 @@ async function hydrate() {
     charactersStore.loadCharacters(),
     worldbooksStore.loadWorldbooks(),
     presetsStore.loadPresetList(),
-    agentStore.loadWorld('default'),
+    agentStore.loadWorldList().then((worlds) => {
+      const targetWorldId = agentStore.currentWorldId ?? worlds[0]?.world_id
+      if (targetWorldId) {
+        return agentStore.loadWorld(targetWorldId)
+      }
+      agentStore.clearWorld()
+      return Promise.resolve()
+    }),
   ])
 }
 
@@ -120,10 +128,10 @@ onMounted(() => {
               <NTag type="success">当前 {{ appShell.currentMode === 'agent' ? '已选' : '可进入' }}</NTag>
             </div>
             <div class="mode-stats">
+              <div class="stat-row"><span>World 数量</span><strong>{{ agentSummary.worldCount }}</strong></div>
               <div class="stat-row"><span>当前 World</span><strong>{{ agentSummary.currentWorld }}</strong></div>
               <div class="stat-row"><span>已加载会话</span><strong>{{ agentSummary.recentSessions }}</strong></div>
               <div class="stat-row"><span>活动会话</span><strong>{{ agentSummary.activeSessions }}</strong></div>
-              <div class="stat-row"><span>共享连接</span><strong>{{ settingsStore.apiConfigs.length }}</strong></div>
             </div>
             <div class="mode-footer">
               <span class="footer-note">继续进入独立 Agent 壳层</span>

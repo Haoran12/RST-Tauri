@@ -20,10 +20,16 @@ import StructuredTextEditor from '@/components/shared/structured-text-editor/Str
 import type { StructuredTextDiagnostic, StructuredTextLanguageId } from '@/types/structuredText'
 import { DEFAULT_BINDINGS } from '@/types/structuredText'
 import { validateStructuredText } from '@/services/storage'
+import { useAgentStore } from '@/stores/agent'
 
 const route = useRoute()
 const message = useMessage()
-const worldId = computed(() => String(route.params.worldId || 'default'))
+const agentStore = useAgentStore()
+const worldId = computed(() => {
+  const routeWorldId = route.params.worldId
+  if (typeof routeWorldId === 'string' && routeWorldId.length > 0) return routeWorldId
+  return agentStore.currentWorldId ?? ''
+})
 
 const locationLevels = [
   'world_root',

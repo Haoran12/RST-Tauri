@@ -1,8 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NCard, NIcon, NList, NListItem, NSpace, NTag } from 'naive-ui'
-import { GitBranchOutline, KeyOutline, MapOutline, PlayOutline, SettingsOutline, TimerOutline } from '@vicons/ionicons5'
+import {
+  NButton,
+  NCard,
+  NEmpty,
+  NIcon,
+  NList,
+  NListItem,
+  NSpace,
+  NTag,
+} from 'naive-ui'
+import {
+  GitBranchOutline,
+  KeyOutline,
+  MapOutline,
+  PlayOutline,
+  SettingsOutline,
+  TimerOutline,
+} from '@vicons/ionicons5'
 import { useAgentStore } from '@/stores/agent'
 import { useSettingsStore } from '@/stores/settings'
 import { useAppShellStore } from '@/stores/appShell'
@@ -12,22 +28,23 @@ const agentStore = useAgentStore()
 const settingsStore = useSettingsStore()
 const appShell = useAppShellStore()
 
-const worldId = computed(() => agentStore.currentWorldId ?? 'default')
+const worldId = computed(() => agentStore.currentWorldId)
+const currentWorld = computed(() => agentStore.currentWorld)
 
 const summaryItems = computed(() => [
   {
-    label: '当前 World',
-    value: worldId.value,
+    label: 'World 数量',
+    value: String(agentStore.worlds.length),
     icon: MapOutline,
   },
   {
-    label: '已加载会话',
-    value: String(agentStore.sessions.length),
+    label: '当前 World',
+    value: worldId.value ?? '未选择',
     icon: GitBranchOutline,
   },
   {
     label: '活动会话',
-    value: String(agentStore.activeSessions.length),
+    value: String(currentWorld.value?.active_session_count ?? 0),
     icon: PlayOutline,
   },
   {
@@ -45,18 +62,35 @@ const recentSessions = computed(() =>
 
 async function hydrate() {
   appShell.setCurrentMode('agent')
-  await Promise.allSettled([
-    settingsStore.loadApiConfigs(),
-    agentStore.loadWorld('default'),
-  ])
+  await settingsStore.loadApiConfigs()
+  const worlds = await agentStore.loadWorldList()
+  const targetWorldId = agentStore.currentWorldId ?? worlds[0]?.world_id
+  if (targetWorldId) {
+    await agentStore.loadWorld(targetWorldId)
+  } else {
+    agentStore.clearWorld()
+  }
 }
 
-function openDefaultWorld() {
+async function selectWorld(nextWorldId: string) {
+  if (nextWorldId === agentStore.currentWorldId) return
+  await agentStore.loadWorld(nextWorldId)
+}
+
+function openCurrentWorld() {
+  if (!worldId.value) return
   router.push({ name: 'agent-worlds', params: { worldId: worldId.value } })
 }
 
-function openSession(sessionId: string) {
-  router.push({ name: 'agent-chat', params: { worldId: worldId.value, sessionId } })
+function openSession(sessionId: string, sessionWorldId: string) {
+  router.push({ name: 'agent-chat', params: { worldId: sessionWorldId, sessionId } })
+}
+
+function formatTime(value: string | null | undefined) {
+  if (!value) return '未记录'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString()
 }
 
 onMounted(() => {
@@ -69,12 +103,12 @@ onMounted(() => {
     <header class="page-header">
       <div>
         <h1>Agent Workspace</h1>
-        <p>聚合当前 World、会话入口和运行侧工作流，不混入 ST 资源页。</p>
+        <p>这里先选 World，再进入会话、时间线和编辑器工作流。</p>
       </div>
       <NSpace>
         <NButton secondary @click="router.push({ name: 'mode-select' })">切换模式</NButton>
         <NButton secondary @click="router.push({ name: 'logs' })">查看日志</NButton>
-        <NButton type="primary" @click="openDefaultWorld">打开当前 World</NButton>
+        <NButton type="primary" :disabled="!worldId" @click="openCurrentWorld">打开当前 World</NButton>
       </NSpace>
     </header>
 
@@ -89,35 +123,101 @@ onMounted(() => {
     </div>
 
     <div class="section-grid">
+      <NCard size="small" title="World 列表 / 入口">
+        <div v-if="agentStore.isWorldListLoading" class="empty-inline">加载 World 列表中...</div>
+        <NList v-else-if="agentStore.worlds.length" hoverable clickable>
+          <NListItem
+            v-for="world in agentStore.worlds"
+            :key="world.world_id"
+            @click="selectWorld(world.world_id)"
+          >
+            <div class="world-row">
+              <div class="world-main">
+                <div class="world-name-line">
+                  <strong>{{ world.world_id }}</strong>
+                  <NTag size="small" :type="world.world_id === worldId ? 'success' : 'default'">
+                    {{ world.world_id === worldId ? '当前' : '可进入' }}
+                  </NTag>
+                </div>
+                <div class="session-meta">
+                  主线 {{ world.mainline_time_anchor?.display_text ?? '未初始化' }} ·
+                  会话 {{ world.session_count }} ·
+                  角色 {{ world.character_count }}
+                </div>
+              </div>
+              <NButton
+                size="small"
+                secondary
+                @click.stop="router.push({ name: 'agent-worlds', params: { worldId: world.world_id } })"
+              >
+                进入
+              </NButton>
+            </div>
+          </NListItem>
+        </NList>
+        <NEmpty v-else description="还没有 Agent World 目录" />
+      </NCard>
+
       <NCard size="small" title="当前 World 摘要">
-        <div class="info-list">
+        <div v-if="currentWorld" class="info-list">
           <div class="info-row">
             <span>World ID</span>
-            <strong>{{ worldId }}</strong>
+            <strong>{{ currentWorld.world_id }}</strong>
           </div>
           <div class="info-row">
             <span>主线时间</span>
-            <strong>{{ agentStore.mainlineCursor?.mainline_time_anchor.display_text ?? '未初始化' }}</strong>
+            <strong>{{ currentWorld.mainline_time_anchor?.display_text ?? '未初始化' }}</strong>
           </div>
           <div class="info-row">
             <span>角色数</span>
-            <strong>{{ agentStore.characters.length }}</strong>
+            <strong>{{ currentWorld.character_count }}</strong>
+          </div>
+          <div class="info-row">
+            <span>最近更新</span>
+            <strong>{{ formatTime(currentWorld.updated_at) }}</strong>
           </div>
           <div class="info-row">
             <span>运行门禁</span>
             <strong>Paused-only commit</strong>
           </div>
         </div>
+        <div v-else class="empty-inline">当前未选择 World</div>
         <div class="card-actions">
-          <NButton size="small" type="primary" @click="openDefaultWorld">进入工作区</NButton>
+          <NButton size="small" type="primary" :disabled="!worldId" @click="openCurrentWorld">进入工作区</NButton>
           <NButton
             size="small"
             secondary
+            :disabled="!worldId"
             @click="router.push({ name: 'agent-world-editor', params: { worldId } })"
           >
             World Editor
           </NButton>
         </div>
+      </NCard>
+    </div>
+
+    <div class="section-grid">
+      <NCard size="small" title="最近 Agent 会话">
+        <NList v-if="recentSessions.length" hoverable clickable>
+          <NListItem
+            v-for="session in recentSessions"
+            :key="session.session_id"
+            @click="openSession(session.session_id, session.world_id)"
+          >
+            <div class="session-row">
+              <div>
+                <div class="session-name">{{ session.title }}</div>
+                <div class="session-meta">
+                  {{ session.period_anchor.display_text }} · {{ session.player_mode }}
+                </div>
+              </div>
+              <NTag size="small" :type="session.status === 'Active' ? 'success' : 'default'">
+                {{ session.session_kind }}
+              </NTag>
+            </div>
+          </NListItem>
+        </NList>
+        <div v-else class="empty-inline">当前 World 暂无 Agent 会话</div>
       </NCard>
 
       <NCard size="small" title="共享连接状态">
@@ -149,33 +249,19 @@ onMounted(() => {
     </div>
 
     <div class="section-grid">
-      <NCard size="small" title="最近 Agent 会话">
-        <NList v-if="recentSessions.length" hoverable clickable>
-          <NListItem v-for="session in recentSessions" :key="session.session_id" @click="openSession(session.session_id)">
-            <div class="session-row">
-              <div>
-                <div class="session-name">{{ session.title }}</div>
-                <div class="session-meta">
-                  {{ session.period_anchor.display_text }} · {{ session.player_mode }}
-                </div>
-              </div>
-              <NTag size="small" :type="session.status === 'Active' ? 'success' : 'default'">
-                {{ session.session_kind }}
-              </NTag>
-            </div>
-          </NListItem>
-        </NList>
-        <div v-else class="empty-inline">当前 World 暂无 Agent 会话</div>
-      </NCard>
-
       <NCard size="small" title="快捷入口">
         <div class="quick-list">
-          <button class="action-tile" type="button" @click="openDefaultWorld">
+          <button class="action-tile" type="button" :disabled="!worldId" @click="openCurrentWorld">
             <NIcon :size="22"><MapOutline /></NIcon>
             <strong>打开 World</strong>
-            <span>进入当前 World 的会话、时间线和运行状态入口。</span>
+            <span>进入当前选中 World 的会话、时间线和运行状态入口。</span>
           </button>
-          <button class="action-tile" type="button" @click="router.push({ name: 'agent-world-editor', params: { worldId } })">
+          <button
+            class="action-tile"
+            type="button"
+            :disabled="!worldId"
+            @click="router.push({ name: 'agent-world-editor', params: { worldId } })"
+          >
             <NIcon :size="22"><GitBranchOutline /></NIcon>
             <strong>World Editor</strong>
             <span>进入结构化编辑器与提交边界。</span>
@@ -237,7 +323,8 @@ onMounted(() => {
 .summary-head,
 .info-row,
 .session-row,
-.card-actions {
+.card-actions,
+.world-row {
   display: flex;
   align-items: center;
 }
@@ -261,9 +348,20 @@ onMounted(() => {
 
 .info-row,
 .session-row,
-.card-actions {
+.card-actions,
+.world-row {
   justify-content: space-between;
   gap: 12px;
+}
+
+.world-main {
+  min-width: 0;
+}
+
+.world-name-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .card-actions {
@@ -282,6 +380,11 @@ onMounted(() => {
   gap: 8px;
   text-align: left;
   cursor: pointer;
+}
+
+.action-tile:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .session-name {

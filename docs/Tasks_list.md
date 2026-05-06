@@ -289,6 +289,7 @@
 | 2026-05-06 | 接通 Agent 技能真实数据链路：`CharacterFacet(KnownAbility/HiddenAbility)` 可解析为 runtime `Skill`，`ReactionWindow` 改为按技能归属与 `EffectValidator` 预检发放 passive/interrupt 选项，并补模型 / runtime / reaction 定向测试 |
 | 2026-05-06 | 补强 Agent Reaction/Effect 热路径：ReactionWindow 改为透传 explicit target，接入 `objective_relationships` 盟友援护资格与 runtime 派生 passive/interrupt 反应选项；`validation::EffectValidator` 新增 passive/interrupt 契约硬失败校验，并补 reaction/effect 定向测试 |
 | 2026-05-06 | 修复 PNG 角色卡导入识别：后端解析同时支持前置/后置 `tEXt`、`zTXt`、`iTXt` metadata，兼容 base64 与直接 JSON 载荷，并补角色卡导入回归测试 |
+| 2026-05-06 | Agent 首页从固定 `default World` 摘要提升为真正的 World 列表/选择入口：新增 `list_agent_worlds` 命令与前端 world 列表状态，首页改为真实 World 列表、当前 World 摘要与联动最近会话；模式选择页与 Agent 相关页面不再硬编码回退到 `default` |
 | 2026-05-02 | 初始化任务清单；阶段一全部完成 |
 | 2026-05-02 | 完成任务 2.1 角色卡 V3 管理、2.2 头像上传与显示 |
 | 2026-05-02 | 完成任务 2.3-2.7 世界书编辑器（基础 CRUD、分组管理、概率控制、递归扫描、时间控制） |

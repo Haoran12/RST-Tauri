@@ -59,6 +59,107 @@ async fn get_agent_store(
 }
 
 // ============================================================================
+// World 列表命令
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentWorldListItem {
+    pub world_id: String,
+    pub session_count: i64,
+    pub active_session_count: i64,
+    pub character_count: i64,
+    pub mainline_time_anchor: Option<TimeAnchor>,
+    pub updated_at: Option<String>,
+}
+
+/// 列出 Agent Worlds 及首页所需摘要。
+#[tauri::command]
+pub async fn list_agent_worlds(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<AgentWorldListItem>, String> {
+    let data_dir = get_data_dir(&app)?;
+    let worlds_dir = data_dir.join("worlds");
+    std::fs::create_dir_all(&worlds_dir)
+        .map_err(|e| format!("Failed to create worlds directory: {}", e))?;
+
+    let mut worlds = Vec::new();
+    let entries = std::fs::read_dir(&worlds_dir)
+        .map_err(|e| format!("Failed to read worlds directory: {}", e))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Failed to read world entry: {}", e))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|e| format!("Failed to read world entry type: {}", e))?;
+        if !file_type.is_dir() {
+            continue;
+        }
+
+        let world_id = entry.file_name().to_string_lossy().to_string();
+        validate_path_component(&world_id)
+            .map_err(|e| format!("Invalid world_id '{}': {}", world_id, e))?;
+
+        let store = get_agent_store(&app, state.inner(), &world_id).await?;
+
+        let session_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM agent_sessions")
+            .fetch_one(store.pool())
+            .await
+            .map_err(|e| format!("Failed to count sessions for world '{}': {}", world_id, e))?;
+
+        let active_session_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM agent_sessions WHERE status = 'active'")
+                .fetch_one(store.pool())
+                .await
+                .map_err(|e| {
+                    format!(
+                        "Failed to count active sessions for world '{}': {}",
+                        world_id, e
+                    )
+                })?;
+
+        let character_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM character_records")
+            .fetch_one(store.pool())
+            .await
+            .map_err(|e| format!("Failed to count characters for world '{}': {}", world_id, e))?;
+
+        let mainline_time_anchor = match store.get_mainline_cursor().await {
+            Ok(cursor) => Some(cursor.mainline_time_anchor),
+            Err(_) => None,
+        };
+
+        let updated_at: Option<String> = sqlx::query_scalar(
+            "SELECT MAX(updated_at) FROM (
+                SELECT updated_at FROM agent_sessions
+                UNION ALL
+                SELECT updated_at FROM world_mainline_cursor
+            )",
+        )
+        .fetch_one(store.pool())
+        .await
+        .map_err(|e| format!("Failed to read updated_at for world '{}': {}", world_id, e))?;
+
+        worlds.push(AgentWorldListItem {
+            world_id,
+            session_count,
+            active_session_count,
+            character_count,
+            mainline_time_anchor,
+            updated_at,
+        });
+    }
+
+    worlds.sort_by(|a, b| {
+        b.updated_at
+            .as_deref()
+            .cmp(&a.updated_at.as_deref())
+            .then_with(|| a.world_id.cmp(&b.world_id))
+    });
+
+    Ok(worlds)
+}
+
+// ============================================================================
 // 会话管理命令
 // ============================================================================
 
