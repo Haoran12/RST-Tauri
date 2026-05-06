@@ -9,7 +9,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 
 - **SillyTavern 模式**：复刻 SillyTavern 体验，支持角色卡 V3 PNG / JSON、外部世界书、预设、Regex、图片 / PDF 附件与 API 配置。ST 兼容资源使用 SillyTavern 文件形态：角色卡以 PNG metadata 为主，外部世界书以 `entries: Record<string, WorldInfoEntry>` JSON 保存，API 连接配置与角色卡 / 世界书 / 预设解耦；聊天附件以 RST 本地附件库 + 消息引用方式持久化。总览见 [70_st_mode.md](70_st_mode.md)，角色卡见 [71_st_character_cards.md](71_st_character_cards.md)，世界书模型见 [72_st_worldbook_model.md](72_st_worldbook_model.md)，注入流程见 [73_st_worldbook_injection.md](73_st_worldbook_injection.md)，预设见 [74_st_presets.md](74_st_presets.md)，运行时组装见 [75_st_runtime_assembly.md](75_st_runtime_assembly.md)，Regex 见 [76_st_regex.md](76_st_regex.md)，多模态附件见 [77_st_multimodal_attachments.md](77_st_multimodal_attachments.md)。
 - **Agent 模式**：基于 RP Agent 架构的高级角色扮演系统，分层"客观世界 / 人物具身状态 / 主观认知与意图 / 结果规划与状态更新 / 叙事输出"，SQLite 存储。数据模型入口见 [10_agent_data_model.md](10_agent_data_model.md)，运行时见 [11_agent_runtime.md](11_agent_runtime.md)，程序化派生见 [12_agent_simulation.md](12_agent_simulation.md)，对抗技能见 [19_agent_combat_and_skills.md](19_agent_combat_and_skills.md)，LLM I/O 入口见 [13_agent_llm_io.md](13_agent_llm_io.md)，场景节点见 [21_agent_scene_llm_io.md](21_agent_scene_llm_io.md)，结果/叙事节点见 [22_agent_outcome_narration_io.md](22_agent_outcome_narration_io.md)，持久化见 [14_agent_persistence.md](14_agent_persistence.md)，地点系统见 [15_agent_location_system.md](15_agent_location_system.md)，世界编辑器见 [40_agent_world_editor.md](40_agent_world_editor.md)。
-- **前端 UI**：应用 Shell、一级页面、路由、资源列表、检查面板、主题 token 与关键工作流见 [41_frontend_interaction.md](41_frontend_interaction.md)。跨 ST / Agent 的 Plain / JSON / YAML 结构化文本编辑器见 [42_structured_text_editor.md](42_structured_text_editor.md)。
+- **前端 UI**：应用 Shell、模式选择器、ST / Agent 双壳层、一级页面、路由、资源列表、检查面板、主题 token 与关键工作流见 [41_frontend_interaction.md](41_frontend_interaction.md)。跨 ST / Agent 的 Plain / JSON / YAML 结构化文本编辑器见 [42_structured_text_editor.md](42_structured_text_editor.md)。
 
 > **架构基础**：参考 `D:\Projects\RST-flutter\docs\rp_agent_*` 系列文档（成熟的角色扮演 Agent 架构），本项目在其基础上为 Tauri + Rust + Vue 3 技术栈做适配。
 
@@ -38,7 +38,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 
 1. 初始化 Tauri + Vue 3 + TypeScript + Naive UI。
 2. 配置 Vue Router + Pinia。
-3. 实现 App Shell、资源工作台默认首页、基础主题和响应式布局。
+3. 实现 App Shell、模式选择入口、基础主题和响应式布局。
 4. 实现 JSON 存储层。
 5. 基础聊天 + AI Provider 抽象。
 6. 集成 OpenAI Responses API、OpenAI Chat Completions API、DeepSeek API。

@@ -223,7 +223,7 @@
 |---|------|------|----------|------|
 | 8.1 | 性能优化 - 缓存 | ✅ | 2026-05-05 | TurnScopedCache/KnowledgeAccessCache/DerivedAttributeCache/SceneDerivedCache；补充 WorldInfoManager 世界书池容量与失效接口 |
 | 8.2 | 性能优化 - 事件批处理 | ✅ | 2026-05-05 | BatchStateWriter 已提供单 SQLite 写事务批量落库入口与事务测试 |
-| 8.3 | UI / UX 改进 | 🔄 | | 资源工作台与 API 配置页已接入；世界书 / 预设改为左侧文件选择器 + 条目/分区列表，左侧上下文栏滚动收敛到列表区域；主导航补齐 Regex，左侧上下文栏已接 ST 会话 / Agent 会话 / 角色卡 / 预设真实列表与点击动作；预设页已补齐 Sampler/Instruct/Context/System Prompt/Reasoning/Prompt 六个分区的实际编辑表单与 prompt 条目启停/编辑，资源页细节和整体交互仍需继续打磨 |
+| 8.3 | UI / UX 改进 | 🔄 | | 资源工作台与 API 配置页已接入；世界书 / 预设改为左侧文件选择器 + 条目/分区列表，左侧上下文栏滚动收敛到列表区域；主导航补齐 Regex，左侧上下文栏已接 ST 会话 / Agent 会话 / 角色卡 / 预设真实列表与点击动作；预设页已补齐 Sampler/Instruct/Context/System Prompt/Reasoning/Prompt 六个分区的实际编辑表单与 prompt 条目启停/编辑。2026-05-06 起新增前端模式分离规划：引入全局模式选择器、拆分 STShell / AgentShell / SharedShell，并把混合 `/library` 与混合导航迁移为独立 ST / Agent 首页与路由分区。 |
 | 8.4 | 高级 Trace 可视化 | ✅ | 2026-05-06 | `/logs` 已支持 Agent Trace 列表、Trace 详情 step 展示、step linked_request_id 跳转与 request 反查 |
 | 8.5 | 测试覆盖 | 🔄 | | 已补 GodOnly 揭示、StateCommitter 非正史边界、附件脱敏、Provider 能力 fail-fast、附件 magic bytes 与缓存/批量事务测试；测试矩阵仍需继续扩大 |
 | 8.6 | 插件系统 | ⏳ | | |
@@ -258,6 +258,7 @@
 
 | 日期 | 更新内容 |
 |------|----------|
+| 2026-05-06 | 规划前端全局模式选择与双壳层分离：在 `41_frontend_interaction.md` 中新增 `Mode Select`、`STShell` / `AgentShell` / `SharedShell`、新路由分区 `/st/**` `/agent/**`、模式切换确认与最近模式恢复规则；同步更新实现计划与阶段 8.3 任务备注 |
 | 2026-05-06 | 完善预设编辑 UI：预设页右侧六个分区从占位说明改为可实际编辑的表单，支持采样参数、Instruct、Context、System Prompt、Reasoning、Prompt 格式字段及 prompt 条目启停/编辑；保存后回读当前预设，避免前端草稿与落盘规范化内容脱节 |
 | 2026-05-06 | 修复 ST 预设默认内容与提示词组装脱节：统一 Rust/前端为扁平 `PresetFile`，默认预设与新建预设改用 SillyTavern `Default.json` 风格 prompt 列表与格式字段，运行时按 `prompt_order` 实际注入 `main/worldInfoBefore/charDescription/charPersonality/scenario/personaDescription/dialogueExamples/jailbreak`，恢复系统内置预设与会话预设装配 |
 | 2026-05-06 | 增加 ST 会话级角色卡绑定、世界书多选与 User Persona：会话文件保存 `character_id` / `enabled_world_info` / `user_persona`，侧栏三点菜单可编辑，会话发送与世界书匹配读取 Persona Description |
