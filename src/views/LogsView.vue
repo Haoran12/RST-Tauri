@@ -857,6 +857,10 @@ onMounted(refreshAll)
   min-height: 0;
 }
 
+.tab-scroll :deep(.n-scrollbar) {
+  height: 100%;
+}
+
 .tab-scroll :deep(.n-scrollbar-container) {
   height: 100%;
 }
