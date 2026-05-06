@@ -8,16 +8,28 @@ import PanelLoading from './PanelLoading.vue'
 
 const route = useRoute()
 const appShell = useAppShellStore()
-const ContextList = defineAsyncComponent({
+const STContextList = defineAsyncComponent({
   loader: () => import('./ContextList.vue'),
   loadingComponent: PanelLoading,
   delay: 80,
 })
-const InspectPanel = defineAsyncComponent({
+const AgentContextList = defineAsyncComponent({
+  loader: () => import('./AgentContextList.vue'),
+  loadingComponent: PanelLoading,
+  delay: 80,
+})
+const STInspectPanel = defineAsyncComponent({
   loader: () => import('./InspectPanel.vue'),
   loadingComponent: PanelLoading,
   delay: 80,
 })
+const AgentInspectPanel = defineAsyncComponent({
+  loader: () => import('./AgentInspectPanel.vue'),
+  loadingComponent: PanelLoading,
+  delay: 80,
+})
+
+const isAgentMode = computed(() => appShell.currentMode === 'agent')
 
 const showContextList = computed(() => {
   const contextPages = [
@@ -90,7 +102,7 @@ const mainContentStyle = {
         :content-style="contextSiderContentStyle"
         class="context-sider"
       >
-        <ContextList />
+        <component :is="isAgentMode ? AgentContextList : STContextList" />
       </NLayoutSider>
 
       <!-- Main Content -->
@@ -125,7 +137,7 @@ const mainContentStyle = {
         :width="appShell.inspectPanelWidth"
         class="inspect-sider"
       >
-        <InspectPanel />
+        <component :is="isAgentMode ? AgentInspectPanel : STInspectPanel" />
       </NLayoutSider>
     </NLayout>
   </div>
@@ -192,8 +204,9 @@ const mainContentStyle = {
 }
 
 .route-host > :deep(*) {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   width: 100%;
+  height: 100%;
   min-width: 0;
   min-height: 0;
 }
