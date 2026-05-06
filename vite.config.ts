@@ -22,8 +22,9 @@ export default defineConfig({
     target: 'esnext',
     minify: !process.env.TAURI_DEBUG ? 'esbuild' : false,
     sourcemap: !!process.env.TAURI_DEBUG,
-    // Use relative paths for Tauri WebView compatibility
-    cssCodeSplit: true,
+    // Keep production CSS in the entry document. Tauri WebView startup is more
+    // reliable when layout CSS is not tied to async Vue chunks.
+    cssCodeSplit: false,
     rollupOptions: {
       output: {
         assetFileNames: 'assets/[name]-[hash].[ext]',
@@ -33,20 +34,11 @@ export default defineConfig({
           if (!id.includes('node_modules')) {
             return
           }
-          if (id.includes('@tauri-apps')) {
-            return 'tauri'
-          }
-          if (id.includes('@vicons')) {
-            return 'icons'
-          }
           if (id.includes('@codemirror') || id.includes('codemirror') || id.includes('yaml')) {
             return 'editor'
           }
-          if (id.includes('vue') || id.includes('pinia') || id.includes('vue-router')) {
-            return 'vue-vendor'
-          }
-          if (id.includes('naive-ui')) {
-            return 'naive-ui'
+          if (id.includes('@tauri-apps')) {
+            return 'tauri'
           }
           return 'vendor'
         },

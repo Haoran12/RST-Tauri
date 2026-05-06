@@ -1,14 +1,5 @@
 <script setup lang="ts">
-import { defineAsyncComponent } from 'vue'
-import StartupShell from '@/components/layout/StartupShell.vue'
-
-const AppProviders = defineAsyncComponent({
-  loader: () => import('@/AppProviders.vue'),
-  loadingComponent: StartupShell,
-  errorComponent: StartupShell,
-  delay: 0,
-  timeout: 20000,
-})
+import AppProviders from '@/AppProviders.vue'
 </script>
 
 <template>

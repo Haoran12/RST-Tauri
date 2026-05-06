@@ -233,6 +233,7 @@
 | 8.10 | 应用数据目录 C 盘写入边界收紧 | ✅ | 2026-05-06 | 默认业务数据与 WebView 数据均写入应用 `data/`；应用不在 C 盘时拒绝 `RST_DATA_DIR` 指向 C 盘 |
 | 8.11 | 日志页面规划 | ✅ | 2026-05-06 | 已补 `/logs` 页面信息架构、筛选/详情/Trace 跳转、容量清理、后端命令边界与 MVP 切片 |
 | 8.12 | 内置预设提示词条目 | ✅ | 2026-05-06 | 参考 SillyTavern 实现，定义 6 个内置条目（System Prompt/Character Description/Personality/Scenario/World Info/Chat History），支持禁用/排序，不可删除；部分条目内容由系统动态生成 |
+| 8.13 | Tauri 生产构建样式稳定性 | ✅ | 2026-05-06 | Vite 生产构建改为单入口 CSS，首屏 Naive UI provider 不再异步拆分，CSP 明确允许运行时 style 注入，避免 build 产物退化为近似浏览器原生控件 |
 
 ---
 
@@ -247,8 +248,8 @@
 | 阶段五 | 20 | 20 | 0 | 0 |
 | 阶段六 | 21 | 19 | 2 | 0 |
 | 阶段七 | 7 | 7 | 0 | 0 |
-| 阶段八 | 12 | 9 | 2 | 1 |
-| **总计** | **175** | **168** | **6** | **1** |
+| 阶段八 | 13 | 10 | 2 | 1 |
+| **总计** | **176** | **169** | **6** | **1** |
 
 ---
 
@@ -256,6 +257,7 @@
 
 | 日期 | 更新内容 |
 |------|----------|
+| 2026-05-06 | 修复 Tauri 生产构建 Naive UI 样式退化：关闭 CSS 分包、取消首屏 provider 异步拆分、收敛 vendor 手动分包并明确 CSP style 注入策略；入口 CSS 不再全局清零所有元素 margin/padding |
 | 2026-05-06 | 继续修复生产构建页面布局异常：App Shell 新增 `route-host` 统一承载路由页面，补齐 `NLayout` / `NLayoutContent` 宽度与 flex 链路，并增加低优先级 Naive UI 按钮 / 卡片 / 输入控件结构兜底，避免内容区和按钮在 build 产物中按内容收缩 |
 | 2026-05-06 | 修复 Tauri 生产构建导航与聊天输入布局：Vite build 明确 `base: './'`，左侧主导航改为固定尺寸图标按钮 + absolute hover tooltip，ST / Agent 聊天输入改为稳定 flex composer，并补齐根节点与滚动链路的 `min-width` / `min-height` / `overflow` 约束 |
 | 2026-05-06 | 修复打包安装后资源工作台布局 / 图标尺寸异常：主导航默认进入折叠图标栏状态，并为 Naive UI `NIcon` / `BaseIcon` 增加静态 SVG 尺寸兜底，避免生产 WebView 启动阶段图标按 512 viewBox 撑开布局 |
