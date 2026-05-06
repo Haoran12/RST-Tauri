@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, nextTick } from 'vue'
 import {
   NCard,
   NForm,
@@ -144,6 +144,12 @@ async function saveChanges() {
   emit('update', { ...localEntry.value })
 }
 
+// Save changes after v-model updates (for NDynamicTags)
+async function saveChangesAfterUpdate() {
+  await nextTick()
+  saveChanges()
+}
+
 // Open content overlay
 function openContentOverlay() {
   overlayContent.value = localEntry.value.content ?? ''
@@ -236,11 +242,11 @@ function cancelOverlay() {
 
       <!-- Keywords -->
       <NFormItem label="主关键词">
-        <NDynamicTags v-model:value="localEntry.key" @change="saveChanges" />
+        <NDynamicTags v-model:value="localEntry.key" @update:value="saveChangesAfterUpdate" />
       </NFormItem>
 
       <NFormItem label="次关键词">
-        <NDynamicTags v-model:value="localEntry.keysecondary" @change="saveChanges" />
+        <NDynamicTags v-model:value="localEntry.keysecondary" @update:value="saveChangesAfterUpdate" />
       </NFormItem>
 
       <!-- Selective & Logic on same row -->
@@ -469,7 +475,7 @@ function cancelOverlay() {
 
       <!-- Triggers -->
       <NFormItem label="触发词">
-        <NDynamicTags v-model:value="localEntry.triggers" @change="saveChanges" />
+        <NDynamicTags v-model:value="localEntry.triggers" @update:value="saveChangesAfterUpdate" />
       </NFormItem>
 
       <NFormItem label="自动化ID">
