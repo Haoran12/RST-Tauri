@@ -2,7 +2,8 @@
 // 运行时组装服务：调用 Tauri 命令
 
 import { invoke } from '@tauri-apps/api/core';
-import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import { listen } from '@tauri-apps/api/event';
+import type { UnlistenFn } from '@tauri-apps/api/event';
 import type {
   GlobalAppState,
   STWorldInfoSettings,

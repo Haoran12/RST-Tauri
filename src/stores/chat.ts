@@ -264,7 +264,7 @@ export const useChatStore = defineStore('chat', () => {
           max_context: 8192,
         },
         {
-          onStart: (event) => {
+          onStart: () => {
             // Stream started, we already have the placeholder
           },
           onChunk: (event) => {
