@@ -518,12 +518,17 @@ onMounted(refreshAll)
                 </div>
                 <div class="record-summary">{{ record.summary || primaryContext(record) }}</div>
                 <div class="record-meta">
-                  <span>{{ record.record_ref.source.source_kind }}</span>
-                  <span>{{ formatDate(record.created_at) }}</span>
-                  <span v-if="record.latency_ms">{{ record.latency_ms }}ms</span>
-                  <span v-if="record.stream_chunk_count">{{ record.stream_chunk_count }} chunks</span>
-                  <span v-if="record.step_count">{{ record.step_count }} steps</span>
-                  <span v-if="record.protected === true" class="protected-badge">已保护</span>
+                  <span class="record-meta-left">
+                    <span>{{ record.record_ref.source.source_kind }}</span>
+                    <span>{{ formatDate(record.created_at) }}</span>
+                    <span v-if="record.latency_ms">{{ record.latency_ms }}ms</span>
+                    <span v-if="record.stream_chunk_count">{{ record.stream_chunk_count }} chunks</span>
+                    <span v-if="record.step_count">{{ record.step_count }} steps</span>
+                  </span>
+                  <span v-if="record.protected === true" class="protected-badge">
+                    <NIcon :component="LockClosedOutline" size="14" />
+                    已保护
+                  </span>
                 </div>
                 <div v-if="record.record_ref.record_kind === 'llm' || record.record_ref.record_kind === 'event'" class="record-actions">
                   <NButton
@@ -950,13 +955,28 @@ onMounted(refreshAll)
 }
 
 .record-meta {
-  flex-wrap: wrap;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin-top: 8px;
 }
 
+.record-meta-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .protected-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   color: var(--n-success-color);
   font-weight: 500;
+  font-size: 12px;
+  flex-shrink: 0;
 }
 
 .record-actions {
