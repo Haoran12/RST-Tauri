@@ -839,13 +839,28 @@ onMounted(refreshAll)
   overflow: hidden;
 }
 
-.detail-tabs :deep(.n-tab-pane) {
+.detail-tabs :deep(.n-tabs-pane-wrapper > div) {
   height: 100%;
   min-height: 0;
 }
 
+.detail-tabs :deep(.n-tab-pane) {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .tab-scroll {
   height: 100%;
+  min-height: 0;
+}
+
+.tab-scroll :deep(.n-scrollbar-container) {
+  height: 100%;
+}
+
+.tab-scroll :deep(.n-scrollbar-content) {
+  padding: 0 4px;
 }
 
 .detail-heading h2 {
