@@ -84,6 +84,7 @@ pub(crate) fn create_provider(
         ))),
         "claude_code" => Ok(Box::new(crate::api::claude_code::ClaudeCodeProvider::new(
             base_url.unwrap_or_else(|| "http://localhost:8080".to_string()),
+            api_key,
             model,
         ))),
         _ => Err(format!("Unknown provider: {}", config.provider)),

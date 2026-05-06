@@ -337,3 +337,4 @@
 | 2026-05-06 | 修复角色卡详情弹窗加载状态：详情读取改为组件本地 loading / error，不再复用角色卡列表全局 `isLoading` 导致点击卡片时只看到整页加载遮罩 |
 | 2026-05-06 | 调整角色卡资源页 UI：左侧上下文列表负责角色选择，右侧内容区直接展示当前角色卡详情与导入 / 导出 / 删除操作，移除卡片网格和编辑弹窗路径 |
 | 2026-05-06 | 角色卡详情接入自动保存：字段变更标记 dirty，右侧编辑区整体失焦、切换角色或卸载离开时自动保存当前角色卡 |
+| 2026-05-06 | 依据 `E:\AIPlay\cccode` 源码修正 Claude Code Interface：契约改为 Messages API `/v1/messages` + `Authorization: Bearer`，实际 provider 改用顶层 system blocks、user/assistant messages、tool schema 结构化输出和 Anthropic Messages 响应解析 |

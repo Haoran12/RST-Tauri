@@ -74,8 +74,8 @@
     },
     {
       "id": "claude_code_request_format",
-      "title": "LLM Request Format Replication Guide",
-      "url": "docs/CLUADE_CODE_REQUEST_FORMAT.md"
+      "title": "Claude Code local source request format investigation",
+      "url": "E:/AIPlay/cccode/src/services/api/claude.ts; E:/AIPlay/cccode/src/services/api/client.ts; E:/AIPlay/cccode/src/utils/messages.ts"
     }
   ],
   "contracts": {
@@ -941,8 +941,8 @@
       "purpose": "Single Claude Code-compatible interface for Coding Plan packages. Provider variants only define endpoint, model, and environment differences.",
       "selection_rule": "Expose this as one provider/interface in RST. Select a provider_variant such as aliyun_coding_plan or xfyun_astron_coding_plan from account/package settings.",
       "headers": {
-        "required": ["ANTHROPIC_AUTH_TOKEN / x-api-key / Authorization bearer carrying the Coding Plan API Key", "Content-Type: application/json"],
-        "optional": ["anthropic-version when sent by the client/tool"]
+        "required": ["Authorization: Bearer <ANTHROPIC_AUTH_TOKEN or Coding Plan API Key>", "anthropic-version: 2023-06-01", "Content-Type: application/json"],
+        "optional": ["x-api-key when using a direct Anthropic SDK apiKey path instead of ANTHROPIC_AUTH_TOKEN", "x-app", "User-Agent", "X-Claude-Code-Session-Id", "ANTHROPIC_CUSTOM_HEADERS entries"]
       },
       "allowed_request_fields": [
         {"path": "model", "status": "required", "type": "string", "notes": "Use the selected provider_variant model policy."},
@@ -958,7 +958,7 @@
         {"path": "tools", "status": "optional", "type": "array<object>", "notes": "Anthropic tool schema array used by Claude Code local tools."},
         {"path": "tool_choice", "status": "optional", "type": "object", "notes": "Usually {\"type\":\"auto\"} for Claude Code-style agent loops."},
         {"path": "metadata", "status": "optional", "type": "object", "notes": "Claude Code commonly sends metadata.user_id as a JSON string containing device/account/session IDs."},
-        {"path": "stream", "status": "optional", "type": "boolean", "recommended": true},
+        {"path": "stream", "status": "optional", "type": "boolean", "recommended": true, "notes": "Claude Code appends stream:true to the same Messages endpoint; it does not switch to a /chat/stream endpoint."},
         {"path": "temperature", "status": "conditional", "type": "number", "notes": "Send only when thinking is disabled or omitted; Claude Code normally omits temperature when thinking is enabled."},
         {"path": "thinking", "status": "conditional", "type": "object", "notes": "Use {\"type\":\"adaptive\"} or budgeted thinking only for models/endpoints that accept it."},
         {"path": "betas", "status": "conditional", "type": "array<string>", "notes": "Only send beta names required by enabled Claude Code features and accepted by the endpoint."},
@@ -1009,7 +1009,7 @@
             "model": "Use the selected provider_variant model policy.",
             "max_tokens": "required",
             "system": "top-level array of text blocks; do not send messages[].role=system",
-            "messages": "array of user/assistant turns only; merge consecutive user turns and keep tool_use/tool_result pairing valid",
+            "messages": "array of user/assistant turns only; filter display-only/system UI messages, convert local command system messages to user turns, merge consecutive user turns, merge matching assistant fragments, and keep tool_use/tool_result pairing valid",
             "tools": "optional Anthropic tool schema array with name, description, and input_schema",
             "tool_choice": "optional; usually {\"type\":\"auto\"}",
             "metadata": "optional Claude Code metadata object, typically metadata.user_id JSON string",
@@ -1044,6 +1044,11 @@
         "coerce_system_messages_to_top_level_system": true,
         "coerce_system_to_text_block_array": true,
         "merge_consecutive_user_messages": true,
+        "send_to_messages_endpoint": true,
+        "do_not_use_chat_endpoint": true,
+        "streaming_uses_same_messages_endpoint_with_stream_true": true,
+        "auth_token_header": "Authorization: Bearer <api_key>",
+        "anthropic_version": "2023-06-01",
         "validate_tool_use_tool_result_pairing": true,
         "omit_temperature_when_thinking_enabled": true,
         "gate_claude_code_extension_fields_by_provider_support": ["betas", "thinking", "context_management", "output_config", "speed", "tools[].defer_loading", "tools[].eager_input_streaming", "cache_control"],
