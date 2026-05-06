@@ -77,6 +77,9 @@ export const usePresetsStore = defineStore('presets', () => {
     if (!preset.name) return
     await storage.savePreset(preset)
     await loadPresetList()
+    if (currentPreset.value?.name === preset.name) {
+      await loadPreset(preset.name)
+    }
   }
 
   async function deletePreset(name: string) {
