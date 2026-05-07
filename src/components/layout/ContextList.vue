@@ -1333,10 +1333,12 @@ watch(() => route.name, async (newName) => {
   touch-action: none;
   background-color: var(--n-color-modal);
   border: 1px solid var(--n-border-color);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
 }
 
 .entry-item:hover {
   border-color: var(--n-border-color-hover);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
 }
 
 .entry-item-dragging {
