@@ -328,11 +328,9 @@ watch(() => props.show, (show) => {
 
 .item-content {
   margin-top: 8px;
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
-  background: color-mix(in srgb, var(--n-color) 98%, var(--n-border-color));
-  border: 1px solid color-mix(in srgb, var(--n-border-color) 80%, transparent);
-  box-shadow: 0 1px 3px color-mix(in srgb, var(--n-text-color) 5%, transparent);
+  background: var(--n-color-embedded);
 }
 
 .content-text {
@@ -356,23 +354,17 @@ watch(() => props.show, (show) => {
 
 /* 折叠卡片整体样式 */
 :deep(.n-collapse-item) {
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--n-color) 97%, var(--n-border-color));
-  border: 1px solid color-mix(in srgb, var(--n-border-color) 60%, transparent);
-  box-shadow: 0 1px 4px color-mix(in srgb, var(--n-text-color) 4%, transparent);
-  transition: box-shadow 0.2s ease;
-}
-
-:deep(.n-collapse-item:hover) {
-  box-shadow: 0 2px 6px color-mix(in srgb, var(--n-text-color) 8%, transparent);
+  background: var(--n-color-embedded);
+  border: 1px solid var(--n-border-color);
 }
 
 :deep(.n-collapse-item__header) {
-  padding: 12px 16px;
+  padding: 10px 14px;
 }
 
 :deep(.n-collapse-item__content-inner) {
-  padding: 0 16px 12px;
+  padding: 0 14px 10px;
 }
 </style>
