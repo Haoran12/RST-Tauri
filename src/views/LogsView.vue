@@ -305,6 +305,23 @@ const filteredReadableMessages = computed(() => {
   return readableContent.value.messages.filter((msg) => readableRoleFilter.value.includes(msg.role))
 })
 
+const combinedReadableContent = computed(() => {
+  const parts: string[] = []
+
+  // Add reasoning if present
+  if (readableContent.value?.reasoning) {
+    parts.push(`REASONING >\n${readableContent.value.reasoning}`)
+  }
+
+  // Add filtered messages with role prefix
+  for (const msg of filteredReadableMessages.value) {
+    const prefix = msg.role.toUpperCase()
+    parts.push(`${prefix} >\n${msg.content}`)
+  }
+
+  return parts.join('\n\n---\n\n')
+})
+
 const roleFilterOptions = [
   { label: 'System', value: 'system' },
   { label: 'User', value: 'user' },
@@ -838,20 +855,8 @@ onMounted(refreshAll)
 
         <NSpin :show="isReadableLoading">
           <NScrollbar style="max-height: 70vh">
-            <div v-if="readableContent?.reasoning" class="reasoning-section">
-              <div class="section-label">推理过程</div>
-              <MarkdownViewer :content="readableContent.reasoning" :max-height="300" />
-            </div>
-
-            <div v-if="filteredReadableMessages.length > 0" class="message-list">
-              <div v-for="(msg, idx) in filteredReadableMessages" :key="idx" class="message-item">
-                <div class="message-header">
-                  <NTag :type="msg.role === 'system' ? 'info' : msg.role === 'user' ? 'warning' : 'success'" size="small">
-                    {{ msg.role.toUpperCase() }}
-                  </NTag>
-                </div>
-                <MarkdownViewer :content="msg.content" :max-height="400" />
-              </div>
+            <div v-if="combinedReadableContent" class="readable-content-wrapper">
+              <MarkdownViewer :content="combinedReadableContent" :max-height="600" />
             </div>
 
             <div v-else-if="!isReadableLoading" class="empty-area compact">
@@ -1273,28 +1278,6 @@ onMounted(refreshAll)
   margin-bottom: 8px;
 }
 
-.reasoning-section {
-  margin-bottom: 16px;
-}
-
-.message-list {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.message-item {
-  border: 1px solid var(--n-border-color);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.message-header {
-  padding: 8px 12px;
-  background: var(--n-color-hover);
-  border-bottom: 1px solid var(--n-border-color);
-}
-
 .readable-toolbar {
   display: flex;
   align-items: center;
@@ -1313,6 +1296,10 @@ onMounted(refreshAll)
 .filter-label {
   font-size: 13px;
   color: var(--n-text-color-2);
+}
+
+.readable-content-wrapper {
+  padding: 4px 0;
 }
 
 .json-block,
