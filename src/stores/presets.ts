@@ -15,7 +15,7 @@ export interface PresetListItem {
   source_api_id?: string
 }
 
-export type PresetSectionKey = 'sampler' | 'instruct' | 'context' | 'sysprompt' | 'reasoning' | 'prompt'
+export type PresetSectionKey = 'sampler' | 'prompt' | 'instruct' | 'context' | 'sysprompt' | 'reasoning'
 
 export const usePresetsStore = defineStore('presets', () => {
   // State

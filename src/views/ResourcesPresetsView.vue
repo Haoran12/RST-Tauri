@@ -43,20 +43,20 @@ const editInjectionTrigger = ref('')
 
 const sectionLabels: Record<PresetSectionKey, string> = {
   sampler: 'Sampler',
+  prompt: 'Prompt',
   instruct: 'Instruct',
   context: 'Context',
   sysprompt: 'System Prompt',
   reasoning: 'Reasoning',
-  prompt: 'Prompt',
 }
 
 const sectionDescriptions: Record<PresetSectionKey, string> = {
   sampler: 'ST 扁平预设顶层采样字段：采样、惩罚、DRY、Mirostat、流式开关与 token 上限。',
+  prompt: 'ST 扁平预设主链：prompts、prompt_order、格式模板与特殊提示词。',
   instruct: '兼容扩展：保留 instruct 模板字段；当前运行时只消费停止符与少量格式字段。',
   context: '兼容扩展：保留 context 模板字段；当前运行时主要消费 story_string。',
   sysprompt: '兼容扩展：保留旧 sysprompt 字段；实际标准应优先使用 prompts/prompt_order。',
   reasoning: '兼容扩展与 ST 顶层推理字段；运行时优先使用扁平 preset 中的 reasoning_effort。',
-  prompt: 'ST 扁平预设主链：prompts、prompt_order、格式模板与特殊提示词。',
 }
 
 const fixedPromptIdentifiers = new Set([
