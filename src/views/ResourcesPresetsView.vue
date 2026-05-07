@@ -40,6 +40,7 @@ const editInjectionDepth = ref<number | null>(4)
 const editInjectionOrder = ref<number | null>(100)
 const editForbidOverrides = ref(false)
 const editInjectionTrigger = ref('')
+const editIsReadonlyContent = ref(false)
 
 const sectionLabels: Record<PresetSectionKey, string> = {
   sampler: 'Sampler',
@@ -170,6 +171,7 @@ function openEditModal(item: PromptItem) {
   editInjectionOrder.value = item.injection_order ?? 100
   editForbidOverrides.value = item.forbid_overrides ?? false
   editInjectionTrigger.value = (item.injection_trigger ?? []).join('\n')
+  editIsReadonlyContent.value = item.marker === true
   showEditModal.value = true
 }
 
@@ -896,7 +898,9 @@ onBeforeUnmount(() => {
             type="textarea"
             placeholder="提示词内容"
             :autosize="{ minRows: 6, maxRows: 16 }"
+            :disabled="editIsReadonlyContent"
           />
+          <span v-if="editIsReadonlyContent" class="readonly-hint">此条目内容由系统运行时动态构建，不可编辑</span>
         </NFormItem>
         <div class="form-grid">
           <NFormItem label="System Prompt">
@@ -1098,5 +1102,11 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 8px;
+}
+
+.readonly-hint {
+  font-size: 12px;
+  color: var(--color-text-secondary, #6b7280);
+  margin-top: 4px;
 }
 </style>
