@@ -597,41 +597,60 @@ impl LlmCallLogger {
     }
 }
 
+/// Message item for readable content
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReadableMessage {
+    pub role: String,
+    pub content: String,
+}
+
+/// Structured readable content for UI display
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReadableContent {
+    pub reasoning: Option<String>,
+    pub messages: Vec<ReadableMessage>,
+}
+
 /// Generate readable content from log data (for on-demand generation)
 ///
 /// This function is called when the user clicks "可读内容" in the UI.
-/// It generates readable text from the stored request/response JSON.
-pub fn generate_readable_from_log(
+/// It generates structured readable content from the stored request/response JSON.
+pub fn generate_readable_content_structured(
     request_json: &serde_json::Value,
     response_json: &Option<serde_json::Value>,
     reasoning_text: Option<&str>,
     assembled_text: Option<&str>,
-) -> Result<String, String> {
-    let mut parts = Vec::new();
+) -> Result<ReadableContent, String> {
+    let mut messages = Vec::new();
 
-    // Add reasoning text if present
-    if let Some(reasoning) = reasoning_text {
-        if !reasoning.trim().is_empty() {
-            parts.push(format!("REASONING >\n{}", format_readable_content(reasoning)));
+    // Add reasoning as a special message
+    let reasoning = reasoning_text.and_then(|r| {
+        if r.trim().is_empty() {
+            None
+        } else {
+            Some(format_readable_content(r))
         }
-    }
+    });
 
     // Extract system prompt if present (for providers that use separate system field)
     if let Some(system) = request_json.get("system") {
         let system_text = extract_text_value(system);
         if !system_text.trim().is_empty() {
-            parts.push(format!("SYSTEM >\n{}", format_readable_content(&system_text)));
+            messages.push(ReadableMessage {
+                role: "system".to_string(),
+                content: format_readable_content(&system_text),
+            });
         }
     }
 
     // Extract messages from request body (for providers with messages in body)
-    let messages = request_json
+    let request_messages = request_json
         .get("body")
         .and_then(|b| b.get("messages"))
         .or_else(|| request_json.get("messages"));
 
-    if let Some(messages) = messages.and_then(|m| m.as_array()) {
-        for msg in messages {
+    if let Some(msgs) = request_messages.and_then(|m| m.as_array()) {
+        for msg in msgs {
             if let (Some(role), Some(content)) =
                 (msg.get("role").and_then(|r| r.as_str()), msg.get("content"))
             {
@@ -640,14 +659,15 @@ pub fn generate_readable_from_log(
                     continue;
                 }
 
-                let prefix = match role.to_lowercase().as_str() {
-                    "system" => "SYSTEM >",
-                    "user" => "USER >",
-                    "assistant" => "ASSISTANT >",
-                    _ => continue, // Skip unknown roles
-                };
+                let role_lower = role.to_lowercase();
+                if !matches!(role_lower.as_str(), "system" | "user" | "assistant") {
+                    continue;
+                }
 
-                parts.push(format!("{}\n{}", prefix, format_readable_content(&content_text)));
+                messages.push(ReadableMessage {
+                    role: role_lower,
+                    content: format_readable_content(&content_text),
+                });
             }
         }
     }
@@ -670,8 +690,51 @@ pub fn generate_readable_from_log(
 
     if let Some(text) = response_text {
         if !text.trim().is_empty() {
-            parts.push(format!("ASSISTANT >\n{}", format_readable_content(&text)));
+            messages.push(ReadableMessage {
+                role: "assistant".to_string(),
+                content: format_readable_content(&text),
+            });
         }
+    }
+
+    if reasoning.is_none() && messages.is_empty() {
+        Err("No readable content could be generated from this log".to_string())
+    } else {
+        Ok(ReadableContent { reasoning, messages })
+    }
+}
+
+/// Generate readable content from log data (for on-demand generation)
+///
+/// This function is called when the user clicks "可读内容" in the UI.
+/// It generates readable text from the stored request/response JSON.
+pub fn generate_readable_from_log(
+    request_json: &serde_json::Value,
+    response_json: &Option<serde_json::Value>,
+    reasoning_text: Option<&str>,
+    assembled_text: Option<&str>,
+) -> Result<String, String> {
+    let structured = generate_readable_content_structured(
+        request_json,
+        response_json,
+        reasoning_text,
+        assembled_text,
+    )?;
+
+    let mut parts = Vec::new();
+
+    if let Some(reasoning) = &structured.reasoning {
+        parts.push(format!("REASONING >\n{}", reasoning));
+    }
+
+    for msg in &structured.messages {
+        let prefix = match msg.role.as_str() {
+            "system" => "SYSTEM >",
+            "user" => "USER >",
+            "assistant" => "ASSISTANT >",
+            _ => continue,
+        };
+        parts.push(format!("{}\n{}", prefix, msg.content));
     }
 
     if parts.is_empty() {

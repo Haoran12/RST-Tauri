@@ -221,8 +221,22 @@ export async function getLogRecordDetail(recordRef: LogRecordRef) {
   return await invoke<LogRecordDetail>('get_log_record_detail', { recordRef })
 }
 
+export interface ReadableMessage {
+  role: string
+  content: string
+}
+
+export interface ReadableContent {
+  reasoning: string | null
+  messages: ReadableMessage[]
+}
+
 export async function generateReadableContent(recordRef: LogRecordRef) {
   return await invoke<string>('generate_readable_content', { recordRef })
+}
+
+export async function generateReadableContentStructured(recordRef: LogRecordRef) {
+  return await invoke<ReadableContent>('generate_readable_content_structured', { recordRef })
 }
 
 export async function getStreamChunks(requestId: string, source: LogSourceRef, page?: LogPageInput) {

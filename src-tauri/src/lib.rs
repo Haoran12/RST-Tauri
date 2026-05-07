@@ -182,6 +182,7 @@ pub fn run() {
             commands::query_log_records,
             commands::get_log_record_detail,
             commands::generate_readable_content,
+            commands::generate_readable_content_structured,
             commands::get_stream_chunks,
             commands::get_trace_detail,
             commands::get_log_storage_summary,
