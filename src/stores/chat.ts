@@ -159,21 +159,19 @@ export const useChatStore = defineStore('chat', () => {
     error.value = null
     const messageContent = content.trim()
     const attachments = [...pendingAttachments.value]
-    if (!messageContent && attachments.length === 0) {
-      isGenerating.value = false
-      return
-    }
 
-    // Add user message
-    const userMessage: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: messageContent,
-      created_at: new Date().toISOString(),
-      attachments,
+    // Add user message only if there's content or attachments
+    if (messageContent || attachments.length > 0) {
+      const userMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: messageContent,
+        created_at: new Date().toISOString(),
+        attachments,
+      }
+      messages.value.push(userMessage)
+      pendingAttachments.value = []
     }
-    messages.value.push(userMessage)
-    pendingAttachments.value = []
 
     try {
       await saveCurrentSession()
@@ -222,21 +220,19 @@ export const useChatStore = defineStore('chat', () => {
     error.value = null
     const messageContent = content.trim()
     const attachments = [...pendingAttachments.value]
-    if (!messageContent && attachments.length === 0) {
-      isGenerating.value = false
-      return
-    }
 
-    // Add user message
-    const userMessage: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: messageContent,
-      created_at: new Date().toISOString(),
-      attachments,
+    // Add user message only if there's content or attachments
+    if (messageContent || attachments.length > 0) {
+      const userMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: messageContent,
+        created_at: new Date().toISOString(),
+        attachments,
+      }
+      messages.value.push(userMessage)
+      pendingAttachments.value = []
     }
-    messages.value.push(userMessage)
-    pendingAttachments.value = []
 
     // Pre-create assistant message placeholder for efficient updates
     const assistantId = crypto.randomUUID()

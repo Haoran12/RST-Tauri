@@ -54,7 +54,8 @@ const showSessionMenu = ref(false)
 
 const hasActiveApiConfig = computed(() => settingsStore.activeApiConfig !== null)
 const canSend = computed(() => {
-  return (inputText.value.trim() || chatStore.hasPendingAttachments) && !chatStore.isGenerating && hasActiveApiConfig.value
+  // 允许空输入发送（触发 continue 模式），只需有活跃 API 配置且不在生成中
+  return !chatStore.isGenerating && hasActiveApiConfig.value
 })
 const apiConfigOptions = computed(() => {
   return settingsStore.apiConfigs.map(config => ({
@@ -90,7 +91,8 @@ async function handleSend() {
 }
 
 function handleKeyDown(e: KeyboardEvent) {
-  if (e.key === 'Enter' && !e.shiftKey) {
+  // Ctrl+Enter 发送，Enter / Shift+Enter 换行
+  if (e.key === 'Enter' && e.ctrlKey) {
     e.preventDefault()
     handleSend()
   }
