@@ -462,9 +462,9 @@ async function handlePresetSelect(name: string | null) {
   }
 }
 
-// Select prompt item for right-side editing
-function selectPromptItem(identifier: string) {
-  presetsStore.selectPromptItem(identifier)
+// Open edit modal for prompt item (same modal as right-side detail panel)
+function openPromptItemEditModal(item: PromptItem) {
+  window.dispatchEvent(new CustomEvent('edit-prompt-item', { detail: item }))
 }
 
 // Create new preset
@@ -1015,7 +1015,7 @@ watch(() => route.name, async (newName) => {
                 </div>
 
                 <!-- Prompt info -->
-                <div class="entry-info" @click="selectPromptItem(item.identifier)" @pointerdown.stop @mousedown.stop>
+                <div class="entry-info" @click="openPromptItemEditModal(item)" @pointerdown.stop @mousedown.stop>
                   <div class="entry-header">
                     <span class="entry-name">{{ item.name }}</span>
                   </div>
