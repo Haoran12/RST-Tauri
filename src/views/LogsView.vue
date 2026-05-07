@@ -5,9 +5,12 @@ import {
   NButton,
   NButtonGroup,
   NCard,
+  NCheckbox,
+  NCheckboxGroup,
   NEmpty,
   NIcon,
   NInput,
+  NModal,
   NPagination,
   NSelect,
   NScrollbar,
@@ -34,13 +37,15 @@ import {
   previewLogCleanup,
   queryLogRecords,
   setLogProtection,
-  generateReadableContent,
+  generateReadableContentStructured,
   type LogRecordDetail,
   type LogRecordFilter,
   type LogRecordSummary,
   type LogStorageSummary,
   type StreamChunkDetail,
+  type ReadableContent,
 } from '@/services/logs'
+import MarkdownViewer from '@/components/shared/MarkdownViewer.vue'
 
 const message = useMessage()
 
@@ -62,8 +67,10 @@ const selectedRecord = ref<LogRecordSummary | null>(null)
 const detail = ref<LogRecordDetail | null>(null)
 const storageSummary = ref<LogStorageSummary | null>(null)
 const streamChunks = ref<StreamChunkDetail[]>([])
-const readableContent = ref<string | null>(null)
+const readableContent = ref<ReadableContent | null>(null)
 const isReadableLoading = ref(false)
+const showReadableModal = ref(false)
+const readableRoleFilter = ref<string[]>(['system', 'user', 'assistant'])
 const currentPage = ref(1)
 const totalCount = ref(0)
 const isLoading = ref(false)
@@ -274,20 +281,35 @@ async function loadReadableContent() {
 
   isReadableLoading.value = true
   try {
-    readableContent.value = await generateReadableContent(selectedRecord.value.record_ref)
+    readableContent.value = await generateReadableContentStructured(selectedRecord.value.record_ref)
   } catch (e) {
-    readableContent.value = ''
+    readableContent.value = { reasoning: null, messages: [] }
     message.error(String(e))
   } finally {
     isReadableLoading.value = false
   }
 }
 
-function handleTabChange(tab: string) {
-  if (tab === 'readable') {
-    void loadReadableContent()
-  }
+function openReadableModal() {
+  readableContent.value = null
+  showReadableModal.value = true
+  void loadReadableContent()
 }
+
+function closeReadableModal() {
+  showReadableModal.value = false
+}
+
+const filteredReadableMessages = computed(() => {
+  if (!readableContent.value) return []
+  return readableContent.value.messages.filter((msg) => readableRoleFilter.value.includes(msg.role))
+})
+
+const roleFilterOptions = [
+  { label: 'System', value: 'system' },
+  { label: 'User', value: 'user' },
+  { label: 'Assistant', value: 'assistant' },
+]
 
 async function loadStorageSummary() {
   isSummaryLoading.value = true
@@ -590,7 +612,7 @@ onMounted(refreshAll)
             </div>
 
             <div class="detail-tabs-wrapper">
-              <NTabs type="line" animated class="detail-tabs" @update:value="handleTabChange">
+              <NTabs type="line" animated class="detail-tabs">
                 <NTabPane name="summary" tab="摘要">
                   <NScrollbar class="tab-scroll">
                     <div class="summary-grid">
@@ -698,6 +720,14 @@ onMounted(refreshAll)
                       >
                         查看 Request
                       </NButton>
+                      <NButton
+                        v-if="selectedKind === 'llm'"
+                        size="small"
+                        type="primary"
+                        @click="openReadableModal"
+                      >
+                        查看可读内容
+                      </NButton>
                     </div>
                   </NScrollbar>
                 </NTabPane>
@@ -710,23 +740,6 @@ onMounted(refreshAll)
                 <NTabPane v-if="selectedLlm" name="response" tab="原始响应">
                   <NScrollbar class="tab-scroll">
                     <pre class="json-block">{{ jsonText(selectedLlm.response_json) }}</pre>
-                  </NScrollbar>
-                </NTabPane>
-                <NTabPane v-if="selectedLlm" name="readable" tab="可读内容">
-                  <NScrollbar class="tab-scroll">
-                    <NSpin :show="isReadableLoading">
-                      <div v-if="selectedLlm.reasoning_text" class="reasoning-section">
-                        <div class="section-label">推理过程</div>
-                        <pre class="text-block reasoning-block">{{ selectedLlm.reasoning_text }}</pre>
-                      </div>
-                      <div v-if="readableContent">
-                        <div class="section-label">对话内容</div>
-                        <pre class="text-block">{{ readableContent }}</pre>
-                      </div>
-                      <div v-else-if="!isReadableLoading" class="empty-area compact">
-                        <NEmpty description="没有可读内容" />
-                      </div>
-                    </NSpin>
                   </NScrollbar>
                 </NTabPane>
                 <NTabPane v-if="selectedLlm" name="schema" tab="Schema">
@@ -796,6 +809,58 @@ onMounted(refreshAll)
         </NSpin>
       </section>
     </main>
+
+    <!-- 可读内容弹窗 -->
+    <NModal
+      v-model:show="showReadableModal"
+      preset="card"
+      title="可读内容"
+      style="width: 900px; max-width: 95vw"
+      :bordered="false"
+      segmented
+      @close="closeReadableModal"
+    >
+      <template #header-extra>
+        <NButton size="small" quaternary @click="closeReadableModal">
+          关闭
+        </NButton>
+      </template>
+
+      <div class="readable-modal-content">
+        <div class="readable-toolbar">
+          <div class="readable-filter">
+            <span class="filter-label">筛选消息类型：</span>
+            <NCheckboxGroup v-model:value="readableRoleFilter">
+              <NCheckbox v-for="opt in roleFilterOptions" :key="opt.value" :value="opt.value" :label="opt.label" />
+            </NCheckboxGroup>
+          </div>
+        </div>
+
+        <NSpin :show="isReadableLoading">
+          <NScrollbar style="max-height: 70vh">
+            <div v-if="readableContent?.reasoning" class="reasoning-section">
+              <div class="section-label">推理过程</div>
+              <MarkdownViewer :content="readableContent.reasoning" :max-height="300" />
+            </div>
+
+            <div v-if="filteredReadableMessages.length > 0" class="message-list">
+              <div v-for="(msg, idx) in filteredReadableMessages" :key="idx" class="message-item">
+                <div class="message-header">
+                  <NTag :type="msg.role === 'system' ? 'info' : msg.role === 'user' ? 'warning' : 'success'" size="small">
+                    {{ msg.role.toUpperCase() }}
+                  </NTag>
+                </div>
+                <MarkdownViewer :content="msg.content" :max-height="400" />
+              </div>
+            </div>
+
+            <div v-else-if="!isReadableLoading" class="empty-area compact">
+              <NEmpty description="没有匹配的消息" />
+            </div>
+          </NScrollbar>
+        </NSpin>
+      </div>
+    </NModal>
   </div>
 </template>
 
@@ -1212,9 +1277,42 @@ onMounted(refreshAll)
   margin-bottom: 16px;
 }
 
-.reasoning-block {
-  background: rgba(255, 193, 7, 0.1);
-  border-color: rgba(255, 193, 7, 0.3);
+.message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.message-item {
+  border: 1px solid var(--n-border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.message-header {
+  padding: 8px 12px;
+  background: var(--n-color-hover);
+  border-bottom: 1px solid var(--n-border-color);
+}
+
+.readable-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--n-border-color);
+}
+
+.readable-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-label {
+  font-size: 13px;
+  color: var(--n-text-color-2);
 }
 
 .json-block,

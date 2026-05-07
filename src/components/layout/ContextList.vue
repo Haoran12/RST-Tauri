@@ -17,7 +17,7 @@ import {
   NTag,
   useMessage,
 } from 'naive-ui'
-import { computed, ref, watch, h } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { SearchOutline, AddOutline, TrashOutline, SettingsOutline, ReorderFourOutline } from '@vicons/ionicons5'
 import { useAppShellStore } from '@/stores/appShell'
