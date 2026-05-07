@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import {
   NCollapse,
   NCollapseItem,
@@ -11,8 +11,6 @@ import {
   NText,
 } from 'naive-ui'
 import { ChevronDownOutline } from '@vicons/ionicons5'
-import { markdown } from '@codemirror/lang-markdown'
-import { createStructuredTextEditor, type StructuredTextEditorController } from './structured-text-editor/cm6Setup'
 import type { PromptPreviewOutput } from '@/types/runtime'
 import { previewSTPrompt } from '@/services/runtime'
 import type { AssembleRequestInput } from '@/types/runtime'
@@ -31,9 +29,6 @@ const error = ref<string | null>(null)
 const previewData = ref<PromptPreviewOutput | null>(null)
 const expandedKeys = ref<string[]>([])
 
-// CodeMirror 编辑器控制器
-const editorControllers = ref<Map<string, StructuredTextEditorController>>(new Map())
-
 const totalTokens = computed(() => previewData.value?.total_estimated_tokens ?? 0)
 
 const promptItems = computed(() => previewData.value?.prompt_items ?? [])
@@ -50,10 +45,6 @@ async function loadPreview() {
   isLoading.value = true
   error.value = null
   previewData.value = null
-
-  // 清理旧的编辑器
-  editorControllers.value.forEach(ctrl => ctrl.destroy())
-  editorControllers.value.clear()
 
   try {
     const result = await previewSTPrompt(props.input)
@@ -97,48 +88,10 @@ function getRoleColor(role: string): string {
   }
 }
 
-// 初始化 CodeMirror 编辑器
-function initEditor(identifier: string, content: string, container: HTMLElement | null) {
-  if (!container) return
-
-  // 销毁旧的编辑器
-  const oldController = editorControllers.value.get(identifier)
-  if (oldController) {
-    oldController.destroy()
-    editorControllers.value.delete(identifier)
-  }
-
-  // 创建新编辑器
-  const controller = createStructuredTextEditor({
-    parent: container,
-    doc: content,
-    languageExtensions: [markdown()],
-    readOnly: true,
-    minHeight: 50,
-    maxHeight: 300,
-    onDocChange: () => {},
-    diagnosticsProvider: () => [],
-  })
-
-  editorControllers.value.set(identifier, controller)
-}
-
-// 清理所有编辑器
-function cleanupEditors() {
-  editorControllers.value.forEach(ctrl => ctrl.destroy())
-  editorControllers.value.clear()
-}
-
 watch(() => props.show, (show) => {
   if (show && props.input) {
     loadPreview()
-  } else if (!show) {
-    cleanupEditors()
   }
-})
-
-onUnmounted(() => {
-  cleanupEditors()
 })
 </script>
 
@@ -198,10 +151,7 @@ onUnmounted(() => {
 
                   <div class="item-content">
                     <template v-if="item.content">
-                      <div
-                        :ref="(el) => { if (el && expandedKeys.includes(item.identifier)) initEditor(item.identifier, item.content, el as HTMLElement) }"
-                        class="editor-container"
-                      ></div>
+                      <pre class="content-text">{{ item.content }}</pre>
                     </template>
                     <template v-else>
                       <NText depth="3" italic>（空内容）</NText>
@@ -310,11 +260,19 @@ onUnmounted(() => {
   margin-top: 8px;
   border-radius: 6px;
   overflow: hidden;
+  background: var(--n-color-hover);
 }
 
-.editor-container {
-  width: 100%;
-  min-height: 50px;
+.content-text {
+  margin: 0;
+  padding: 12px;
+  font-family: var(--font-mono, 'SF Mono', Monaco, 'Cascadia Code', monospace);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
 }
 
 .chat-history-section {
