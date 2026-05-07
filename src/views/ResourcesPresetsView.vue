@@ -320,7 +320,7 @@ onBeforeUnmount(() => {
       </NCard>
     </div>
 
-    <template v-else>
+    <div v-else class="editor-content">
       <div class="editor-header">
         <div class="header-left">
           <h2 class="preset-title">{{ store.currentPreset.name }}</h2>
@@ -857,7 +857,7 @@ onBeforeUnmount(() => {
           </NForm>
         </template>
       </NCard>
-    </template>
+    </div>
 
     <NModal
       v-model:show="showCreateModal"
@@ -965,6 +965,15 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 16px;
   padding: 24px;
+}
+
+.editor-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
 }
 
 .editor-header {

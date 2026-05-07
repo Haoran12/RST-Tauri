@@ -223,7 +223,7 @@ async function handleExport() {
     </div>
 
     <!-- Worldbook Editor when worldbook is selected -->
-    <template v-else>
+    <div v-else class="editor-content">
       <!-- Header with actions -->
       <div class="editor-header">
         <div class="header-left">
@@ -267,7 +267,7 @@ async function handleExport() {
           </div>
         </template>
       </NCard>
-    </template>
+    </div>
 
     <!-- Create Modal -->
     <NModal
@@ -409,6 +409,15 @@ async function handleExport() {
 
 .empty-text {
   font-size: 14px;
+}
+
+.editor-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
 }
 
 .editor-header {
