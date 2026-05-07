@@ -958,15 +958,17 @@ watch(() => route.name, async (newName) => {
                   'entry-item-drag-over': dragOverItem?.identifier === item.identifier,
                   'entry-selected': presetsStore.currentPromptIdentifier === item.identifier
                 }"
-                draggable="true"
-                @dragstart="(e) => onDragStart(e, item)"
-                @dragend="onDragEnd"
                 @dragover="(e) => onDragOver(e, item)"
                 @dragleave="onDragLeave"
                 @drop="(e) => onDrop(e, item)"
               >
-                <!-- Drag handle -->
-                <div class="entry-drag-handle">
+                <!-- Drag handle - this is the primary drag trigger -->
+                <div
+                  class="entry-drag-handle"
+                  draggable="true"
+                  @dragstart="(e) => onDragStart(e, item)"
+                  @dragend="onDragEnd"
+                >
                   <NIcon :size="16" class="drag-icon">
                     <ReorderFourOutline />
                   </NIcon>
@@ -1293,14 +1295,9 @@ watch(() => route.name, async (newName) => {
   align-items: center;
   padding: 8px 8px;
   border-radius: 4px;
-  cursor: grab;
   transition: all 0.2s ease;
   gap: 8px;
   user-select: none;
-}
-
-.entry-item:active {
-  cursor: grabbing;
 }
 
 .entry-item:hover {
@@ -1327,19 +1324,25 @@ watch(() => route.name, async (newName) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 100%;
+  min-height: 24px;
   cursor: grab;
-  opacity: 0.4;
-  transition: opacity 0.2s;
+  opacity: 0.5;
+  transition: opacity 0.2s, background-color 0.2s;
+  border-radius: 4px;
+  margin: -4px;
+  padding: 4px;
 }
 
 .entry-drag-handle:hover {
-  opacity: 0.8;
+  opacity: 1;
+  background-color: rgba(0, 0, 0, 0.05);
 }
 
 .entry-drag-handle:active {
   cursor: grabbing;
+  background-color: rgba(0, 0, 0, 0.08);
 }
 
 .drag-icon {
