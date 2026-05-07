@@ -291,6 +291,13 @@ watch(() => props.show, (show) => {
   font-weight: 500;
 }
 
+.item-name :deep(.highlight) {
+  background: #ffeb3b;
+  color: #000;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
 .item-role {
   font-size: 12px;
   padding: 2px 6px;
@@ -339,8 +346,8 @@ watch(() => props.show, (show) => {
 }
 
 .content-text :deep(.highlight) {
-  background: var(--n-primary-color);
-  color: white;
+  background: #ffeb3b;
+  color: #000;
   padding: 0 2px;
   border-radius: 2px;
 }
