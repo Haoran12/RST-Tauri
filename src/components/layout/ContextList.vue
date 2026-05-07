@@ -991,8 +991,7 @@ watch(() => route.name, async (newName) => {
                 :data-prompt-id="item.identifier"
                 :class="{
                   'entry-item-dragging': draggedItem?.identifier === item.identifier,
-                  'entry-item-drag-over': dragOverItem?.identifier === item.identifier,
-                  'entry-selected': presetsStore.currentPromptIdentifier === item.identifier
+                  'entry-item-drag-over': dragOverItem?.identifier === item.identifier
                 }"
               >
                 <!-- Drag handle -->
