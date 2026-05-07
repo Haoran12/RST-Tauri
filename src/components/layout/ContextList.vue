@@ -1331,15 +1331,12 @@ watch(() => route.name, async (newName) => {
   gap: 10px;
   user-select: none;
   touch-action: none;
-  background-color: var(--n-color);
-  border: 1px solid var(--color-border-subtle, #e0e0e6);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  background-color: var(--n-color-modal);
+  border: 1px solid var(--n-border-color);
 }
 
 .entry-item:hover {
-  background-color: var(--n-color-hover);
-  border-color: var(--color-border, #d0d0d6);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  border-color: var(--n-border-color-hover);
 }
 
 .entry-item-dragging {
