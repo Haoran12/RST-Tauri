@@ -4,6 +4,7 @@ import {
   NCollapse,
   NCollapseItem,
   NEmpty,
+  NInput,
   NModal,
   NScrollbar,
   NSpin,
@@ -26,13 +27,37 @@ const isLoading = ref(false)
 const error = ref<string | null>(null)
 const previewData = ref<PromptPreviewOutput | null>(null)
 const expandedKeys = ref<string[]>([])
+const searchQuery = ref('')
 
 const totalTokens = computed(() => previewData.value?.total_estimated_tokens ?? 0)
 
-const promptItems = computed(() => previewData.value?.prompt_items ?? [])
+// 搜索过滤后的条目
+const filteredItems = computed(() => {
+  const items = previewData.value?.prompt_items ?? []
+  if (!searchQuery.value.trim()) {
+    return items
+  }
+
+  const query = searchQuery.value.toLowerCase()
+  return items.filter(item => {
+    // 搜索名称
+    if (item.name.toLowerCase().includes(query)) return true
+    // 搜索标识符
+    if (item.identifier.toLowerCase().includes(query)) return true
+    // 搜索内容
+    if (item.content.toLowerCase().includes(query)) return true
+    return false
+  })
+})
+
+// 匹配计数
+const matchCount = computed(() => {
+  if (!searchQuery.value.trim()) return 0
+  return filteredItems.value.length
+})
 
 const hasContent = computed(() => {
-  return promptItems.value.length > 0
+  return (previewData.value?.prompt_items ?? []).length > 0
 })
 
 async function loadPreview() {
@@ -41,6 +66,7 @@ async function loadPreview() {
   isLoading.value = true
   error.value = null
   previewData.value = null
+  searchQuery.value = ''
 
   try {
     const result = await previewSTPrompt(props.input)
@@ -84,6 +110,27 @@ function getRoleColor(role: string): string {
   }
 }
 
+// 高亮搜索文本
+function highlightText(text: string): string {
+  if (!searchQuery.value.trim()) return text
+
+  const query = searchQuery.value.trim()
+  const regex = new RegExp(`(${escapeRegex(query)})`, 'gi')
+  return text.replace(regex, '<mark class="highlight">$1</mark>')
+}
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+// 搜索时自动展开所有匹配的条目
+watch(searchQuery, (query) => {
+  if (query.trim() && previewData.value) {
+    // 展开所有匹配的条目
+    expandedKeys.value = filteredItems.value.map(p => p.identifier)
+  }
+})
+
 watch(() => props.show, (show) => {
   if (show && props.input) {
     loadPreview()
@@ -114,47 +161,71 @@ watch(() => props.show, (show) => {
         </template>
 
         <template v-else>
-          <!-- 统计信息 -->
-          <div class="stats-bar">
-            <NText depth="3">
-              总计约 <strong>{{ totalTokens }}</strong> tokens
-            </NText>
+          <!-- 搜索框和统计信息 -->
+          <div class="toolbar">
+            <NInput
+              v-model:value="searchQuery"
+              placeholder="搜索提示词..."
+              clearable
+              class="search-input"
+            />
+            <div class="stats">
+              <NText depth="3">
+                总计约 <strong>{{ totalTokens }}</strong> tokens
+                <template v-if="searchQuery.trim()">
+                  <span class="search-result">，匹配 <strong>{{ matchCount }}</strong> 个条目</span>
+                </template>
+              </NText>
+            </div>
           </div>
 
           <!-- 提示词条目列表 -->
-          <NScrollbar style="max-height: calc(80vh - 180px)">
+          <NScrollbar style="max-height: calc(80vh - 220px)">
             <div class="prompt-list">
-              <NCollapse v-model:expanded-names="expandedKeys">
-                <NCollapseItem
-                  v-for="item in promptItems"
-                  :key="item.identifier"
-                  :name="item.identifier"
-                >
-                  <template #header>
-                    <div class="item-header">
-                      <span class="item-name">{{ item.name }}</span>
-                      <span
-                        class="item-role"
-                        :style="{ color: getRoleColor(item.role) }"
-                      >
-                        {{ getRoleLabel(item.role) }}
-                      </span>
-                      <span class="item-tokens">~{{ item.estimated_tokens }} tokens</span>
-                      <span v-if="item.marker" class="item-marker">标记</span>
-                      <span v-if="!item.enabled" class="item-disabled">已禁用</span>
-                    </div>
-                  </template>
+              <template v-if="filteredItems.length > 0">
+                <NCollapse v-model:expanded-names="expandedKeys">
+                  <NCollapseItem
+                    v-for="item in filteredItems"
+                    :key="item.identifier"
+                    :name="item.identifier"
+                  >
+                    <template #header>
+                      <div class="item-header">
+                        <span
+                          class="item-name"
+                          v-html="highlightText(item.name)"
+                        ></span>
+                        <span
+                          class="item-role"
+                          :style="{ color: getRoleColor(item.role) }"
+                        >
+                          {{ getRoleLabel(item.role) }}
+                        </span>
+                        <span class="item-tokens">~{{ item.estimated_tokens }} tokens</span>
+                        <span v-if="item.marker" class="item-marker">标记</span>
+                        <span v-if="!item.enabled" class="item-disabled">已禁用</span>
+                      </div>
+                    </template>
 
-                  <div class="item-content">
-                    <template v-if="item.content">
-                      <pre class="content-text">{{ item.content }}</pre>
-                    </template>
-                    <template v-else>
-                      <NText depth="3" italic>（空内容）</NText>
-                    </template>
-                  </div>
-                </NCollapseItem>
-              </NCollapse>
+                    <div class="item-content">
+                      <template v-if="item.content">
+                        <pre
+                          class="content-text"
+                          v-html="highlightText(item.content)"
+                        ></pre>
+                      </template>
+                      <template v-else>
+                        <NText depth="3" italic>（空内容）</NText>
+                      </template>
+                    </div>
+                  </NCollapseItem>
+                </NCollapse>
+              </template>
+              <template v-else>
+                <div class="no-match">
+                  <NText depth="3">未找到匹配的提示词</NText>
+                </div>
+              </template>
             </div>
           </NScrollbar>
         </template>
@@ -176,15 +247,37 @@ watch(() => props.show, (show) => {
   min-height: 200px;
 }
 
-.stats-bar {
-  padding: 8px 12px;
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
   margin-bottom: 12px;
-  background: var(--n-color-hover);
-  border-radius: 6px;
+  flex-wrap: wrap;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 200px;
+  max-width: 300px;
+}
+
+.stats {
+  flex-shrink: 0;
+}
+
+.search-result {
+  color: var(--n-primary-color);
 }
 
 .prompt-list {
   padding-right: 8px;
+}
+
+.no-match {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
 }
 
 .item-header {
@@ -243,5 +336,12 @@ watch(() => props.show, (show) => {
   word-break: break-word;
   max-height: 300px;
   overflow-y: auto;
+}
+
+.content-text :deep(.highlight) {
+  background: var(--n-primary-color);
+  color: white;
+  padding: 0 2px;
+  border-radius: 2px;
 }
 </style>
