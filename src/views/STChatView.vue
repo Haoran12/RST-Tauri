@@ -15,7 +15,6 @@ import {
   useMessage,
 } from 'naive-ui'
 import {
-  AttachOutline,
   ChevronBackOutline,
   ReorderThreeOutline,
   SendOutline,
@@ -164,8 +163,7 @@ function handleSessionMenuSelect(key: string) {
       openFilePicker()
       break
     case 'regenerate':
-      // TODO: 实现重新生成功能
-      message.info('重新生成功能待实现')
+      handleRegenerate()
       break
     case 'prompt-preview':
       // TODO: 实现提示词预览功能
@@ -176,6 +174,22 @@ function handleSessionMenuSelect(key: string) {
       message.info('AI 帮答功能待实现')
       break
   }
+}
+
+async function handleRegenerate() {
+  if (!settingsStore.activeApiConfig) {
+    message.error('请先选择 API 配置')
+    return
+  }
+  if (chatStore.messages.length === 0) {
+    message.warning('没有消息可以重新生成')
+    return
+  }
+  await chatStore.regenerateLastResponse(settingsStore.activeApiConfig)
+  if (chatStore.error) {
+    message.error(chatStore.error)
+  }
+  scrollToBottom()
 }
 
 const characterName = computed(() => {

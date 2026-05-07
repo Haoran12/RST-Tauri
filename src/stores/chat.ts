@@ -151,6 +151,27 @@ export const useChatStore = defineStore('chat', () => {
     pendingAttachments.value = []
   }
 
+  // Regenerate last AI response
+  // - If last message is assistant: delete it, then generate new response
+  // - If last message is user: keep it, generate new response based on user message
+  async function regenerateLastResponse(apiConfig: ApiConfig) {
+    if (!currentSession.value || isGenerating.value) return
+
+    const lastMessage = messages.value[messages.value.length - 1]
+    if (!lastMessage) return
+
+    // If last message is assistant, delete it before regenerating
+    if (lastMessage.role === 'assistant') {
+      messages.value.pop()
+      await saveCurrentSession()
+    }
+
+    // Generate new response (no new user message, use existing context)
+    // Use sendMessageStream with empty content - it will trigger 'normal' mode
+    // since last message is now user (or was user originally)
+    await sendMessageStream('', apiConfig)
+  }
+
   // Determine generation type based on input and last message
   // - 'continue': empty input + has messages + last message is assistant (append to last message)
   // - 'normal': other cases (generate new response)
@@ -555,6 +576,7 @@ export const useChatStore = defineStore('chat', () => {
     clearPendingAttachments,
     sendMessage,
     sendMessageStream,
+    regenerateLastResponse,
     stopGeneration,
     clearMessages,
     updateMessageContent,
