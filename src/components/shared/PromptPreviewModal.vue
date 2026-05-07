@@ -84,32 +84,6 @@ function handleClose() {
   emit('update:show', false)
 }
 
-function getRoleLabel(role: string): string {
-  switch (role) {
-    case 'system':
-      return '系统'
-    case 'user':
-      return '用户'
-    case 'assistant':
-      return '助手'
-    default:
-      return role
-  }
-}
-
-function getRoleColor(role: string): string {
-  switch (role) {
-    case 'system':
-      return 'var(--n-info-color)'
-    case 'user':
-      return 'var(--n-success-color)'
-    case 'assistant':
-      return 'var(--n-warning-color)'
-    default:
-      return 'var(--n-text-color)'
-  }
-}
-
 // 高亮搜索文本
 function highlightText(text: string): string {
   if (!searchQuery.value.trim()) return text
@@ -195,12 +169,6 @@ watch(() => props.show, (show) => {
                           class="item-name"
                           v-html="highlightText(item.name)"
                         ></span>
-                        <span
-                          class="item-role"
-                          :style="{ color: getRoleColor(item.role) }"
-                        >
-                          {{ getRoleLabel(item.role) }}
-                        </span>
                         <span class="item-tokens">~{{ item.estimated_tokens }} tokens</span>
                         <span v-if="item.marker" class="item-marker">标记</span>
                         <span v-if="!item.enabled" class="item-disabled">已禁用</span>
@@ -283,7 +251,7 @@ watch(() => props.show, (show) => {
 .item-header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
@@ -296,13 +264,6 @@ watch(() => props.show, (show) => {
   color: #000;
   padding: 0 2px;
   border-radius: 2px;
-}
-
-.item-role {
-  font-size: 12px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: color-mix(in srgb, currentColor 10%, transparent);
 }
 
 .item-tokens {
