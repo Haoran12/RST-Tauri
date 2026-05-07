@@ -328,9 +328,11 @@ watch(() => props.show, (show) => {
 
 .item-content {
   margin-top: 8px;
-  border-radius: 6px;
+  border-radius: 8px;
   overflow: hidden;
-  background: var(--n-color-hover);
+  background: color-mix(in srgb, var(--n-color) 98%, var(--n-border-color));
+  border: 1px solid color-mix(in srgb, var(--n-border-color) 80%, transparent);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--n-text-color) 5%, transparent);
 }
 
 .content-text {
@@ -350,5 +352,27 @@ watch(() => props.show, (show) => {
   color: #000;
   padding: 0 2px;
   border-radius: 2px;
+}
+
+/* 折叠卡片整体样式 */
+:deep(.n-collapse-item) {
+  margin-bottom: 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--n-color) 97%, var(--n-border-color));
+  border: 1px solid color-mix(in srgb, var(--n-border-color) 60%, transparent);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--n-text-color) 4%, transparent);
+  transition: box-shadow 0.2s ease;
+}
+
+:deep(.n-collapse-item:hover) {
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--n-text-color) 8%, transparent);
+}
+
+:deep(.n-collapse-item__header) {
+  padding: 12px 16px;
+}
+
+:deep(.n-collapse-item__content-inner) {
+  padding: 0 16px 12px;
 }
 </style>
