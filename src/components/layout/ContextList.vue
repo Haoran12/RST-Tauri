@@ -966,10 +966,10 @@ watch(() => route.name, async (newName) => {
                 <div
                   class="entry-drag-handle"
                   draggable="true"
-                  @dragstart="(e) => onDragStart(e, item)"
-                  @dragend="onDragEnd"
+                  @dragstart.stop="(e) => onDragStart(e, item)"
+                  @dragend.stop="onDragEnd"
                 >
-                  <NIcon :size="16" class="drag-icon">
+                  <NIcon :size="16" class="drag-icon" style="pointer-events: none;">
                     <ReorderFourOutline />
                   </NIcon>
                 </div>
@@ -1325,14 +1325,11 @@ watch(() => route.name, async (newName) => {
   align-items: center;
   justify-content: center;
   width: 24px;
-  height: 100%;
-  min-height: 24px;
+  height: 24px;
   cursor: grab;
   opacity: 0.5;
   transition: opacity 0.2s, background-color 0.2s;
   border-radius: 4px;
-  margin: -4px;
-  padding: 4px;
 }
 
 .entry-drag-handle:hover {
