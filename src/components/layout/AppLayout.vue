@@ -113,19 +113,21 @@ const mainContentStyle = {
       >
         <div class="route-host">
           <router-view v-slot="{ Component }">
-            <Suspense>
-              <component :is="Component" />
-              <template #fallback>
-                <div class="route-loading">
-                  <div class="route-loading-header" />
-                  <div class="route-loading-grid">
-                    <div class="route-loading-card route-loading-card-wide" />
-                    <div class="route-loading-card" />
-                    <div class="route-loading-card" />
+            <transition name="route-fade" mode="out-in">
+              <Suspense :key="route.name">
+                <component :is="Component" />
+                <template #fallback>
+                  <div class="route-loading">
+                    <div class="route-loading-header" />
+                    <div class="route-loading-grid">
+                      <div class="route-loading-card route-loading-card-wide" />
+                      <div class="route-loading-card" />
+                      <div class="route-loading-card" />
+                    </div>
                   </div>
-                </div>
-              </template>
-            </Suspense>
+                </template>
+              </Suspense>
+            </transition>
           </router-view>
         </div>
       </NLayoutContent>
@@ -208,6 +210,22 @@ const mainContentStyle = {
   height: 100%;
   min-width: 0;
   min-height: 0;
+}
+
+/* Route transition animations */
+.route-fade-enter-active,
+.route-fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.route-fade-enter-from {
+  opacity: 0;
+  transform: translateX(12px);
+}
+
+.route-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-8px);
 }
 
 .route-loading {
