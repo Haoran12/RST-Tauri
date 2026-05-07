@@ -2346,7 +2346,7 @@ pub async fn start_st_chat_stream(
                     .filter_map(|s| serde_json::from_str::<serde_json::Value>(s).ok())
                     .collect();
 
-                // Log success with raw SSE events array
+                // Log success with raw SSE events array and assembled content
                 {
                     let store_guard = sqlite_store_arc.read().await;
                     if let Some(ref store) = store_guard.as_ref() {
@@ -2354,9 +2354,10 @@ pub async fn start_st_chat_stream(
                         let response_json = serde_json::Value::Array(raw_sse_events);
                         store
                             .llm_logger()
-                            .log_success(
+                            .log_stream_success(
                                 &request_id_clone,
                                 &response_json,
+                                &full_content,
                                 None,
                                 None,
                             )

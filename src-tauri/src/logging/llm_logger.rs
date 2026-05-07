@@ -395,6 +395,106 @@ impl LlmCallLogger {
         }
     }
 
+    /// Log LLM stream success with pre-assembled content
+    ///
+    /// This is used for streaming responses where the content is assembled
+    /// incrementally from SSE chunks, rather than from a single response JSON.
+    pub async fn log_stream_success(
+        &self,
+        request_id: &str,
+        response: &serde_json::Value,
+        assembled_content: &str,
+        reasoning_text: Option<&str>,
+        token_usage: Option<serde_json::Value>,
+    ) {
+        tracing::info!("[LlmLogger] log_stream_success called, request_id: {}", request_id);
+        let call = self.in_progress.read().await.get(request_id).cloned();
+        tracing::info!(
+            "[LlmLogger] log_stream_success found in_progress call: {}",
+            call.is_some()
+        );
+        if let Some(call) = call {
+            self.in_progress.write().await.remove(request_id);
+
+            let completed_at = Utc::now();
+            let latency_ms = (completed_at - call.started_at).num_milliseconds() as u64;
+
+            let (response_json, response_redacted) = redact_sensitive_value(response);
+
+            // Use pre-assembled content for assembled_text
+            let assembled_text = if assembled_content.is_empty() {
+                None
+            } else {
+                Some(assembled_content.to_string())
+            };
+
+            // Build readable_text using the request and assembled content
+            let readable_text = build_readable_text_from_content(
+                &call.request_json,
+                assembled_content,
+                reasoning_text,
+            );
+
+            let redaction_applied = call.redaction_applied || response_redacted;
+
+            tracing::info!(
+                "[LlmLogger] log_stream_success inserting into database, request_id: {}, latency_ms: {}",
+                request_id,
+                latency_ms
+            );
+            let result = sqlx::query(
+                r#"
+                INSERT INTO llm_call_logs (
+                    request_id, mode, world_id, session_id, scene_turn_id, trace_id,
+                    character_id, llm_node, api_config_id, runtime_config_snapshot_id,
+                    world_rules_snapshot_id, provider, model, call_type, request_url, request_json,
+                    schema_json, response_json, reasoning_text, assembled_text, readable_text, status,
+                    latency_ms, token_usage, retry_count, redaction_applied, created_at, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(request_id)
+            .bind(&call.mode)
+            .bind(&call.world_id)
+            .bind(&call.session_id)
+            .bind(&call.scene_turn_id)
+            .bind(&call.trace_id)
+            .bind(&call.character_id)
+            .bind(&call.llm_node)
+            .bind(&call.api_config_id)
+            .bind(None::<String>) // runtime_config_snapshot_id
+            .bind(None::<String>) // world_rules_snapshot_id
+            .bind(&call.provider)
+            .bind(&call.model)
+            .bind(&call.call_type)
+            .bind(&call.request_url)
+            .bind(serde_json::to_string(&call.request_json).unwrap_or_default())
+            .bind(call.schema_json.as_ref().map(|s| serde_json::to_string(s).unwrap_or_default()))
+            .bind(serde_json::to_string(&response_json).ok())
+            .bind(reasoning_text)
+            .bind(&assembled_text)
+            .bind(&readable_text)
+            .bind("success")
+            .bind(latency_ms as i64)
+            .bind(token_usage.as_ref().map(|t| serde_json::to_string(t).unwrap_or_default()))
+            .bind(0i32) // retry_count
+            .bind(if redaction_applied { 1 } else { 0 })
+            .bind(call.started_at.to_rfc3339())
+            .bind(completed_at.to_rfc3339())
+            .execute(&self.pool)
+            .await;
+            tracing::info!(
+                "[LlmLogger] log_stream_success database insert result: {:?}",
+                result.map(|r| r.rows_affected())
+            );
+        } else {
+            tracing::warn!(
+                "[LlmLogger] log_stream_success request_id {} not found in in_progress",
+                request_id
+            );
+        }
+    }
+
     /// Log LLM call failure
     pub async fn log_failure(&self, request_id: &str, error: &str) {
         let call = self.in_progress.read().await.get(request_id).cloned();
@@ -685,6 +785,72 @@ fn format_readable_content(text: &str) -> String {
     }
 
     formatted_lines.join("\n").trim().to_string()
+}
+
+/// Build readable text from request and pre-assembled content
+///
+/// This is used for streaming responses where the content is assembled
+/// incrementally, rather than extracted from a response JSON.
+fn build_readable_text_from_content(
+    request: &serde_json::Value,
+    assembled_content: &str,
+    reasoning_text: Option<&str>,
+) -> Option<String> {
+    let mut parts = Vec::new();
+
+    // Add reasoning text if present
+    if let Some(reasoning) = reasoning_text {
+        if !reasoning.trim().is_empty() {
+            parts.push(format!("REASONING >\n{}", format_readable_content(reasoning)));
+        }
+    }
+
+    // Extract system prompt if present (for providers that use separate system field)
+    if let Some(system) = request.get("system") {
+        let system_text = extract_text_value(system);
+        if !system_text.trim().is_empty() {
+            parts.push(format!("SYSTEM >\n{}", format_readable_content(&system_text)));
+        }
+    }
+
+    // Extract messages from request body (for providers with messages in body)
+    let messages = request
+        .get("body")
+        .and_then(|b| b.get("messages"))
+        .or_else(|| request.get("messages"));
+
+    if let Some(messages) = messages.and_then(|m| m.as_array()) {
+        for msg in messages {
+            if let (Some(role), Some(content)) =
+                (msg.get("role").and_then(|r| r.as_str()), msg.get("content"))
+            {
+                let content_text = extract_text_value(content);
+                if content_text.trim().is_empty() {
+                    continue;
+                }
+
+                let prefix = match role.to_lowercase().as_str() {
+                    "system" => "SYSTEM >",
+                    "user" => "USER >",
+                    "assistant" => "ASSISTANT >",
+                    _ => continue, // Skip unknown roles
+                };
+
+                parts.push(format!("{}\n{}", prefix, format_readable_content(&content_text)));
+            }
+        }
+    }
+
+    // Add assembled content as ASSISTANT response
+    if !assembled_content.trim().is_empty() {
+        parts.push(format!("ASSISTANT >\n{}", format_readable_content(assembled_content)));
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n\n---\n\n"))
+    }
 }
 
 fn redact_sensitive_value(value: &serde_json::Value) -> (serde_json::Value, bool) {
