@@ -373,7 +373,7 @@ impl LlmCallLogger {
                     world_rules_snapshot_id, provider, model, call_type, request_url, request_json,
                     schema_json, response_json, reasoning_text, assembled_text, status,
                     latency_ms, token_usage, retry_count, redaction_applied, created_at, completed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(request_id)
@@ -465,7 +465,7 @@ impl LlmCallLogger {
                     world_rules_snapshot_id, provider, model, call_type, request_url, request_json,
                     schema_json, response_json, reasoning_text, assembled_text, status,
                     latency_ms, token_usage, retry_count, redaction_applied, created_at, completed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(request_id)
