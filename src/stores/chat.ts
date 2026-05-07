@@ -238,7 +238,9 @@ export const useChatStore = defineStore('chat', () => {
     messages.value.push(userMessage)
     pendingAttachments.value = []
 
-    let assistantMessage: ChatMessage | null = null
+    // Pre-create assistant message placeholder for efficient updates
+    const assistantId = crypto.randomUUID()
+    let assistantAdded = false
 
     try {
       await saveCurrentSession()
@@ -267,38 +269,40 @@ export const useChatStore = defineStore('chat', () => {
         },
         {
           onStart: () => {
-            // Stream started, wait for first chunk before adding message
+            // Stream started, wait for first chunk
           },
           onChunk: (event) => {
             accumulatedContent += event.delta
             streamingContent.value = accumulatedContent
-            // Only add assistant message after receiving first non-empty content
-            if (!assistantMessage && accumulatedContent.trim()) {
-              assistantMessage = {
-                id: crypto.randomUUID(),
+            // Add assistant message on first non-empty content
+            if (!assistantAdded && accumulatedContent.trim()) {
+              messages.value.push({
+                id: assistantId,
                 role: 'assistant',
                 content: accumulatedContent,
                 created_at: new Date().toISOString(),
                 attachments: [],
-              }
-              messages.value.push(assistantMessage)
-            } else if (assistantMessage) {
-              const index = messages.value.findIndex(msg => msg.id === assistantMessage!.id)
-              if (index !== -1) {
-                messages.value.splice(index, 1, {
-                  ...messages.value[index],
+              })
+              assistantAdded = true
+            } else if (assistantAdded) {
+              // Direct update by index - faster than findIndex + splice
+              const lastIndex = messages.value.length - 1
+              if (lastIndex >= 0 && messages.value[lastIndex].id === assistantId) {
+                // Use direct assignment for better performance
+                messages.value[lastIndex] = {
+                  ...messages.value[lastIndex],
                   content: accumulatedContent,
-                })
+                }
               }
             }
           },
           onError: (event) => {
             error.value = event.error
-            // Remove the assistant message on error if it was added
-            if (assistantMessage) {
-              const index = messages.value.findIndex(msg => msg.id === assistantMessage!.id)
-              if (index !== -1) {
-                messages.value.splice(index, 1)
+            // Remove the assistant message on error
+            if (assistantAdded) {
+              const lastIndex = messages.value.length - 1
+              if (lastIndex >= 0 && messages.value[lastIndex].id === assistantId) {
+                messages.value.pop()
               }
             }
             rejectStream(new Error(event.error))
@@ -314,11 +318,11 @@ export const useChatStore = defineStore('chat', () => {
       await saveCurrentSession()
     } catch (e) {
       error.value = String(e)
-      // Keep the user message persisted; only remove the assistant message if it was added.
-      if (assistantMessage) {
-        const index = messages.value.findIndex(msg => msg.id === assistantMessage!.id)
-        if (index !== -1) {
-          messages.value.splice(index, 1)
+      // Keep the user message; remove assistant message if added
+      if (assistantAdded) {
+        const lastIndex = messages.value.length - 1
+        if (lastIndex >= 0 && messages.value[lastIndex].id === assistantId) {
+          messages.value.pop()
         }
       }
       currentStreamController = null

@@ -2231,41 +2231,10 @@ pub async fn start_st_chat_stream(
         request_id: request_id.clone(),
     };
 
-    // Log start before spawning
-    {
-        let store_guard = state.sqlite_store.read().await;
-        if let Some(sqlite_store) = store_guard.as_ref() {
-            // Build actual request body that will be sent to the API
-            let request_json = build_provider_request_preview(
-                &data_dir,
-                &api_config,
-                &compiled_contract.key.protocol_kind,
-                stream_request.clone(),
-            )
-            .await
-            .unwrap_or_else(|e| {
-                tracing::warn!("[ST Stream Log] Failed to build request preview: {}, falling back to ChatRequest", e);
-                serde_json::to_value(&stream_request).unwrap_or(serde_json::Value::Null)
-            });
-            sqlite_store
-                .llm_logger()
-                .log_start(
-                    &log_context,
-                    &request_json,
-                    request_url.as_deref(),
-                    &api_config.provider,
-                    &api_config.model,
-                    "chat_stream",
-                    None,
-                )
-                .await;
-        }
-    }
-
     // Get Arc clone for use in spawned task
     let sqlite_store_arc = state.sqlite_store.clone();
 
-    // Emit start event
+    // Emit start event immediately (before log_start completes)
     app.emit(
         "st-stream-start",
         StreamStartEvent {
@@ -2279,22 +2248,57 @@ pub async fn start_st_chat_stream(
     let app_clone = app.clone();
     let request_id_clone = request_id.clone();
     let stream_id_for_task = stream_id.clone();
+    let log_context_clone = log_context.clone();
+    let api_config_clone = api_config.clone();
+    let compiled_contract_clone = compiled_contract.clone();
+    let stream_request_clone = stream_request.clone();
+    let data_dir_clone = data_dir.clone();
+    let request_url_clone = request_url.clone();
 
     tokio::spawn(async move {
+        // Perform log_start in background (non-blocking)
+        {
+            let store_guard = sqlite_store_arc.read().await;
+            if let Some(ref store) = store_guard.as_ref() {
+                let request_json = build_provider_request_preview(
+                    &data_dir_clone,
+                    &api_config_clone,
+                    &compiled_contract_clone.key.protocol_kind,
+                    stream_request_clone,
+                )
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::warn!("[ST Stream Log] Failed to build request preview: {}, falling back to ChatRequest", e);
+                    serde_json::to_value(&stream_request).unwrap_or(serde_json::Value::Null)
+                });
+                store
+                    .llm_logger()
+                    .log_start(
+                        &log_context_clone,
+                        &request_json,
+                        request_url_clone.as_deref(),
+                        &api_config_clone.provider,
+                        &api_config_clone.model,
+                        "chat_stream",
+                        None,
+                    )
+                    .await;
+            }
+        }
+
         match provider.chat_stream(stream_request).await {
             Ok(mut stream) => {
                 let mut full_content = String::new();
                 let mut finish_reason: Option<String> = None;
-                let mut raw_sse_events: Vec<serde_json::Value> = Vec::new();
+                // Collect raw SSE strings for deferred parsing (avoid per-chunk JSON overhead)
+                let mut raw_sse_strings: Vec<String> = Vec::new();
 
                 while let Some(chunk_result) = stream.next().await {
                     match chunk_result {
                         Ok(chunk) => {
-                            // Collect raw SSE events for logging
+                            // Collect raw SSE data string for later parsing (defer JSON overhead)
                             if let Some(raw_data) = &chunk.raw_sse_data {
-                                if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(raw_data) {
-                                    raw_sse_events.push(json_value);
-                                }
+                                raw_sse_strings.push(raw_data.clone());
                             }
 
                             if !chunk.delta.is_empty() {
@@ -2304,7 +2308,7 @@ pub async fn start_st_chat_stream(
                                 finish_reason = chunk.finish_reason.clone();
                             }
 
-                            // Emit chunk event
+                            // Emit chunk event immediately
                             let _ = app_clone.emit(
                                 "st-stream-chunk",
                                 StreamChunkEvent {
@@ -2335,6 +2339,12 @@ pub async fn start_st_chat_stream(
                         }
                     }
                 }
+
+                // Parse raw SSE strings to JSON after stream ends (deferred, non-blocking for UI)
+                let raw_sse_events: Vec<serde_json::Value> = raw_sse_strings
+                    .iter()
+                    .filter_map(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                    .collect();
 
                 // Log success with raw SSE events array
                 {

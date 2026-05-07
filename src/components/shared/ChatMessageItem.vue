@@ -31,19 +31,40 @@ const tokenEstimate = computed(() => estimateTokens(props.content))
 const renderedHtml = ref<string>('')
 let renderScheduled = false
 let lastRenderedContent = ''
+let lastRenderTime = 0
+const RENDER_THROTTLE_MS = 50 // Minimum 50ms between renders (20fps max)
 
 function scheduleMarkdownRender() {
   if (renderScheduled) return
-  renderScheduled = true
 
-  // Use requestAnimationFrame for smooth updates
-  requestAnimationFrame(() => {
-    renderScheduled = false
-    if (props.content !== lastRenderedContent) {
-      lastRenderedContent = props.content
-      renderedHtml.value = renderMarkdown(props.content)
-    }
-  })
+  const now = Date.now()
+  const timeSinceLastRender = now - lastRenderTime
+
+  // If enough time has passed, render immediately
+  if (timeSinceLastRender >= RENDER_THROTTLE_MS) {
+    renderScheduled = true
+    requestAnimationFrame(() => {
+      renderScheduled = false
+      lastRenderTime = Date.now()
+      if (props.content !== lastRenderedContent) {
+        lastRenderedContent = props.content
+        renderedHtml.value = renderMarkdown(props.content)
+      }
+    })
+  } else {
+    // Schedule for later with remaining time
+    renderScheduled = true
+    setTimeout(() => {
+      requestAnimationFrame(() => {
+        renderScheduled = false
+        lastRenderTime = Date.now()
+        if (props.content !== lastRenderedContent) {
+          lastRenderedContent = props.content
+          renderedHtml.value = renderMarkdown(props.content)
+        }
+      })
+    }, RENDER_THROTTLE_MS - timeSinceLastRender)
+  }
 }
 
 // For non-streaming content, use computed directly
