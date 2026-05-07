@@ -632,8 +632,13 @@ pub fn generate_readable_content_structured(
         }
     });
 
+    // First get the body object (request_json is wrapped with headers)
+    let request_body = request_json
+        .get("body")
+        .unwrap_or(request_json);
+
     // Extract system prompt if present (for providers that use separate system field)
-    if let Some(system) = request_json.get("system") {
+    if let Some(system) = request_body.get("system") {
         let system_text = extract_text_value(system);
         if !system_text.trim().is_empty() {
             messages.push(ReadableMessage {
@@ -644,9 +649,8 @@ pub fn generate_readable_content_structured(
     }
 
     // Extract messages from request body (for providers with messages in body)
-    let request_messages = request_json
-        .get("body")
-        .and_then(|b| b.get("messages"))
+    let request_messages = request_body
+        .get("messages")
         .or_else(|| request_json.get("messages"));
 
     if let Some(msgs) = request_messages.and_then(|m| m.as_array()) {
@@ -825,8 +829,13 @@ fn assemble_readable_text(
 ) -> Option<String> {
     let mut parts = Vec::new();
 
+    // First get the body object (request is wrapped with headers)
+    let request_body = request
+        .get("body")
+        .unwrap_or(request);
+
     // Extract system prompt if present (for providers that use separate system field)
-    if let Some(system) = request.get("system") {
+    if let Some(system) = request_body.get("system") {
         let system_text = extract_text_value(system);
         if !system_text.trim().is_empty() {
             parts.push(format!("SYSTEM >\n{}", format_readable_content(&system_text)));
@@ -834,9 +843,8 @@ fn assemble_readable_text(
     }
 
     // Extract messages from request body (for providers with messages in body)
-    let messages = request
-        .get("body")
-        .and_then(|b| b.get("messages"))
+    let messages = request_body
+        .get("messages")
         .or_else(|| request.get("messages"));
 
     if let Some(messages) = messages.and_then(|m| m.as_array()) {
@@ -952,8 +960,13 @@ fn build_readable_text_from_content(
         }
     }
 
+    // First get the body object (request is wrapped with headers)
+    let request_body = request
+        .get("body")
+        .unwrap_or(request);
+
     // Extract system prompt if present (for providers that use separate system field)
-    if let Some(system) = request.get("system") {
+    if let Some(system) = request_body.get("system") {
         let system_text = extract_text_value(system);
         if !system_text.trim().is_empty() {
             parts.push(format!("SYSTEM >\n{}", format_readable_content(&system_text)));
@@ -961,9 +974,8 @@ fn build_readable_text_from_content(
     }
 
     // Extract messages from request body (for providers with messages in body)
-    let messages = request
-        .get("body")
-        .and_then(|b| b.get("messages"))
+    let messages = request_body
+        .get("messages")
         .or_else(|| request.get("messages"));
 
     if let Some(messages) = messages.and_then(|m| m.as_array()) {
