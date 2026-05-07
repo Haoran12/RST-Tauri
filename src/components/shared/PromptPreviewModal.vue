@@ -354,17 +354,18 @@ watch(() => props.show, (show) => {
 
 /* 折叠卡片整体样式 */
 :deep(.n-collapse-item) {
-  margin-bottom: 6px;
+  margin-bottom: 8px;
   border-radius: 8px;
   background: var(--n-color-embedded);
   border: 1px solid var(--n-border-color);
 }
 
 :deep(.n-collapse-item__header) {
-  padding: 10px 14px;
+  padding: 14px 16px;
+  min-height: 48px;
 }
 
 :deep(.n-collapse-item__content-inner) {
-  padding: 0 14px 10px;
+  padding: 0 16px 14px;
 }
 </style>
