@@ -578,35 +578,113 @@ fn assemble_readable_text(
 ) -> Option<String> {
     let mut parts = Vec::new();
 
-    if let Some(messages) = request.get("messages").and_then(|m| m.as_array()) {
+    // Extract system prompt if present (for providers that use separate system field)
+    if let Some(system) = request.get("system") {
+        let system_text = extract_text_value(system);
+        if !system_text.trim().is_empty() {
+            parts.push(format!("SYSTEM >\n{}", format_readable_content(&system_text)));
+        }
+    }
+
+    // Extract messages from request body (for providers with messages in body)
+    let messages = request
+        .get("body")
+        .and_then(|b| b.get("messages"))
+        .or_else(|| request.get("messages"));
+
+    if let Some(messages) = messages.and_then(|m| m.as_array()) {
         for msg in messages {
             if let (Some(role), Some(content)) =
                 (msg.get("role").and_then(|r| r.as_str()), msg.get("content"))
             {
-                let content_text = if let Some(s) = content.as_str() {
-                    s.to_string()
-                } else if let Some(arr) = content.as_array() {
-                    arr.iter()
-                        .filter_map(|c| c.get("text").and_then(|t| t.as_str()))
-                        .collect::<Vec<_>>()
-                        .join("")
-                } else {
+                let content_text = extract_text_value(content);
+                if content_text.trim().is_empty() {
                     continue;
+                }
+
+                let prefix = match role.to_lowercase().as_str() {
+                    "system" => "SYSTEM >",
+                    "user" => "USER >",
+                    "assistant" => "ASSISTANT >",
+                    _ => continue, // Skip unknown roles
                 };
-                parts.push(format!("[{}] {}", role.to_uppercase(), content_text));
+
+                parts.push(format!("{}\n{}", prefix, format_readable_content(&content_text)));
             }
         }
     }
 
+    // Extract response text
     if let Some(response_text) = extract_text_from_response(response) {
-        parts.push(format!("[ASSISTANT] {}", response_text));
+        if !response_text.trim().is_empty() {
+            parts.push(format!("ASSISTANT >\n{}", format_readable_content(&response_text)));
+        }
     }
 
     if parts.is_empty() {
         None
     } else {
-        Some(parts.join("\n\n"))
+        Some(parts.join("\n\n---\n\n"))
     }
+}
+
+/// Extract text from a content field (string or array of content parts)
+fn extract_text_value(content: &serde_json::Value) -> String {
+    if let Some(text) = content.as_str() {
+        text.to_string()
+    } else if let Some(arr) = content.as_array() {
+        arr.iter()
+            .filter_map(|part| {
+                // Handle different content part formats
+                part.get("text")
+                    .or_else(|| part.get("input_text"))
+                    .and_then(|t| t.as_str())
+            })
+            .collect::<Vec<_>>()
+            .join("")
+    } else {
+        String::new()
+    }
+}
+
+/// Format content for readability:
+/// - Convert escape sequences to actual characters
+/// - Normalize whitespace and add paragraph breaks
+fn format_readable_content(text: &str) -> String {
+    let mut result = text.to_string();
+
+    // Convert common escape sequences
+    result = result.replace("\\n", "\n");
+    result = result.replace("\\r", "\r");
+    result = result.replace("\\t", "\t");
+    result = result.replace("\\\"", "\"");
+    result = result.replace("\\'", "'");
+    result = result.replace("\\\\", "\\");
+
+    // Normalize multiple consecutive newlines to double newlines (paragraph break)
+    while result.contains("\n\n\n") {
+        result = result.replace("\n\n\n", "\n\n");
+    }
+
+    // Trim leading/trailing whitespace from each line while preserving paragraph structure
+    let lines: Vec<&str> = result.lines().collect();
+    let mut formatted_lines = Vec::new();
+    let mut in_paragraph = false;
+
+    for line in lines {
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() {
+            if in_paragraph {
+                formatted_lines.push(String::new());
+                in_paragraph = false;
+            }
+        } else {
+            formatted_lines.push(trimmed.to_string());
+            in_paragraph = true;
+        }
+    }
+
+    formatted_lines.join("\n").trim().to_string()
 }
 
 fn redact_sensitive_value(value: &serde_json::Value) -> (serde_json::Value, bool) {
@@ -876,5 +954,81 @@ mod tests {
         );
         assert!(!redacted.to_string().contains("aGVsbG8="));
         assert!(!redacted.to_string().contains("cGRmLWJ5dGVz"));
+    }
+
+    #[test]
+    fn assembles_readable_text_with_role_prefixes() {
+        let request = serde_json::json!({
+            "body": {
+                "messages": [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": "Hello!"},
+                    {"role": "assistant", "content": "Hi there!"}
+                ]
+            }
+        });
+        let response = serde_json::json!({
+            "content": [{"type": "text", "text": "How can I help?"}]
+        });
+
+        let readable = assemble_readable_text(&request, &response).unwrap();
+
+        assert!(readable.contains("SYSTEM >"));
+        assert!(readable.contains("USER >"));
+        assert!(readable.contains("ASSISTANT >"));
+        assert!(readable.contains("You are a helpful assistant."));
+        assert!(readable.contains("Hello!"));
+        assert!(readable.contains("How can I help?"));
+    }
+
+    #[test]
+    fn formats_escape_sequences_in_readable_text() {
+        let text = "Line 1\\nLine 2\\n\\nParagraph 2 with \\\"quotes\\\" and \\\\backslash.";
+        let formatted = format_readable_content(text);
+
+        assert!(formatted.contains("Line 1\nLine 2"));
+        assert!(formatted.contains("Paragraph 2 with \"quotes\" and \\backslash."));
+    }
+
+    #[test]
+    fn extracts_text_from_anthropic_system_prompt() {
+        let request = serde_json::json!({
+            "system": "System instructions here.",
+            "body": {
+                "messages": [
+                    {"role": "user", "content": "User message."}
+                ]
+            }
+        });
+        let response = serde_json::json!({});
+
+        let readable = assemble_readable_text(&request, &response).unwrap();
+
+        assert!(readable.contains("SYSTEM >"));
+        assert!(readable.contains("System instructions here."));
+        assert!(readable.contains("USER >"));
+        assert!(readable.contains("User message."));
+    }
+
+    #[test]
+    fn handles_array_content_format() {
+        let request = serde_json::json!({
+            "body": {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Part 1"},
+                            {"type": "text", "text": " Part 2"}
+                        ]
+                    }
+                ]
+            }
+        });
+        let response = serde_json::json!({});
+
+        let readable = assemble_readable_text(&request, &response).unwrap();
+
+        assert!(readable.contains("Part 1 Part 2"));
     }
 }
