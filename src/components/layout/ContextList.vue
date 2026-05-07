@@ -958,18 +958,16 @@ watch(() => route.name, async (newName) => {
                   'entry-item-drag-over': dragOverItem?.identifier === item.identifier,
                   'entry-selected': presetsStore.currentPromptIdentifier === item.identifier
                 }"
+                draggable="true"
+                @dragstart="(e) => onDragStart(e, item)"
+                @dragend="onDragEnd"
                 @dragover="(e) => onDragOver(e, item)"
                 @dragleave="onDragLeave"
                 @drop="(e) => onDrop(e, item)"
               >
-                <!-- Drag handle - this is the primary drag trigger -->
-                <div
-                  class="entry-drag-handle"
-                  draggable="true"
-                  @dragstart.stop="(e) => onDragStart(e, item)"
-                  @dragend.stop="onDragEnd"
-                >
-                  <NIcon :size="16" class="drag-icon" style="pointer-events: none;">
+                <!-- Drag handle - visual indicator only -->
+                <div class="entry-drag-handle">
+                  <NIcon :size="16" class="drag-icon">
                     <ReorderFourOutline />
                   </NIcon>
                 </div>
