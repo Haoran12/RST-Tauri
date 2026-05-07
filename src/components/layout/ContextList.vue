@@ -555,26 +555,33 @@ async function createPromptItem() {
 // ============================================================================
 
 function onDragStart(event: DragEvent, item: PromptItem) {
+  console.log('onDragStart', item.identifier)
   draggedItem.value = item
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', item.identifier)
+    // 设置拖拽图像为整个条目
+    const target = event.target as HTMLElement
+    const entryItem = target.closest('.entry-item') as HTMLElement
+    if (entryItem) {
+      event.dataTransfer.setDragImage(entryItem, 0, 0)
+    }
   }
 }
 
 function onDragEnd() {
+  console.log('onDragEnd')
   draggedItem.value = null
   dragOverItem.value = null
 }
 
 function onDragOver(event: DragEvent, item: PromptItem) {
   event.preventDefault()
-  if (event.dataTransfer) {
-    event.dataTransfer.dropEffect = 'move'
-  }
-  if (draggedItem.value && draggedItem.value.identifier !== item.identifier) {
-    dragOverItem.value = item
-  }
+  if (!draggedItem.value) return
+  if (draggedItem.value.identifier === item.identifier) return
+  event.dataTransfer!.dropEffect = 'move'
+  dragOverItem.value = item
+  console.log('onDragOver', item.identifier)
 }
 
 function onDragLeave() {
@@ -958,22 +965,25 @@ watch(() => route.name, async (newName) => {
                   'entry-item-drag-over': dragOverItem?.identifier === item.identifier,
                   'entry-selected': presetsStore.currentPromptIdentifier === item.identifier
                 }"
-                draggable="true"
-                @dragstart="(e) => onDragStart(e, item)"
-                @dragend="onDragEnd"
                 @dragover="(e) => onDragOver(e, item)"
+                @dragenter.prevent
                 @dragleave="onDragLeave"
                 @drop="(e) => onDrop(e, item)"
               >
-                <!-- Drag handle - visual indicator only -->
-                <div class="entry-drag-handle">
+                <!-- Drag handle - draggable element -->
+                <div
+                  class="entry-drag-handle"
+                  draggable="true"
+                  @dragstart="(e) => onDragStart(e, item)"
+                  @dragend="onDragEnd"
+                >
                   <NIcon :size="16" class="drag-icon">
                     <ReorderFourOutline />
                   </NIcon>
                 </div>
 
                 <!-- Enable switch -->
-                <div class="entry-switch">
+                <div class="entry-switch" @pointerdown.stop @mousedown.stop>
                   <NSwitch
                     :value="isPromptEnabled(item.identifier)"
                     size="small"
@@ -982,7 +992,7 @@ watch(() => route.name, async (newName) => {
                 </div>
 
                 <!-- Prompt info -->
-                <div class="entry-info" @click="selectPromptItem(item.identifier)">
+                <div class="entry-info" @click="selectPromptItem(item.identifier)" @pointerdown.stop @mousedown.stop>
                   <div class="entry-header">
                     <span class="entry-name">{{ item.name }}</span>
                   </div>
