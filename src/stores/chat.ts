@@ -151,6 +151,26 @@ export const useChatStore = defineStore('chat', () => {
     pendingAttachments.value = []
   }
 
+  // Determine generation type based on input and last message
+  // - 'continue': empty input + has messages + last message is assistant (append to last message)
+  // - 'normal': other cases (generate new response)
+  function determineGenerateType(content: string): 'normal' | 'continue' {
+    const trimmedContent = content.trim()
+    const hasAttachments = pendingAttachments.value.length > 0
+    const lastMessage = messages.value[messages.value.length - 1]
+
+    // Continue mode: empty input, no attachments, has messages, last message is assistant
+    if (
+      !trimmedContent &&
+      !hasAttachments &&
+      messages.value.length > 0 &&
+      lastMessage?.role === 'assistant'
+    ) {
+      return 'continue'
+    }
+    return 'normal'
+  }
+
   // Send message (non-streaming)
   async function sendMessage(content: string, apiConfig: ApiConfig) {
     if (!currentSession.value || isGenerating.value) return
@@ -159,9 +179,10 @@ export const useChatStore = defineStore('chat', () => {
     error.value = null
     const messageContent = content.trim()
     const attachments = [...pendingAttachments.value]
+    const generateType = determineGenerateType(content)
 
-    // Add user message only if there's content or attachments
-    if (messageContent || attachments.length > 0) {
+    // Add user message only if there's content or attachments (not in continue mode)
+    if (generateType === 'normal' && (messageContent || attachments.length > 0)) {
       const userMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'user',
@@ -189,16 +210,25 @@ export const useChatStore = defineStore('chat', () => {
         max_context: 8192,
       })
 
-      // Only add assistant message if response has valid content
+      // Handle response based on generate type
       if (response.content?.trim()) {
-        const assistantMessage: ChatMessage = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: response.content,
-          created_at: new Date().toISOString(),
-          attachments: [],
+        if (generateType === 'continue' && messages.value.length > 0) {
+          // Append to last assistant message
+          const lastMessage = messages.value[messages.value.length - 1]
+          if (lastMessage.role === 'assistant') {
+            lastMessage.content += response.content
+          }
+        } else {
+          // Add new assistant message
+          const assistantMessage: ChatMessage = {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: response.content,
+            created_at: new Date().toISOString(),
+            attachments: [],
+          }
+          messages.value.push(assistantMessage)
         }
-        messages.value.push(assistantMessage)
       }
 
       // Save session
@@ -220,9 +250,10 @@ export const useChatStore = defineStore('chat', () => {
     error.value = null
     const messageContent = content.trim()
     const attachments = [...pendingAttachments.value]
+    const generateType = determineGenerateType(content)
 
-    // Add user message only if there's content or attachments
-    if (messageContent || attachments.length > 0) {
+    // Add user message only if there's content or attachments (not in continue mode)
+    if (generateType === 'normal' && (messageContent || attachments.length > 0)) {
       const userMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'user',
@@ -234,16 +265,23 @@ export const useChatStore = defineStore('chat', () => {
       pendingAttachments.value = []
     }
 
+    // For continue mode, get the last assistant message
+    const lastAssistantMessage = generateType === 'continue' && messages.value.length > 0
+      ? messages.value[messages.value.length - 1]
+      : null
+    const isContinueMode = generateType === 'continue' && lastAssistantMessage?.role === 'assistant'
+
     // Pre-create assistant message placeholder for efficient updates
-    const assistantId = crypto.randomUUID()
-    let assistantAdded = false
+    const assistantId = isContinueMode ? lastAssistantMessage!.id : crypto.randomUUID()
+    const originalContent = isContinueMode ? lastAssistantMessage!.content : ''
+    let assistantAdded = !isContinueMode // In continue mode, message already exists
 
     try {
       await saveCurrentSession()
       const runtimeStore = useRuntimeStore()
       await runtimeStore.loadGlobalState()
 
-      let accumulatedContent = ''
+      let accumulatedContent = isContinueMode ? originalContent : ''
       let resolveStream: () => void = () => {}
       let rejectStream: (error: Error) => void = () => {}
       const streamDone = new Promise<void>((resolve, reject) => {
@@ -270,21 +308,31 @@ export const useChatStore = defineStore('chat', () => {
           onChunk: (event) => {
             accumulatedContent += event.delta
             streamingContent.value = accumulatedContent
-            // Add assistant message on first non-empty content
-            if (!assistantAdded && accumulatedContent.trim()) {
-              messages.value.push({
-                id: assistantId,
-                role: 'assistant',
-                content: accumulatedContent,
-                created_at: new Date().toISOString(),
-                attachments: [],
-              })
-              assistantAdded = true
-            } else if (assistantAdded) {
-              // Direct update by index - faster than findIndex + splice
+            if (!isContinueMode) {
+              // Normal mode: add new assistant message on first non-empty content
+              if (!assistantAdded && accumulatedContent.trim()) {
+                messages.value.push({
+                  id: assistantId,
+                  role: 'assistant',
+                  content: accumulatedContent,
+                  created_at: new Date().toISOString(),
+                  attachments: [],
+                })
+                assistantAdded = true
+              } else if (assistantAdded) {
+                // Direct update by index - faster than findIndex + splice
+                const lastIndex = messages.value.length - 1
+                if (lastIndex >= 0 && messages.value[lastIndex].id === assistantId) {
+                  messages.value[lastIndex] = {
+                    ...messages.value[lastIndex],
+                    content: accumulatedContent,
+                  }
+                }
+              }
+            } else {
+              // Continue mode: update last assistant message directly
               const lastIndex = messages.value.length - 1
               if (lastIndex >= 0 && messages.value[lastIndex].id === assistantId) {
-                // Use direct assignment for better performance
                 messages.value[lastIndex] = {
                   ...messages.value[lastIndex],
                   content: accumulatedContent,
@@ -294,8 +342,17 @@ export const useChatStore = defineStore('chat', () => {
           },
           onError: (event) => {
             error.value = event.error
-            // Remove the assistant message on error
-            if (assistantAdded) {
+            // In continue mode, restore original content on error
+            if (isContinueMode && lastAssistantMessage) {
+              const lastIndex = messages.value.length - 1
+              if (lastIndex >= 0 && messages.value[lastIndex].id === assistantId) {
+                messages.value[lastIndex] = {
+                  ...messages.value[lastIndex],
+                  content: originalContent,
+                }
+              }
+            } else if (assistantAdded) {
+              // Normal mode: remove the assistant message on error
               const lastIndex = messages.value.length - 1
               if (lastIndex >= 0 && messages.value[lastIndex].id === assistantId) {
                 messages.value.pop()
@@ -314,8 +371,17 @@ export const useChatStore = defineStore('chat', () => {
       await saveCurrentSession()
     } catch (e) {
       error.value = String(e)
-      // Keep the user message; remove assistant message if added
-      if (assistantAdded) {
+      // In continue mode, restore original content on error
+      if (isContinueMode && lastAssistantMessage) {
+        const lastIndex = messages.value.length - 1
+        if (lastIndex >= 0 && messages.value[lastIndex].id === assistantId) {
+          messages.value[lastIndex] = {
+            ...messages.value[lastIndex],
+            content: originalContent,
+          }
+        }
+      } else if (assistantAdded) {
+        // Normal mode: remove assistant message if added
         const lastIndex = messages.value.length - 1
         if (lastIndex >= 0 && messages.value[lastIndex].id === assistantId) {
           messages.value.pop()
