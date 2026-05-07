@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "sqlite-agent": {
+      "command": "database-mcp",
+      "args": ["stdio", "--db-backend", "sqlite", "--db-name", "E:\\myDev\\RST-Tauri\\data\\agent.db"]
+    }
+  }
+}
