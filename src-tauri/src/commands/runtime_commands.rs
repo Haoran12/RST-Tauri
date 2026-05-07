@@ -831,7 +831,18 @@ pub async fn send_assembled_st_chat_message(
         request_id
     );
     if let Some(sqlite_store) = store_guard.as_ref() {
-        let request_json = serde_json::to_value(&request).unwrap_or(serde_json::Value::Null);
+        // Build actual request body that will be sent to the API
+        let request_json = build_provider_request_preview(
+            &data_dir,
+            &api_config,
+            &compiled_contract.key.protocol_kind,
+            request.clone(),
+        )
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!("[ST Chat Log] Failed to build request preview: {}, falling back to ChatRequest", e);
+            serde_json::to_value(&request).unwrap_or(serde_json::Value::Null)
+        });
         tracing::info!(
             "[ST Chat Log] Calling log_start for request_id: {}",
             request_id
@@ -2224,8 +2235,18 @@ pub async fn start_st_chat_stream(
     {
         let store_guard = state.sqlite_store.read().await;
         if let Some(sqlite_store) = store_guard.as_ref() {
-            let request_json =
-                serde_json::to_value(&stream_request).unwrap_or(serde_json::Value::Null);
+            // Build actual request body that will be sent to the API
+            let request_json = build_provider_request_preview(
+                &data_dir,
+                &api_config,
+                &compiled_contract.key.protocol_kind,
+                stream_request.clone(),
+            )
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!("[ST Stream Log] Failed to build request preview: {}, falling back to ChatRequest", e);
+                serde_json::to_value(&stream_request).unwrap_or(serde_json::Value::Null)
+            });
             sqlite_store
                 .llm_logger()
                 .log_start(
