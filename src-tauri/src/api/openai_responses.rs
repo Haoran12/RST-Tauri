@@ -484,15 +484,22 @@ fn parse_responses_stream_data(data: &str) -> Option<Result<StreamChunk, String>
             Ok(StreamChunk {
                 delta,
                 finish_reason: None,
+                raw_sse_data: Some(data.to_string()),
             })
         })
     } else if event.event_type == "response.done" {
         Some(Ok(StreamChunk {
             delta: String::new(),
             finish_reason: Some("stop".to_string()),
+            raw_sse_data: Some(data.to_string()),
         }))
     } else {
-        None
+        // For other event types, still return raw data for logging
+        Some(Ok(StreamChunk {
+            delta: String::new(),
+            finish_reason: None,
+            raw_sse_data: Some(data.to_string()),
+        }))
     }
 }
 

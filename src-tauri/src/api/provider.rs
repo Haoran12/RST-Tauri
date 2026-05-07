@@ -181,6 +181,9 @@ pub struct StreamChunk {
     pub delta: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finish_reason: Option<String>,
+    /// Raw SSE event data (JSON string) for logging purposes
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_sse_data: Option<String>,
 }
 
 /// Model information returned by list_models

@@ -549,6 +549,7 @@ fn parse_gemini_stream_data(data: &str) -> Option<Result<StreamChunk, String>> {
         Ok(StreamChunk {
             delta,
             finish_reason: candidate.finish_reason.clone(),
+            raw_sse_data: Some(data.to_string()),
         })
     })
 }

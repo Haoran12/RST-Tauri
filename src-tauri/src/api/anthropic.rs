@@ -542,15 +542,23 @@ fn parse_anthropic_stream_data(data: &str) -> Option<Result<StreamChunk, String>
             return Some(Ok(StreamChunk {
                 delta: delta.text,
                 finish_reason: None,
+                raw_sse_data: Some(data.to_string()),
             }));
         }
     } else if event.event_type == "message_stop" {
         return Some(Ok(StreamChunk {
             delta: String::new(),
             finish_reason: Some("stop".to_string()),
+            raw_sse_data: Some(data.to_string()),
         }));
     }
-    None
+    // For other event types (message_start, content_block_start, message_delta, etc.),
+    // still return the raw data for logging, but with empty delta
+    Some(Ok(StreamChunk {
+        delta: String::new(),
+        finish_reason: None,
+        raw_sse_data: Some(data.to_string()),
+    }))
 }
 
 fn image_mime_type_from_data_url(url: &str) -> String {

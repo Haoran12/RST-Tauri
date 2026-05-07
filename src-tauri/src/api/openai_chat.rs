@@ -479,6 +479,7 @@ fn parse_openai_stream_data(data: &str) -> Option<Result<StreamChunk, String>> {
         return Some(Ok(StreamChunk {
             delta: String::new(),
             finish_reason: Some("stop".to_string()),
+            raw_sse_data: Some(data.to_string()),
         }));
     }
 
@@ -487,6 +488,7 @@ fn parse_openai_stream_data(data: &str) -> Option<Result<StreamChunk, String>> {
     Some(Ok(StreamChunk {
         delta: choice.delta.content.clone().unwrap_or_default(),
         finish_reason: choice.finish_reason.clone(),
+        raw_sse_data: Some(data.to_string()),
     }))
 }
 

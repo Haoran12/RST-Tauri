@@ -2176,113 +2176,6 @@ async fn build_provider_request_preview(
     }
 }
 
-/// Build a response JSON in the format that the provider would return.
-/// Used for logging stream responses with the correct structure.
-fn build_provider_response_json(
-    protocol_kind: &str,
-    content: &str,
-    finish_reason: Option<&str>,
-    token_usage: Option<&serde_json::Value>,
-) -> serde_json::Value {
-    match protocol_kind {
-        // OpenAI Chat Completions format
-        "openai_chat_completions" | "deepseek_chat" => {
-            let mut response = serde_json::json!({
-                "id": "chatcmpl-stream",
-                "object": "chat.completion",
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": content
-                    },
-                    "finish_reason": finish_reason.unwrap_or("stop")
-                }]
-            });
-            if let Some(usage) = token_usage {
-                response["usage"] = usage.clone();
-            }
-            response
-        }
-        // OpenAI Responses API format
-        "openai_responses" => {
-            let mut response = serde_json::json!({
-                "id": "resp_stream",
-                "object": "response",
-                "status": "completed",
-                "output": [{
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{
-                        "type": "output_text",
-                        "text": content
-                    }]
-                }]
-            });
-            if let Some(usage) = token_usage {
-                response["usage"] = usage.clone();
-            }
-            response
-        }
-        // Anthropic Messages format
-        "anthropic_messages" => {
-            let mut response = serde_json::json!({
-                "id": "msg_stream",
-                "type": "message",
-                "role": "assistant",
-                "content": [{
-                    "type": "text",
-                    "text": content
-                }],
-                "stop_reason": finish_reason
-            });
-            if let Some(usage) = token_usage {
-                response["usage"] = usage.clone();
-            }
-            response
-        }
-        // Gemini Generate Content format
-        "gemini_generate_content" => {
-            let mut response = serde_json::json!({
-                "candidates": [{
-                    "content": {
-                        "parts": [{
-                            "text": content
-                        }],
-                        "role": "model"
-                    },
-                    "finish_reason": finish_reason.unwrap_or("STOP")
-                }]
-            });
-            if let Some(usage) = token_usage {
-                response["usageMetadata"] = usage.clone();
-            }
-            response
-        }
-        // Claude Code Interface format (similar to Anthropic)
-        "claude_code_interface" => {
-            serde_json::json!({
-                "id": "msg_stream",
-                "type": "message",
-                "role": "assistant",
-                "content": [{
-                    "type": "text",
-                    "text": content
-                }],
-                "stop_reason": finish_reason
-            })
-        }
-        // Fallback for unknown protocols
-        _ => {
-            serde_json::json!({
-                "content": content,
-                "finish_reason": finish_reason,
-                "stream": true
-            })
-        }
-    }
-}
-
 /// Start a streaming chat request for ST mode.
 /// Returns a stream_id immediately, then emits events:
 /// - "st-stream-start" with StreamStartEvent
@@ -2386,17 +2279,24 @@ pub async fn start_st_chat_stream(
     let app_clone = app.clone();
     let request_id_clone = request_id.clone();
     let stream_id_for_task = stream_id.clone();
-    let protocol_kind = compiled_contract.key.protocol_kind.clone();
 
     tokio::spawn(async move {
         match provider.chat_stream(stream_request).await {
             Ok(mut stream) => {
                 let mut full_content = String::new();
                 let mut finish_reason: Option<String> = None;
+                let mut raw_sse_events: Vec<serde_json::Value> = Vec::new();
 
                 while let Some(chunk_result) = stream.next().await {
                     match chunk_result {
                         Ok(chunk) => {
+                            // Collect raw SSE events for logging
+                            if let Some(raw_data) = &chunk.raw_sse_data {
+                                if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(raw_data) {
+                                    raw_sse_events.push(json_value);
+                                }
+                            }
+
                             if !chunk.delta.is_empty() {
                                 full_content.push_str(&chunk.delta);
                             }
@@ -2436,17 +2336,12 @@ pub async fn start_st_chat_stream(
                     }
                 }
 
-                // Log success with provider-specific response structure
+                // Log success with raw SSE events array
                 {
                     let store_guard = sqlite_store_arc.read().await;
                     if let Some(ref store) = store_guard.as_ref() {
-                        // Build response in the format that the provider would return
-                        let response_json = build_provider_response_json(
-                            &protocol_kind,
-                            &full_content,
-                            finish_reason.as_deref(),
-                            None,
-                        );
+                        // Store raw SSE events as JSON array - this is the actual data received from API
+                        let response_json = serde_json::Value::Array(raw_sse_events);
                         store
                             .llm_logger()
                             .log_success(

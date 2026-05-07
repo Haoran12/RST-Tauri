@@ -464,13 +464,22 @@ fn parse_claude_code_stream_data(data: &str) -> Option<Result<StreamChunk, Strin
             Ok(StreamChunk {
                 delta: text,
                 finish_reason: None,
+                raw_sse_data: Some(data.to_string()),
             })
         }),
         ClaudeCodeStreamEvent::MessageDelta { delta, .. } => Some(Ok(StreamChunk {
             delta: String::new(),
             finish_reason: delta.stop_reason,
+            raw_sse_data: Some(data.to_string()),
         })),
-        _ => None,
+        _ => {
+            // For other event types, still return raw data for logging
+            Some(Ok(StreamChunk {
+                delta: String::new(),
+                finish_reason: None,
+                raw_sse_data: Some(data.to_string()),
+            }))
+        }
     }
 }
 
