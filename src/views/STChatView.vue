@@ -3,6 +3,7 @@ import { ref, computed, onMounted, nextTick, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton,
+  NDropdown,
   NEmpty,
   NIcon,
   NInput,
@@ -16,6 +17,7 @@ import {
 import {
   AttachOutline,
   ChevronBackOutline,
+  ReorderThreeOutline,
   SendOutline,
   StopOutline,
   TrashOutline,
@@ -48,6 +50,7 @@ const isInitialLoading = ref(false)
 const previewUrls = ref<Record<string, string>>({})
 const editingMessageId = ref<string | null>(null)
 const editingContent = ref('')
+const showSessionMenu = ref(false)
 
 const hasActiveApiConfig = computed(() => settingsStore.activeApiConfig !== null)
 const canSend = computed(() => {
@@ -142,6 +145,34 @@ async function onFileChange(e: Event) {
     message.error(String(err))
   } finally {
     target.value = ''
+  }
+}
+
+const sessionMenuOptions = computed(() => [
+  { label: '添加附件', key: 'attachment', disabled: chatStore.isGenerating },
+  { label: '重新生成', key: 'regenerate', disabled: chatStore.isGenerating || chatStore.messages.length === 0 },
+  { label: '提示词预览', key: 'prompt-preview', disabled: chatStore.isGenerating },
+  { label: 'AI 帮答', key: 'ai-help', disabled: chatStore.isGenerating },
+])
+
+function handleSessionMenuSelect(key: string) {
+  showSessionMenu.value = false
+  switch (key) {
+    case 'attachment':
+      openFilePicker()
+      break
+    case 'regenerate':
+      // TODO: 实现重新生成功能
+      message.info('重新生成功能待实现')
+      break
+    case 'prompt-preview':
+      // TODO: 实现提示词预览功能
+      message.info('提示词预览功能待实现')
+      break
+    case 'ai-help':
+      // TODO: 实现 AI 帮答功能
+      message.info('AI 帮答功能待实现')
+      break
   }
 }
 
@@ -450,9 +481,17 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="input-row">
-            <NButton quaternary :disabled="chatStore.isGenerating" @click="openFilePicker">
-              <template #icon><NIcon :component="AttachOutline" /></template>
-            </NButton>
+            <NDropdown
+              trigger="click"
+              :options="sessionMenuOptions"
+              :show="showSessionMenu"
+              @update:show="showSessionMenu = $event"
+              @select="handleSessionMenuSelect"
+            >
+              <NButton quaternary :disabled="chatStore.isGenerating">
+                <template #icon><NIcon :component="ReorderThreeOutline" /></template>
+              </NButton>
+            </NDropdown>
             <NInput
               v-model:value="inputText"
               type="textarea"
