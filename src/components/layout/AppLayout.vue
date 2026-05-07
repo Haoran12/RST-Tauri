@@ -114,19 +114,7 @@ const mainContentStyle = {
         <div class="route-host">
           <router-view v-slot="{ Component }">
             <transition name="route-fade" mode="out-in">
-              <Suspense :key="route.name">
-                <component :is="Component" />
-                <template #fallback>
-                  <div class="route-loading">
-                    <div class="route-loading-header" />
-                    <div class="route-loading-grid">
-                      <div class="route-loading-card route-loading-card-wide" />
-                      <div class="route-loading-card" />
-                      <div class="route-loading-card" />
-                    </div>
-                  </div>
-                </template>
-              </Suspense>
+              <component :is="Component" :key="route.name" />
             </transition>
           </router-view>
         </div>
@@ -215,65 +203,17 @@ const mainContentStyle = {
 /* Route transition animations */
 .route-fade-enter-active,
 .route-fade-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
 .route-fade-enter-from {
   opacity: 0;
-  transform: translateX(12px);
+  transform: translateX(8px);
 }
 
 .route-fade-leave-to {
   opacity: 0;
-  transform: translateX(-8px);
-}
-
-.route-loading {
-  height: 100%;
-  min-height: 0;
-  padding: 18px 20px;
-  display: grid;
-  grid-template-rows: 74px 1fr;
-  gap: 16px;
-  background: var(--color-bg-app, #f0f2f5);
-}
-
-.route-loading-header,
-.route-loading-card {
-  border-radius: 8px;
-  background: linear-gradient(
-    90deg,
-    var(--color-bg-surface, #fff),
-    var(--color-bg-subtle, #f5f7fa),
-    var(--color-bg-surface, #fff)
-  );
-  background-size: 220% 100%;
-  border: 1px solid var(--color-border-subtle, #e0e0e6);
-  animation: route-loading-shimmer 1.2s ease-in-out infinite;
-}
-
-.route-loading-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  align-content: start;
-}
-
-.route-loading-card {
-  min-height: 150px;
-}
-
-.route-loading-card-wide {
-  grid-column: 1 / -1;
-}
-
-@keyframes route-loading-shimmer {
-  0% {
-    background-position: 120% 0;
-  }
-  100% {
-    background-position: -120% 0;
-  }
+  transform: translateX(-4px);
 }
 
 .inspect-sider {
