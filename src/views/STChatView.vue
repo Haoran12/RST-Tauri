@@ -22,12 +22,14 @@ import {
   TrashOutline,
 } from '@vicons/ionicons5'
 import ChatMessageItem from '@/components/shared/ChatMessageItem.vue'
+import PromptPreviewModal from '@/components/shared/PromptPreviewModal.vue'
 import { useChatStore } from '@/stores/chat'
 import { useSettingsStore } from '@/stores/settings'
 import { useRuntimeStore } from '@/stores/runtime'
 import { useWorldbooksStore } from '@/stores/worldbooks'
 import { usePresetsStore } from '@/stores/presets'
 import type { CharacterCard, ChatAttachmentRef, ChatMessage } from '@/types/st'
+import type { AssembleRequestInput } from '@/types/runtime'
 import { modalSizeStyles } from '@/composables/useModalSize'
 import { getChatAttachmentBlob, loadPreset } from '@/services/storage'
 
@@ -50,6 +52,7 @@ const previewUrls = ref<Record<string, string>>({})
 const editingMessageId = ref<string | null>(null)
 const editingContent = ref('')
 const showSessionMenu = ref(false)
+const showPromptPreview = ref(false)
 
 const hasActiveApiConfig = computed(() => settingsStore.activeApiConfig !== null)
 const canSend = computed(() => {
@@ -166,8 +169,7 @@ function handleSessionMenuSelect(key: string) {
       handleRegenerate()
       break
     case 'prompt-preview':
-      // TODO: 实现提示词预览功能
-      message.info('提示词预览功能待实现')
+      showPromptPreview.value = true
       break
     case 'ai-help':
       // TODO: 实现 AI 帮答功能
@@ -329,6 +331,21 @@ async function toggleWorldbook(loreId: string, enabled: boolean) {
     message.error(String(err))
   }
 }
+
+// 提示词预览输入
+const promptPreviewInput = computed<AssembleRequestInput | null>(() => {
+  if (!settingsStore.activeApiConfig || !chatStore.currentSession) return null
+  return {
+    api_config_id: settingsStore.activeApiConfig.id,
+    character_id: chatStore.currentSession.character_id ?? null,
+    session_id: chatStore.currentSession.id,
+    preset_name: runtimeStore.activePresetName || 'Default',
+    world_info_settings: runtimeStore.globalState.world_info_settings,
+    chat_lore_id: null,
+    global_lore_ids: [],
+    max_context: 8192,
+  }
+})
 
 function routeSessionId() {
   const v = route.params.sessionId
@@ -545,6 +562,12 @@ onBeforeUnmount(() => {
         <NButton type="primary" @click="saveEditedMessage">保存</NButton>
       </div>
     </NModal>
+
+    <!-- 提示词预览弹窗 -->
+    <PromptPreviewModal
+      v-model:show="showPromptPreview"
+      :input="promptPreviewInput"
+    />
   </div>
 </template>
 

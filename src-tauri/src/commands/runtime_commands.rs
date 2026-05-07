@@ -13,7 +13,7 @@ use crate::config::llm_contracts::{
 };
 use crate::logging::context::{LlmNode, LogContext, LogMode};
 use crate::st::keyword_matcher::GlobalScanData;
-use crate::st::runtime_assembly::{AssembledAttachmentRef, AssembledSamplingParams};
+use crate::st::runtime_assembly::{AssembledAttachmentRef, AssembledMessage, AssembledSamplingParams};
 use crate::st::{
     AssembledRequest, ContextTemplate, GlobalAppState, InstructTemplate, MacroContext, PresetFile,
     PromptPreset, ProviderRequestMapper, ReasoningTemplate, RegexEngine, RegexPlacement,
@@ -2390,4 +2390,443 @@ pub async fn start_st_chat_stream(
     });
 
     Ok(stream_id)
+}
+
+// ============================================================================
+// 提示词预览命令
+// ============================================================================
+
+/// 提示词预览条目
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PromptPreviewItem {
+    /// 预设条目标识符
+    pub identifier: String,
+    /// 预设条目名称
+    pub name: String,
+    /// 角色 (system/user/assistant)
+    pub role: String,
+    /// 组装后的内容
+    pub content: String,
+    /// 预估 token 数（简单估算：每 4 字符约 1 token）
+    pub estimated_tokens: i32,
+    /// 是否启用
+    pub enabled: bool,
+    /// 是否为系统提示词
+    pub system_prompt: bool,
+    /// 是否为标记条目（如 chatHistory）
+    pub marker: bool,
+}
+
+/// 提示词预览输出
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PromptPreviewOutput {
+    /// 系统提示词（合并后的）
+    pub system_prompt: String,
+    /// 各预设条目预览
+    pub prompt_items: Vec<PromptPreviewItem>,
+    /// 聊天历史消息
+    pub chat_messages: Vec<AssembledMessage>,
+    /// 世界书注入结果
+    pub world_info_result: Option<WorldInfoInjectionResult>,
+    /// 总预估 token 数
+    pub total_estimated_tokens: i32,
+}
+
+/// 预览 ST 聊天提示词
+///
+/// 模拟组装过程，返回每个预设条目的详细预览，不实际发送请求。
+#[tauri::command]
+pub async fn preview_st_prompt(
+    app: AppHandle,
+    input: AssembleRequestInput,
+) -> Result<PromptPreviewOutput, String> {
+    let data_dir = get_data_dir(&app)?;
+    let store = JsonStore::new(data_dir);
+    ensure_default_presets(&store)?;
+    let global_state = load_global_state(&store)?;
+
+    // 1. 加载 API 配置
+    let api_config: ApiConfig = {
+        let value = store.read(&format!("api_configs/{}.json", input.api_config_id))?;
+        serde_json::from_value(value).map_err(|e| format!("Failed to parse API config: {}", e))?
+    };
+
+    // 2. 加载角色卡
+    let character: Option<TavernCardV3> = if let Some(char_id) = &input.character_id {
+        let value = store.read(&format!("characters/{}.json", char_id))?;
+        Some(
+            serde_json::from_value(value)
+                .map_err(|e| format!("Failed to parse character: {}", e))?,
+        )
+    } else {
+        None
+    };
+
+    // 3. 加载会话
+    let session_value = store.read(&format!("chats/{}.json", input.session_id))?;
+    let chat_session: ChatSession = serde_json::from_value(session_value)
+        .map_err(|e| format!("Failed to parse chat session: {}", e))?;
+
+    let session = STSessionData {
+        session_id: chat_session.id,
+        character_id: chat_session.character_id,
+        group_id: None,
+        chat_metadata: STChatMetadata {
+            world_info: chat_session.chat_metadata.world_info.clone(),
+            enabled_world_info: chat_session.chat_metadata.enabled_world_info.clone(),
+            disabled_world_info: chat_session.chat_metadata.disabled_world_info.clone(),
+            user_persona: chat_session
+                .chat_metadata
+                .user_persona
+                .clone()
+                .map(|persona| crate::st::runtime_assembly::STUserPersona {
+                    name: persona.name,
+                    description: persona.description,
+                }),
+            extra: chat_session.chat_metadata.extra.clone(),
+        },
+        messages: chat_session
+            .messages
+            .into_iter()
+            .map(|m| STChatMessage {
+                id: m.id,
+                role: m.role,
+                content: m.content,
+                created_at: m.created_at,
+                name: None,
+                attachments: m.attachments,
+            })
+            .collect(),
+    };
+
+    // 4. 加载预设
+    let active_preset_name =
+        resolve_active_preset_name(input.preset_name.as_deref(), &global_state);
+    let preset: Option<PresetFile> = if let Some(name) = active_preset_name.as_deref() {
+        if !name.is_empty() {
+            Some(load_combined_preset(&store, name)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let prompt_preset = preset.as_ref().map(|p| PromptPreset {
+        name: p.name.clone(),
+        prompts: p.prompts.clone(),
+        prompt_order: p.prompt_order.clone(),
+        wi_format: p.wi_format.clone(),
+        scenario_format: p.scenario_format.clone(),
+        personality_format: p.personality_format.clone(),
+        new_chat_prompt: p.new_chat_prompt.clone(),
+        new_group_chat_prompt: p.new_group_chat_prompt.clone(),
+        continue_nudge_prompt: p.continue_nudge_prompt.clone(),
+        group_nudge_prompt: p.group_nudge_prompt.clone(),
+        impersonation_prompt: p.impersonation_prompt.clone(),
+        extensions: std::collections::HashMap::new(),
+    });
+
+    // 5. 构建全局扫描数据
+    let global_scan_data = GlobalScanData {
+        persona_description: persona_scan_text(&session.chat_metadata),
+        character_description: character
+            .as_ref()
+            .map(|c| c.data.description.clone())
+            .unwrap_or_default(),
+        character_personality: character
+            .as_ref()
+            .map(|c| c.data.personality.clone())
+            .unwrap_or_default(),
+        character_depth_prompt: String::new(),
+        scenario: character
+            .as_ref()
+            .map(|c| c.data.scenario.clone())
+            .unwrap_or_default(),
+        creator_notes: character
+            .as_ref()
+            .map(|c| c.data.creator_notes.clone())
+            .unwrap_or_default(),
+        trigger: None,
+    };
+
+    // 6. 执行世界书注入
+    let world_info_result = {
+        let mut global_lore_ids = input.global_lore_ids.clone();
+        for lore_id in &input.world_info_settings.global_select {
+            if !global_lore_ids.contains(lore_id) {
+                global_lore_ids.push(lore_id.clone());
+            }
+        }
+        let sources = collect_world_info_sources(
+            &store,
+            character.as_ref(),
+            &session.chat_metadata,
+            &input.world_info_settings,
+            input.chat_lore_id.as_deref(),
+            &global_lore_ids,
+        )?;
+        if sources.is_empty() {
+            None
+        } else {
+            let mut injector = WorldInfoInjector::new();
+            let macro_context =
+                MacroContext::from_chat_metadata(&session.chat_metadata, character.as_ref(), "");
+            Some(
+                injector
+                    .check_world_info(
+                        &session.messages,
+                        input.max_context,
+                        &input.world_info_settings,
+                        sources,
+                        &global_scan_data,
+                        &macro_context,
+                    )
+                    .await,
+            )
+        }
+    };
+
+    // 7. 构建运行时上下文（用于解析内容）
+    let sampler_preset = preset.as_ref().map(|p| {
+        let mut sampler = SamplerPreset::new(&p.name);
+        sampler.temperature = p.temperature;
+        sampler.frequency_penalty = p.frequency_penalty;
+        sampler.presence_penalty = p.presence_penalty;
+        sampler.top_p = p.top_p;
+        sampler.top_k = p.top_k;
+        sampler.top_a = p.top_a;
+        sampler.min_p = p.min_p;
+        sampler.repetition_penalty = p.repetition_penalty;
+        sampler.rep_pen_range = p.rep_pen_range;
+        sampler.rep_pen_decay = p.rep_pen_decay;
+        sampler.rep_pen_slope = p.rep_pen_slope;
+        sampler.typical_p = p.typical_p;
+        sampler.tfs = p.tfs;
+        sampler.epsilon_cutoff = p.epsilon_cutoff;
+        sampler.eta_cutoff = p.eta_cutoff;
+        sampler.guidance_scale = p.guidance_scale;
+        sampler.negative_prompt = p.negative_prompt.clone();
+        sampler.dry_allowed_length = p.dry_allowed_length;
+        sampler.dry_multiplier = p.dry_multiplier;
+        sampler.dry_base = p.dry_base;
+        sampler.dry_sequence_breakers = p.dry_sequence_breakers.clone();
+        sampler.mirostat_mode = p.mirostat_mode;
+        sampler.mirostat_tau = p.mirostat_tau;
+        sampler.mirostat_eta = p.mirostat_eta;
+        sampler.no_repeat_ngram_size = p.no_repeat_ngram_size;
+        sampler.encoder_rep_pen = p.encoder_rep_pen;
+        sampler.sampler_priority = p.sampler_priority.clone();
+        sampler.temperature_last = p.temperature_last;
+        sampler.source_api_id = p.source_api_id.clone();
+        sampler
+    });
+    let instruct_template = preset.as_ref().and_then(|p| p.instruct.clone());
+    let context_template = preset.as_ref().and_then(|p| p.context.clone());
+    let system_prompt = preset.as_ref().and_then(|p| p.sysprompt.clone());
+    let reasoning_template = preset.as_ref().and_then(|p| p.reasoning.clone());
+
+    let context = RuntimeContext {
+        api_config: api_config.clone(),
+        sampler_preset,
+        instruct_template,
+        context_template,
+        system_prompt,
+        reasoning_template,
+        prompt_preset: prompt_preset.clone(),
+        character,
+        session,
+        global_scan_data,
+        world_info_result: world_info_result.clone(),
+    };
+
+    // 8. 构建预览条目
+    let mut prompt_items: Vec<PromptPreviewItem> = Vec::new();
+    let mut system_prompt_parts: Vec<String> = Vec::new();
+
+    if let Some(ref pp) = prompt_preset {
+        let prompts_by_id: std::collections::HashMap<&str, &crate::st::preset::PromptItem> = pp
+            .prompts
+            .iter()
+            .map(|p| (p.identifier.as_str(), p))
+            .collect();
+
+        let order = pp
+            .prompt_order
+            .iter()
+            .find(|o| o.character_id == 100000)
+            .or_else(|| pp.prompt_order.first());
+
+        if let Some(order_entry) = order {
+            for item in &order_entry.order {
+                if !item.enabled {
+                    continue;
+                }
+                if let Some(prompt) = prompts_by_id.get(item.identifier.as_str()) {
+                    let content =
+                        resolve_prompt_content_for_preview(&context, prompt, &world_info_result);
+                    let estimated_tokens = estimate_tokens(&content);
+
+                    // 系统提示词部分（chatHistory 之前）
+                    if prompt.identifier == "chatHistory" {
+                        // 不加入预览，单独处理聊天历史
+                    } else if prompt.system_prompt && prompt.identifier != "dialogueExamples" {
+                        if !content.is_empty() {
+                            system_prompt_parts.push(content.clone());
+                        }
+                    }
+
+                    prompt_items.push(PromptPreviewItem {
+                        identifier: prompt.identifier.clone(),
+                        name: prompt.name.clone(),
+                        role: prompt.role.clone(),
+                        content,
+                        estimated_tokens,
+                        enabled: item.enabled,
+                        system_prompt: prompt.system_prompt,
+                        marker: prompt.marker,
+                    });
+                }
+            }
+        }
+    }
+
+    // 9. 构建聊天历史消息
+    let chat_messages: Vec<AssembledMessage> = context
+        .session
+        .messages
+        .iter()
+        .map(|m| AssembledMessage {
+            role: m.role.clone(),
+            content: m.content.clone(),
+            attachments: m
+                .attachments
+                .iter()
+                .map(|a| AssembledAttachmentRef {
+                    attachment_id: a.attachment_id.clone(),
+                    kind: match a.kind {
+                        ChatAttachmentKind::Image => "image".to_string(),
+                        ChatAttachmentKind::Pdf => "pdf".to_string(),
+                    },
+                    mime_type: a.mime_type.clone(),
+                    filename: a.filename.clone(),
+                    size_bytes: a.size_bytes,
+                })
+                .collect(),
+        })
+        .collect();
+    let chat_history_tokens: i32 = chat_messages.iter().map(|m| estimate_tokens(&m.content)).sum();
+
+    // 10. 计算总 token 数
+    let total_estimated_tokens = prompt_items
+        .iter()
+        .map(|p| p.estimated_tokens)
+        .sum::<i32>()
+        + chat_history_tokens;
+
+    Ok(PromptPreviewOutput {
+        system_prompt: system_prompt_parts.join("\n\n"),
+        prompt_items,
+        chat_messages,
+        world_info_result,
+        total_estimated_tokens,
+    })
+}
+
+/// 解析预设条目内容（用于预览）
+fn resolve_prompt_content_for_preview(
+    context: &RuntimeContext,
+    prompt: &crate::st::preset::PromptItem,
+    world_info_result: &Option<WorldInfoInjectionResult>,
+) -> String {
+    use crate::st::macros::{substitute_params, MacroContext};
+
+    let macro_context = MacroContext::from_chat_metadata(
+        &context.session.chat_metadata,
+        context.character.as_ref(),
+        world_info_result
+            .as_ref()
+            .map(|wi| {
+                if !wi.world_info_before.is_empty() {
+                    wi.world_info_before.clone()
+                } else {
+                    wi.world_info_after.clone()
+                }
+            })
+            .unwrap_or_default(),
+    );
+
+    match prompt.identifier.as_str() {
+        "worldInfoBefore" => world_info_result
+            .as_ref()
+            .map(|wi| wi.world_info_before.clone())
+            .unwrap_or_default(),
+        "worldInfoAfter" => world_info_result
+            .as_ref()
+            .map(|wi| wi.world_info_after.clone())
+            .unwrap_or_default(),
+        "personaDescription" => context
+            .session
+            .chat_metadata
+            .user_persona
+            .as_ref()
+            .map(|p| {
+                let name = p.name.trim();
+                let desc = p.description.trim();
+                match (name.is_empty(), desc.is_empty()) {
+                    (false, false) => format!("Name: {}\nDescription: {}", name, desc),
+                    (false, true) => format!("Name: {}", name),
+                    (true, false) => desc.to_string(),
+                    _ => String::new(),
+                }
+            })
+            .unwrap_or_default(),
+        "charDescription" => context
+            .character
+            .as_ref()
+            .map(|c| c.data.description.clone())
+            .unwrap_or_default(),
+        "charPersonality" => context
+            .character
+            .as_ref()
+            .map(|c| c.data.personality.clone())
+            .unwrap_or_default(),
+        "scenario" => context
+            .character
+            .as_ref()
+            .map(|c| c.data.scenario.clone())
+            .unwrap_or_default(),
+        "jailbreak" => {
+            let content = if prompt.content.is_empty() {
+                context
+                    .character
+                    .as_ref()
+                    .map(|c| c.data.post_history_instructions.clone())
+                    .unwrap_or_default()
+            } else {
+                prompt.content.clone()
+            };
+            substitute_params(&content, &macro_context)
+        }
+        "dialogueExamples" => context
+            .character
+            .as_ref()
+            .map(|c| c.data.mes_example.clone())
+            .unwrap_or_default(),
+        "chatHistory" => String::new(), // 聊天历史单独处理
+        _ => substitute_params(&prompt.content, &macro_context),
+    }
+}
+
+/// 估算 token 数（简单估算：每 4 字符约 1 token）
+fn estimate_tokens(content: &str) -> i32 {
+    if content.is_empty() {
+        return 0;
+    }
+    // 简单估算：英文约 4 字符 = 1 token，中文约 2 字符 = 1 token
+    let char_count = content.chars().count();
+    let chinese_count = content.chars().filter(|c| c > &'\u{4E00}' && c < &'\u{9FFF}').count();
+    let english_count = char_count - chinese_count;
+
+    (english_count / 4 + chinese_count / 2 + 1) as i32
 }

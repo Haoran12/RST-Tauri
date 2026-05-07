@@ -215,6 +215,7 @@ pub fn run() {
             commands::start_st_chat_stream,
             commands::run_world_info_injection,
             commands::map_request_to_provider,
+            commands::preview_st_prompt,
             // Agent session commands
             commands::list_agent_worlds,
             commands::create_agent_world,

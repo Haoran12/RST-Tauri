@@ -245,6 +245,35 @@ export interface WorldInfoInjectionInput {
 }
 
 // ============================================================================
+// 提示词预览
+// ============================================================================
+
+/**
+ * 提示词预览条目
+ */
+export interface PromptPreviewItem {
+  identifier: string;
+  name: string;
+  role: string;
+  content: string;
+  estimated_tokens: number;
+  enabled: boolean;
+  system_prompt: boolean;
+  marker: boolean;
+}
+
+/**
+ * 提示词预览输出
+ */
+export interface PromptPreviewOutput {
+  system_prompt: string;
+  prompt_items: PromptPreviewItem[];
+  chat_messages: AssembledMessage[];
+  world_info_result: WorldInfoInjectionResult | null;
+  total_estimated_tokens: number;
+}
+
+// ============================================================================
 // 默认值工厂
 // ============================================================================
 

@@ -12,6 +12,7 @@ import type {
   WorldInfoInjectionInput,
   WorldInfoInjectionResult,
   AssembledRequest,
+  PromptPreviewOutput,
 } from '@/types/runtime';
 import type { ChatResponse } from '@/services/api';
 import type {
@@ -301,4 +302,15 @@ export async function buildCompleteChatRequest(
     providerType: assembleOutput.provider_type,
     model: assembleOutput.model,
   };
+}
+
+/**
+ * 预览 ST 聊天提示词
+ *
+ * 模拟组装过程，返回每个预设条目的详细预览，不实际发送请求。
+ */
+export async function previewSTPrompt(
+  input: AssembleRequestInput
+): Promise<PromptPreviewOutput> {
+  return await invoke<PromptPreviewOutput>('preview_st_prompt', { input });
 }
