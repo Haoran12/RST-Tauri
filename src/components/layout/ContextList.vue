@@ -17,7 +17,7 @@ import {
   NTag,
   useMessage,
 } from 'naive-ui'
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { SearchOutline, AddOutline, TrashOutline, SettingsOutline, ReorderFourOutline } from '@vicons/ionicons5'
 import { useAppShellStore } from '@/stores/appShell'
@@ -52,6 +52,8 @@ const deletingSessionId = ref<string | null>(null)
 // Drag and drop state for prompt items
 const draggedItem = ref<PromptItem | null>(null)
 const dragOverItem = ref<PromptItem | null>(null)
+const isPromptDragging = ref(false)
+const hasPendingPromptReorder = ref(false)
 
 const fixedPromptIdentifiers = new Set([
   'main',
@@ -554,111 +556,137 @@ async function createPromptItem() {
 // Drag and drop for prompt items
 // ============================================================================
 
-function onDragStart(event: DragEvent, item: PromptItem) {
-  console.log('onDragStart', item.identifier)
-  draggedItem.value = item
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData('text/plain', item.identifier)
-    // 使用整个卡片作为拖拽预览，避免只拖出一个小图标。
-    const target = event.target as HTMLElement | null
-    const entryItem = target?.closest('.entry-item') as HTMLElement | null
-    if (entryItem) {
-      event.dataTransfer.setDragImage(entryItem, 0, 0)
-    }
+function ensurePromptOrderItems(preset: NonNullable<typeof presetsStore.currentPreset>) {
+  if (!preset.prompt_order || preset.prompt_order.length === 0) {
+    preset.prompt_order = [{ character_id: 100000, order: [] }]
   }
+
+  preset.prompt_order = preset.prompt_order.map((orderEntry, index) => ({
+    character_id: orderEntry.character_id ?? (index === 0 ? 100000 : 100000 + index),
+    order: orderEntry.order ?? [],
+  }))
+
+  return preset.prompt_order
 }
 
-function onDragEnd() {
-  console.log('onDragEnd')
-  draggedItem.value = null
-  dragOverItem.value = null
+function reorderPromptItemsInPreset(
+  preset: NonNullable<typeof presetsStore.currentPreset>,
+  draggedIdentifier: string,
+  targetIdentifier: string
+): boolean {
+  if (!preset.prompts || draggedIdentifier === targetIdentifier) {
+    return false
+  }
+
+  const promptOrderEntries = ensurePromptOrderItems(preset)
+  const baseOrder = [...(promptOrderEntries[0]?.order ?? [])]
+
+  preset.prompts.forEach((prompt) => {
+    if (!baseOrder.some((item) => item.identifier === prompt.identifier)) {
+      baseOrder.push({ identifier: prompt.identifier, enabled: true })
+    }
+  })
+
+  const draggedIndex = baseOrder.findIndex((item) => item.identifier === draggedIdentifier)
+  const targetIndex = baseOrder.findIndex((item) => item.identifier === targetIdentifier)
+  if (draggedIndex < 0 || targetIndex < 0 || draggedIndex === targetIndex) {
+    return false
+  }
+
+  const [removed] = baseOrder.splice(draggedIndex, 1)
+  baseOrder.splice(targetIndex, 0, removed)
+
+  baseOrder.forEach((item) => {
+    delete item.position
+  })
+
+  preset.prompt_order = promptOrderEntries.map((orderEntry) => {
+    const enabledMap = new Map(
+      (orderEntry.order ?? []).map((item) => [item.identifier, item.enabled !== false])
+    )
+
+    return {
+      character_id: orderEntry.character_id ?? 100000,
+      order: baseOrder.map((item) => ({
+        identifier: item.identifier,
+        enabled: enabledMap.get(item.identifier) ?? item.enabled !== false,
+      })),
+    }
+  })
+
+  return true
 }
 
-function onDragOver(event: DragEvent, item: PromptItem) {
+function finishPromptDragSession() {
+  window.removeEventListener('pointermove', onPromptDragPointerMove)
+  window.removeEventListener('pointerup', onPromptDragPointerUp)
+  window.removeEventListener('pointercancel', onPromptDragPointerUp)
+}
+
+function onPromptDragStart(event: PointerEvent, item: PromptItem) {
+  if (event.button !== 0) return
+
   event.preventDefault()
-  if (!draggedItem.value) return
-  if (draggedItem.value.identifier === item.identifier) return
-  event.dataTransfer!.dropEffect = 'move'
-  dragOverItem.value = item
-  console.log('onDragOver', item.identifier)
-}
+  event.stopPropagation()
 
-function onDragLeave() {
+  draggedItem.value = item
   dragOverItem.value = null
+  isPromptDragging.value = true
+  hasPendingPromptReorder.value = false
+
+  window.addEventListener('pointermove', onPromptDragPointerMove)
+  window.addEventListener('pointerup', onPromptDragPointerUp)
+  window.addEventListener('pointercancel', onPromptDragPointerUp)
 }
 
-async function onDrop(event: DragEvent, targetItem: PromptItem) {
-  event.preventDefault()
-  if (!draggedItem.value || draggedItem.value.identifier === targetItem.identifier) {
+function onPromptDragPointerMove(event: PointerEvent) {
+  if (!isPromptDragging.value || !draggedItem.value) return
+
+  const hoveredElement = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null
+  const targetEntry = hoveredElement?.closest('.entry-item') as HTMLElement | null
+  const targetIdentifier = targetEntry?.dataset.promptId
+  if (!targetIdentifier || targetIdentifier === draggedItem.value.identifier) {
     return
   }
 
   const preset = presetsStore.currentPreset
   if (!preset?.prompts) return
 
-  // 确保 prompt_order 存在
-  if (!preset.prompt_order || preset.prompt_order.length === 0) {
-    preset.prompt_order = [{ character_id: 100000, order: [] }]
+  const targetItem = preset.prompts.find((prompt) => prompt.identifier === targetIdentifier)
+  if (!targetItem) return
+
+  if (reorderPromptItemsInPreset(preset, draggedItem.value.identifier, targetIdentifier)) {
+    dragOverItem.value = targetItem
+    hasPendingPromptReorder.value = true
   }
+}
 
-  // 获取当前 order 数组
-  const currentOrder = preset.prompt_order[0].order ?? []
+async function onPromptDragPointerUp() {
+  if (!isPromptDragging.value) return
 
-  // 创建新的 order 数组（确保响应式更新）
-  const newOrder = [...currentOrder]
+  const preset = presetsStore.currentPreset
 
-  // 获取 dragged 和 target 在 newOrder 中的索引
-  const draggedOrderIndex = newOrder.findIndex(o => o.identifier === draggedItem.value!.identifier)
-  const targetOrderIndex = newOrder.findIndex(o => o.identifier === targetItem.identifier)
+  finishPromptDragSession()
+  isPromptDragging.value = false
 
-  // 如果两个都在 order 中，直接重新排序
-  if (draggedOrderIndex >= 0 && targetOrderIndex >= 0) {
-    const [removed] = newOrder.splice(draggedOrderIndex, 1)
-    newOrder.splice(targetOrderIndex, 0, removed)
-  } else {
-    // 如果其中一个不在 order 中，需要添加到 order 中
-    // 先确保所有 prompts 都在 order 中
-    preset.prompts.forEach((p) => {
-      if (!newOrder.some(o => o.identifier === p.identifier)) {
-        newOrder.push({ identifier: p.identifier, enabled: true })
-      }
-    })
-    // 然后重新排序
-    const newDraggedIndex = newOrder.findIndex(o => o.identifier === draggedItem.value!.identifier)
-    const newTargetIndex = newOrder.findIndex(o => o.identifier === targetItem.identifier)
-    if (newDraggedIndex >= 0 && newTargetIndex >= 0) {
-      const [removed] = newOrder.splice(newDraggedIndex, 1)
-      newOrder.splice(newTargetIndex, 0, removed)
-    }
-  }
-
-  // 清除所有 position 字段，使用数组顺序
-  newOrder.forEach(item => {
-    delete item.position
-  })
-
-  // 更新所有 prompt_order 条目（保持一致性）
-  preset.prompt_order = preset.prompt_order.map((orderEntry) => {
-    const existingOrder = orderEntry.order ?? []
-    return {
-      character_id: orderEntry.character_id ?? 100000,
-      order: newOrder.map((item) => {
-        // 保留原有的 enabled 状态
-        const existing = existingOrder.find((o) => o.identifier === item.identifier)
-        return {
-          identifier: item.identifier,
-          enabled: existing?.enabled ?? true,
-        }
-      }),
-    }
-  })
-
-  await presetsStore.savePreset(preset)
+  const shouldSave = hasPendingPromptReorder.value && !!preset
 
   draggedItem.value = null
   dragOverItem.value = null
+  hasPendingPromptReorder.value = false
+
+  if (!shouldSave || !preset) return
+
+  try {
+    await presetsStore.savePreset(preset)
+  } catch (err) {
+    message.error(`提示词排序保存失败: ${String(err)}`)
+  }
 }
+
+onBeforeUnmount(() => {
+  finishPromptDragSession()
+})
 
 // Get sorted prompt items with position from prompt_order
 const sortedPromptItems = computed(() => {
@@ -960,22 +988,17 @@ watch(() => route.name, async (newName) => {
                 v-for="item in sortedPromptItems"
                 :key="item.identifier"
                 class="entry-item"
+                :data-prompt-id="item.identifier"
                 :class="{
                   'entry-item-dragging': draggedItem?.identifier === item.identifier,
                   'entry-item-drag-over': dragOverItem?.identifier === item.identifier,
                   'entry-selected': presetsStore.currentPromptIdentifier === item.identifier
                 }"
-                @dragover.prevent="(e) => onDragOver(e, item)"
-                @dragenter.prevent
-                @dragleave="onDragLeave"
-                @drop.prevent="(e) => onDrop(e, item)"
               >
                 <!-- Drag handle -->
                 <div
                   class="entry-drag-handle"
-                  draggable="true"
-                  @dragstart="(e) => onDragStart(e, item)"
-                  @dragend="onDragEnd"
+                  @pointerdown="(e) => onPromptDragStart(e, item)"
                 >
                   <NIcon :size="16" class="drag-icon">
                     <ReorderFourOutline />
@@ -1306,6 +1329,7 @@ watch(() => route.name, async (newName) => {
   transition: all 0.2s ease;
   gap: 8px;
   user-select: none;
+  touch-action: none;
 }
 
 .entry-item:hover {
