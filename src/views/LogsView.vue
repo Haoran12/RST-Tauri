@@ -34,6 +34,7 @@ import {
   previewLogCleanup,
   queryLogRecords,
   setLogProtection,
+  generateReadableContent,
   type LogRecordDetail,
   type LogRecordFilter,
   type LogRecordSummary,
@@ -61,6 +62,8 @@ const selectedRecord = ref<LogRecordSummary | null>(null)
 const detail = ref<LogRecordDetail | null>(null)
 const storageSummary = ref<LogStorageSummary | null>(null)
 const streamChunks = ref<StreamChunkDetail[]>([])
+const readableContent = ref<string | null>(null)
+const isReadableLoading = ref(false)
 const currentPage = ref(1)
 const totalCount = ref(0)
 const isLoading = ref(false)
@@ -248,6 +251,7 @@ async function loadRecords(reset = true) {
 async function loadDetail(record: LogRecordSummary) {
   isDetailLoading.value = true
   streamChunks.value = []
+  readableContent.value = null
   try {
     detail.value = await getLogRecordDetail(record.record_ref)
     if (record.record_ref.record_kind === 'llm' && (record.stream_chunk_count ?? 0) > 0) {
@@ -261,6 +265,27 @@ async function loadDetail(record: LogRecordSummary) {
     message.error(String(e))
   } finally {
     isDetailLoading.value = false
+  }
+}
+
+async function loadReadableContent() {
+  if (!selectedRecord.value || selectedRecord.value.record_ref.record_kind !== 'llm') return
+  if (readableContent.value !== null) return // Already loaded
+
+  isReadableLoading.value = true
+  try {
+    readableContent.value = await generateReadableContent(selectedRecord.value.record_ref)
+  } catch (e) {
+    readableContent.value = ''
+    message.error(String(e))
+  } finally {
+    isReadableLoading.value = false
+  }
+}
+
+function handleTabChange(tab: string) {
+  if (tab === 'readable') {
+    void loadReadableContent()
   }
 }
 
@@ -565,7 +590,7 @@ onMounted(refreshAll)
             </div>
 
             <div class="detail-tabs-wrapper">
-              <NTabs type="line" animated class="detail-tabs">
+              <NTabs type="line" animated class="detail-tabs" @update:value="handleTabChange">
                 <NTabPane name="summary" tab="摘要">
                   <NScrollbar class="tab-scroll">
                     <div class="summary-grid">
@@ -689,17 +714,19 @@ onMounted(refreshAll)
                 </NTabPane>
                 <NTabPane v-if="selectedLlm" name="readable" tab="可读内容">
                   <NScrollbar class="tab-scroll">
-                    <div v-if="selectedLlm.reasoning_text" class="reasoning-section">
-                      <div class="section-label">推理过程</div>
-                      <pre class="text-block reasoning-block">{{ selectedLlm.reasoning_text }}</pre>
-                    </div>
-                    <div v-if="selectedLlm.readable_text">
-                      <div class="section-label">对话内容</div>
-                      <pre class="text-block">{{ selectedLlm.readable_text }}</pre>
-                    </div>
-                    <div v-else class="empty-area compact">
-                      <NEmpty description="没有可读内容" />
-                    </div>
+                    <NSpin :show="isReadableLoading">
+                      <div v-if="selectedLlm.reasoning_text" class="reasoning-section">
+                        <div class="section-label">推理过程</div>
+                        <pre class="text-block reasoning-block">{{ selectedLlm.reasoning_text }}</pre>
+                      </div>
+                      <div v-if="readableContent">
+                        <div class="section-label">对话内容</div>
+                        <pre class="text-block">{{ readableContent }}</pre>
+                      </div>
+                      <div v-else-if="!isReadableLoading" class="empty-area compact">
+                        <NEmpty description="没有可读内容" />
+                      </div>
+                    </NSpin>
                   </NScrollbar>
                 </NTabPane>
                 <NTabPane v-if="selectedLlm" name="schema" tab="Schema">

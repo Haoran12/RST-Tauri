@@ -326,6 +326,30 @@ pub async fn get_log_record_detail(
 }
 
 #[tauri::command]
+pub async fn generate_readable_content(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    record_ref: LogRecordRef,
+) -> Result<String, String> {
+    if record_ref.record_kind != "llm" {
+        return Err("Only LLM logs support readable content generation".to_string());
+    }
+
+    let pool = pool_for_source(&app, state.inner(), &record_ref.source).await?;
+    let llm = get_llm_detail(&pool, &record_ref.id)
+        .await?
+        .ok_or_else(|| "LLM log not found".to_string())?;
+
+    // Generate readable content from request and response
+    crate::logging::llm_logger::generate_readable_from_log(
+        &llm.request_json,
+        &llm.response_json,
+        llm.reasoning_text.as_deref(),
+        llm.assembled_text.as_deref(),
+    )
+}
+
+#[tauri::command]
 pub async fn get_stream_chunks(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,

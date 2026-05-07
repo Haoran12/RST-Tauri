@@ -597,6 +597,90 @@ impl LlmCallLogger {
     }
 }
 
+/// Generate readable content from log data (for on-demand generation)
+///
+/// This function is called when the user clicks "可读内容" in the UI.
+/// It generates readable text from the stored request/response JSON.
+pub fn generate_readable_from_log(
+    request_json: &serde_json::Value,
+    response_json: &Option<serde_json::Value>,
+    reasoning_text: Option<&str>,
+    assembled_text: Option<&str>,
+) -> Result<String, String> {
+    let mut parts = Vec::new();
+
+    // Add reasoning text if present
+    if let Some(reasoning) = reasoning_text {
+        if !reasoning.trim().is_empty() {
+            parts.push(format!("REASONING >\n{}", format_readable_content(reasoning)));
+        }
+    }
+
+    // Extract system prompt if present (for providers that use separate system field)
+    if let Some(system) = request_json.get("system") {
+        let system_text = extract_text_value(system);
+        if !system_text.trim().is_empty() {
+            parts.push(format!("SYSTEM >\n{}", format_readable_content(&system_text)));
+        }
+    }
+
+    // Extract messages from request body (for providers with messages in body)
+    let messages = request_json
+        .get("body")
+        .and_then(|b| b.get("messages"))
+        .or_else(|| request_json.get("messages"));
+
+    if let Some(messages) = messages.and_then(|m| m.as_array()) {
+        for msg in messages {
+            if let (Some(role), Some(content)) =
+                (msg.get("role").and_then(|r| r.as_str()), msg.get("content"))
+            {
+                let content_text = extract_text_value(content);
+                if content_text.trim().is_empty() {
+                    continue;
+                }
+
+                let prefix = match role.to_lowercase().as_str() {
+                    "system" => "SYSTEM >",
+                    "user" => "USER >",
+                    "assistant" => "ASSISTANT >",
+                    _ => continue, // Skip unknown roles
+                };
+
+                parts.push(format!("{}\n{}", prefix, format_readable_content(&content_text)));
+            }
+        }
+    }
+
+    // Try to get response text
+    let response_text = if let Some(response) = response_json {
+        // First try assembled_text (for streaming responses)
+        if let Some(assembled) = assembled_text {
+            if !assembled.trim().is_empty() {
+                Some(assembled.to_string())
+            } else {
+                extract_text_from_response(response)
+            }
+        } else {
+            extract_text_from_response(response)
+        }
+    } else {
+        assembled_text.map(|s| s.to_string())
+    };
+
+    if let Some(text) = response_text {
+        if !text.trim().is_empty() {
+            parts.push(format!("ASSISTANT >\n{}", format_readable_content(&text)));
+        }
+    }
+
+    if parts.is_empty() {
+        Err("No readable content could be generated from this log".to_string())
+    } else {
+        Ok(parts.join("\n\n---\n\n"))
+    }
+}
+
 fn row_to_log(row: &sqlx::sqlite::SqliteRow) -> LlmCallLog {
     use sqlx::Row;
     LlmCallLog {

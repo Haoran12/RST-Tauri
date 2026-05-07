@@ -221,6 +221,10 @@ export async function getLogRecordDetail(recordRef: LogRecordRef) {
   return await invoke<LogRecordDetail>('get_log_record_detail', { recordRef })
 }
 
+export async function generateReadableContent(recordRef: LogRecordRef) {
+  return await invoke<string>('generate_readable_content', { recordRef })
+}
+
 export async function getStreamChunks(requestId: string, source: LogSourceRef, page?: LogPageInput) {
   return await invoke<StreamChunkPage>('get_stream_chunks', { requestId, source, page })
 }
