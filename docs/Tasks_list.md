@@ -360,3 +360,4 @@
 | 2026-05-07 | 修复 ST 会话流式发送路径：补充 Tauri event listen/unlisten capability，发送 store 等待真实 stream end 后再结束生成状态，并用响应式替换方式更新 assistant 消息气泡内容与滚动位置 |
 | 2026-05-07 | 修复 ST 聊天响应为空与配置选择问题：provider 流式请求补 `stream` 字段并改用带缓冲 SSE 解码，ST 会话页可直接选择当前预设 / 主 API，发送时尊重预设流式开关，运行时按当前 API 契约过滤和近似映射采样参数 |
 | 2026-05-07 | 将 `E:\AIPlay\cards\夏瑾DS预设v0.40.json` 对齐为本应用预设实际标准：文档改为 ST 扁平 `PresetFile` 主标准，预设编辑页补齐顶层 ST 字段与 PromptItem 注入元数据编辑，运行时改为按 `prompts + prompt_order + chatHistory` 前后切分装配 system prompt 与消息链 |
+| 2026-05-07 | 修复预设 `ContextList` 提示词条目拖拽失效：确认 `prompt_order` 数据层无禁排约束后，将拖拽源收敛回拖拽手柄，恢复交互区事件隔离，并在列表项容器上显式处理 `dragover/drop`，避免整卡拖拽导致排序无法落到目标条目 |

@@ -560,9 +560,9 @@ function onDragStart(event: DragEvent, item: PromptItem) {
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', item.identifier)
-    // 设置拖拽图像为整个条目
-    const target = event.target as HTMLElement
-    const entryItem = target.closest('.entry-item') as HTMLElement
+    // 使用整个卡片作为拖拽预览，避免只拖出一个小图标。
+    const target = event.target as HTMLElement | null
+    const entryItem = target?.closest('.entry-item') as HTMLElement | null
     if (entryItem) {
       event.dataTransfer.setDragImage(entryItem, 0, 0)
     }
@@ -965,12 +965,12 @@ watch(() => route.name, async (newName) => {
                   'entry-item-drag-over': dragOverItem?.identifier === item.identifier,
                   'entry-selected': presetsStore.currentPromptIdentifier === item.identifier
                 }"
-                @dragover="(e) => onDragOver(e, item)"
+                @dragover.prevent="(e) => onDragOver(e, item)"
                 @dragenter.prevent
                 @dragleave="onDragLeave"
-                @drop="(e) => onDrop(e, item)"
+                @drop.prevent="(e) => onDrop(e, item)"
               >
-                <!-- Drag handle - draggable element -->
+                <!-- Drag handle -->
                 <div
                   class="entry-drag-handle"
                   draggable="true"
