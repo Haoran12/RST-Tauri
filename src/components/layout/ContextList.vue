@@ -791,7 +791,7 @@ watch(() => route.name, async (newName) => {
           <template #icon>
             <NIcon><AddOutline /></NIcon>
           </template>
-          新建
+          新建世界书
         </NButton>
         <NPopconfirm
           v-if="worldbooksStore.currentWorldbookId"
@@ -820,7 +820,7 @@ watch(() => route.name, async (newName) => {
             <template #icon>
               <NIcon><AddOutline /></NIcon>
             </template>
-            添加
+            添加条目
           </NButton>
         </div>
 
@@ -933,7 +933,7 @@ watch(() => route.name, async (newName) => {
           <template #icon>
             <NIcon><AddOutline /></NIcon>
           </template>
-          新建
+          新建预设
         </NButton>
         <NPopconfirm
           v-if="presetsStore.currentPreset && presetsStore.currentPreset.name !== 'Default'"
@@ -962,7 +962,7 @@ watch(() => route.name, async (newName) => {
             <template #icon>
               <NIcon><AddOutline /></NIcon>
             </template>
-            新建
+            添加条目
           </NButton>
         </div>
 
@@ -1318,22 +1318,28 @@ watch(() => route.name, async (newName) => {
 .entry-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 8px;
+  padding: 4px;
 }
 
 .entry-item {
   display: flex;
   align-items: center;
-  padding: 8px 8px;
-  border-radius: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
   transition: all 0.2s ease;
-  gap: 8px;
+  gap: 10px;
   user-select: none;
   touch-action: none;
+  background-color: var(--n-color);
+  border: 1px solid var(--color-border-subtle, #e0e0e6);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .entry-item:hover {
   background-color: var(--n-color-hover);
+  border-color: var(--color-border, #d0d0d6);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
 
 .entry-item-dragging {
