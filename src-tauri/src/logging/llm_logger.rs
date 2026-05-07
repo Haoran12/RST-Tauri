@@ -31,7 +31,6 @@ pub struct LlmCallLog {
     pub response_json: Option<serde_json::Value>,
     pub reasoning_text: Option<String>,
     pub assembled_text: Option<String>,
-    pub readable_text: Option<String>,
     pub status: String,
     pub latency_ms: Option<u64>,
     pub token_usage: Option<serde_json::Value>,
@@ -114,8 +113,8 @@ impl LlmCallLogger {
                 request_json TEXT NOT NULL,
                 schema_json TEXT,
                 response_json TEXT,
+                reasoning_text TEXT,
                 assembled_text TEXT,
-                readable_text TEXT,
                 status TEXT NOT NULL,
                 latency_ms INTEGER,
                 token_usage TEXT,
@@ -137,6 +136,8 @@ impl LlmCallLogger {
         self.migrate_add_column("redaction_applied", "INTEGER DEFAULT 0").await?;
         self.migrate_add_column("request_url", "TEXT").await?;
         self.migrate_add_column("reasoning_text", "TEXT").await?;
+        // Migration: drop readable_text column if it exists (no longer stored)
+        self.migrate_drop_column("readable_text").await?;
 
         // Create indexes
         sqlx::query(
@@ -191,6 +192,29 @@ impl LlmCallLogger {
                 .execute(&self.pool)
                 .await
                 .map_err(|e| format!("Failed to add column {}: {}", column, e))?;
+        }
+
+        Ok(())
+    }
+
+    /// Drop a column if it exists (SQLite 3.35.0+)
+    async fn migrate_drop_column(&self, column: &str) -> Result<(), String> {
+        use sqlx::Row;
+        let row = sqlx::query(
+            "SELECT COUNT(*) AS count FROM pragma_table_info('llm_call_logs') WHERE name = ?",
+        )
+        .bind(column)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to check column existence: {}", e))?;
+        let has_column: bool = row.get::<i64, _>("count") != 0;
+
+        if has_column {
+            let sql = format!("ALTER TABLE llm_call_logs DROP COLUMN {}", column);
+            sqlx::query(&sql)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| format!("Failed to drop column {}: {}", column, e))?;
         }
 
         Ok(())
@@ -334,7 +358,6 @@ impl LlmCallLogger {
 
             let (response_json, response_redacted) = redact_sensitive_value(response);
             let assembled_text = extract_text_from_response(&response_json);
-            let readable_text = assemble_readable_text(&call.request_json, &response_json);
             let redaction_applied = call.redaction_applied || response_redacted;
 
             tracing::info!(
@@ -348,7 +371,7 @@ impl LlmCallLogger {
                     request_id, mode, world_id, session_id, scene_turn_id, trace_id,
                     character_id, llm_node, api_config_id, runtime_config_snapshot_id,
                     world_rules_snapshot_id, provider, model, call_type, request_url, request_json,
-                    schema_json, response_json, reasoning_text, assembled_text, readable_text, status,
+                    schema_json, response_json, reasoning_text, assembled_text, status,
                     latency_ms, token_usage, retry_count, redaction_applied, created_at, completed_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
@@ -373,7 +396,6 @@ impl LlmCallLogger {
             .bind(serde_json::to_string(&response_json).ok())
             .bind(reasoning_text)
             .bind(&assembled_text)
-            .bind(&readable_text)
             .bind("success")
             .bind(latency_ms as i64)
             .bind(token_usage.as_ref().map(|t| serde_json::to_string(t).unwrap_or_default()))
@@ -428,13 +450,6 @@ impl LlmCallLogger {
                 Some(assembled_content.to_string())
             };
 
-            // Build readable_text using the request and assembled content
-            let readable_text = build_readable_text_from_content(
-                &call.request_json,
-                assembled_content,
-                reasoning_text,
-            );
-
             let redaction_applied = call.redaction_applied || response_redacted;
 
             tracing::info!(
@@ -448,7 +463,7 @@ impl LlmCallLogger {
                     request_id, mode, world_id, session_id, scene_turn_id, trace_id,
                     character_id, llm_node, api_config_id, runtime_config_snapshot_id,
                     world_rules_snapshot_id, provider, model, call_type, request_url, request_json,
-                    schema_json, response_json, reasoning_text, assembled_text, readable_text, status,
+                    schema_json, response_json, reasoning_text, assembled_text, status,
                     latency_ms, token_usage, retry_count, redaction_applied, created_at, completed_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
@@ -473,7 +488,6 @@ impl LlmCallLogger {
             .bind(serde_json::to_string(&response_json).ok())
             .bind(reasoning_text)
             .bind(&assembled_text)
-            .bind(&readable_text)
             .bind("success")
             .bind(latency_ms as i64)
             .bind(token_usage.as_ref().map(|t| serde_json::to_string(t).unwrap_or_default()))
@@ -776,7 +790,6 @@ fn row_to_log(row: &sqlx::sqlite::SqliteRow) -> LlmCallLog {
             .and_then(|s| serde_json::from_str(s).ok()),
         reasoning_text: row.get("reasoning_text"),
         assembled_text: row.get("assembled_text"),
-        readable_text: row.get("readable_text"),
         status: row.get("status"),
         latency_ms: row.get::<Option<i64>, _>("latency_ms").map(|v| v as u64),
         token_usage: row

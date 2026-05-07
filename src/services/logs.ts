@@ -89,7 +89,6 @@ export interface LlmLogDetail {
   response_json?: unknown
   reasoning_text?: string | null
   assembled_text?: string | null
-  readable_text?: string | null
   status: string
   latency_ms?: number | null
   token_usage?: unknown
