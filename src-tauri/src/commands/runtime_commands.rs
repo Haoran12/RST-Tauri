@@ -2424,8 +2424,6 @@ pub struct PromptPreviewOutput {
     pub system_prompt: String,
     /// 各预设条目预览
     pub prompt_items: Vec<PromptPreviewItem>,
-    /// 聊天历史消息
-    pub chat_messages: Vec<AssembledMessage>,
     /// 世界书注入结果
     pub world_info_result: Option<WorldInfoInjectionResult>,
     /// 总预估 token 数
@@ -2668,12 +2666,12 @@ pub async fn preview_st_prompt(
                     let estimated_tokens = estimate_tokens(&content);
 
                     // 系统提示词部分（chatHistory 之前）
-                    if prompt.identifier == "chatHistory" {
-                        // 不加入预览，单独处理聊天历史
-                    } else if prompt.system_prompt && prompt.identifier != "dialogueExamples" {
-                        if !content.is_empty() {
-                            system_prompt_parts.push(content.clone());
-                        }
+                    if prompt.identifier != "chatHistory"
+                        && prompt.identifier != "dialogueExamples"
+                        && prompt.system_prompt
+                        && !content.is_empty()
+                    {
+                        system_prompt_parts.push(content.clone());
                     }
 
                     prompt_items.push(PromptPreviewItem {
@@ -2691,43 +2689,15 @@ pub async fn preview_st_prompt(
         }
     }
 
-    // 9. 构建聊天历史消息
-    let chat_messages: Vec<AssembledMessage> = context
-        .session
-        .messages
-        .iter()
-        .map(|m| AssembledMessage {
-            role: m.role.clone(),
-            content: m.content.clone(),
-            attachments: m
-                .attachments
-                .iter()
-                .map(|a| AssembledAttachmentRef {
-                    attachment_id: a.attachment_id.clone(),
-                    kind: match a.kind {
-                        ChatAttachmentKind::Image => "image".to_string(),
-                        ChatAttachmentKind::Pdf => "pdf".to_string(),
-                    },
-                    mime_type: a.mime_type.clone(),
-                    filename: a.filename.clone(),
-                    size_bytes: a.size_bytes,
-                })
-                .collect(),
-        })
-        .collect();
-    let chat_history_tokens: i32 = chat_messages.iter().map(|m| estimate_tokens(&m.content)).sum();
-
-    // 10. 计算总 token 数
+    // 9. 计算总 token 数
     let total_estimated_tokens = prompt_items
         .iter()
         .map(|p| p.estimated_tokens)
-        .sum::<i32>()
-        + chat_history_tokens;
+        .sum();
 
     Ok(PromptPreviewOutput {
         system_prompt: system_prompt_parts.join("\n\n"),
         prompt_items,
-        chat_messages,
         world_info_result,
         total_estimated_tokens,
     })
@@ -2813,7 +2783,37 @@ fn resolve_prompt_content_for_preview(
             .as_ref()
             .map(|c| c.data.mes_example.clone())
             .unwrap_or_default(),
-        "chatHistory" => String::new(), // 聊天历史单独处理
+        "chatHistory" => {
+            // 格式化聊天历史
+            let char_name = context
+                .character
+                .as_ref()
+                .map(|c| c.data.name.as_str())
+                .unwrap_or("AI");
+            let user_name = context
+                .session
+                .chat_metadata
+                .user_persona
+                .as_ref()
+                .map(|p| p.name.as_str())
+                .filter(|n| !n.is_empty())
+                .unwrap_or("User");
+
+            context
+                .session
+                .messages
+                .iter()
+                .map(|m| {
+                    let name = match m.role.as_str() {
+                        "user" => user_name,
+                        "assistant" => char_name,
+                        _ => "System",
+                    };
+                    format!("{}: {}", name, m.content)
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        }
         _ => substitute_params(&prompt.content, &macro_context),
     }
 }

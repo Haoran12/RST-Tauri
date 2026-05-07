@@ -268,7 +268,6 @@ export interface PromptPreviewItem {
 export interface PromptPreviewOutput {
   system_prompt: string;
   prompt_items: PromptPreviewItem[];
-  chat_messages: AssembledMessage[];
   world_info_result: WorldInfoInjectionResult | null;
   total_estimated_tokens: number;
 }

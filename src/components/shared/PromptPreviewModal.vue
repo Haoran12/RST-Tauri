@@ -4,13 +4,11 @@ import {
   NCollapse,
   NCollapseItem,
   NEmpty,
-  NIcon,
   NModal,
   NScrollbar,
   NSpin,
   NText,
 } from 'naive-ui'
-import { ChevronDownOutline } from '@vicons/ionicons5'
 import type { PromptPreviewOutput } from '@/types/runtime'
 import { previewSTPrompt } from '@/services/runtime'
 import type { AssembleRequestInput } from '@/types/runtime'
@@ -33,10 +31,8 @@ const totalTokens = computed(() => previewData.value?.total_estimated_tokens ?? 
 
 const promptItems = computed(() => previewData.value?.prompt_items ?? [])
 
-const chatMessages = computed(() => previewData.value?.chat_messages ?? [])
-
 const hasContent = computed(() => {
-  return promptItems.value.length > 0 || chatMessages.value.length > 0
+  return promptItems.value.length > 0
 })
 
 async function loadPreview() {
@@ -159,32 +155,6 @@ watch(() => props.show, (show) => {
                   </div>
                 </NCollapseItem>
               </NCollapse>
-
-              <!-- 聊天历史 -->
-              <div v-if="chatMessages.length > 0" class="chat-history-section">
-                <div class="section-title">
-                  <NIcon :component="ChevronDownOutline" />
-                  <span>聊天历史 ({{ chatMessages.length }} 条消息)</span>
-                </div>
-                <div class="chat-messages">
-                  <div
-                    v-for="(msg, index) in chatMessages"
-                    :key="index"
-                    class="chat-message"
-                    :class="msg.role"
-                  >
-                    <div class="message-header">
-                      <span
-                        class="message-role"
-                        :style="{ color: getRoleColor(msg.role) }"
-                      >
-                        {{ getRoleLabel(msg.role) }}
-                      </span>
-                    </div>
-                    <div class="message-content">{{ msg.content }}</div>
-                  </div>
-                </div>
-              </div>
             </div>
           </NScrollbar>
         </template>
@@ -272,62 +242,6 @@ watch(() => props.show, (show) => {
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 300px;
-  overflow-y: auto;
-}
-
-.chat-history-section {
-  margin-top: 16px;
-  border-top: 1px solid var(--n-border-color);
-  padding-top: 16px;
-}
-
-.section-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 500;
-  margin-bottom: 12px;
-  color: var(--n-text-color-2);
-}
-
-.chat-messages {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.chat-message {
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: var(--n-color-hover);
-}
-
-.chat-message.user {
-  background: color-mix(in srgb, var(--n-success-color) 8%, var(--n-color-hover));
-}
-
-.chat-message.assistant {
-  background: color-mix(in srgb, var(--n-warning-color) 8%, var(--n-color-hover));
-}
-
-.chat-message.system {
-  background: color-mix(in srgb, var(--n-info-color) 8%, var(--n-color-hover));
-}
-
-.message-header {
-  margin-bottom: 4px;
-}
-
-.message-role {
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.message-content {
-  font-size: 13px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 150px;
   overflow-y: auto;
 }
 </style>
