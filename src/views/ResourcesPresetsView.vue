@@ -893,14 +893,18 @@ onBeforeUnmount(() => {
           <NSelect v-model:value="editRole" :options="roleOptions" placeholder="选择角色" />
         </NFormItem>
         <NFormItem label="内容">
+          <template v-if="editIsReadonlyContent">
+            <div class="readonly-content-notice">
+              此条目内容由系统运行时动态构建，不可编辑
+            </div>
+          </template>
           <NInput
+            v-else
             v-model:value="editContent"
             type="textarea"
             placeholder="提示词内容"
             :autosize="{ minRows: 6, maxRows: 16 }"
-            :disabled="editIsReadonlyContent"
           />
-          <span v-if="editIsReadonlyContent" class="readonly-hint">此条目内容由系统运行时动态构建，不可编辑</span>
         </NFormItem>
         <div class="form-grid">
           <NFormItem label="System Prompt">
@@ -1104,9 +1108,12 @@ onBeforeUnmount(() => {
   margin-top: 8px;
 }
 
-.readonly-hint {
-  font-size: 12px;
+.readonly-content-notice {
+  padding: 12px 16px;
+  background: rgba(248, 250, 252, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  font-size: 13px;
   color: var(--color-text-secondary, #6b7280);
-  margin-top: 4px;
 }
 </style>
