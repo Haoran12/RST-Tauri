@@ -15,6 +15,7 @@ import type {
   ReactionWindowEntry,
   LocationTreeNode,
   LocationNodeSummary,
+  LocationNodeDetailDto,
   CharacterRecordSummary,
 } from '@/types/agent/worldEditor'
 import type { KnowledgeEntry, KnowledgeListItem } from '@/types/agent/knowledge'
@@ -356,9 +357,6 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
   // ===== Knowledge Lazy Loading =====
 
   async function loadKnowledgeDetail(worldId: string, knowledgeId: string): Promise<KnowledgeEntry | null> {
-    if (knowledgeLoadedIds.value.has(knowledgeId)) {
-      return null
-    }
     knowledgeLoadingIds.value.add(knowledgeId)
     try {
       const entry = await invoke<KnowledgeEntry>('get_knowledge_entry_detail', {
@@ -381,6 +379,18 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
       return characters.find((character) => character.character_id === characterId) ?? null
     } catch (e) {
       console.error('Failed to load character detail:', e)
+      return null
+    }
+  }
+
+  async function loadLocationDetail(worldId: string, locationId: string): Promise<LocationNodeDetailDto | null> {
+    try {
+      return await invoke<LocationNodeDetailDto>('get_location_node_detail', {
+        worldId,
+        locationId,
+      })
+    } catch (e) {
+      console.error('Failed to load location detail:', e)
       return null
     }
   }
@@ -496,6 +506,7 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
     clearValidationResult,
     clearImpactSummary,
     loadKnowledgeDetail,
+    loadLocationDetail,
     loadCharacterDetail,
     updateLocationParent,
     loadTraceEvents,

@@ -75,44 +75,24 @@ const selectedLocationKeys = computed(() => {
     : []
 })
 
-function handleLocationSelect(keys: string[]) {
+async function handleLocationSelect(keys: string[]) {
   const id = keys[0] ?? null
   if (id) {
     editorStore.selectEntity('location', id)
-    // Init draft with location data
-    const loc = editorStore.locationList.find(l => l.location_id === id)
+    if (!worldId.value) return
+    const loc = await editorStore.loadLocationDetail(worldId.value, id)
     if (loc) {
       editorStore.initDraft('location', id, { ...loc }, false)
     }
   }
 }
 
-function handleKnowledgeSelect(id: string) {
+async function handleKnowledgeSelect(id: string) {
   editorStore.selectEntity('knowledge', id)
-  // For existing knowledge, we would normally load detail then init draft
-  const knowledge = editorStore.knowledgeList.find(k => k.knowledge_id === id)
+  if (!worldId.value) return
+  const knowledge = await editorStore.loadKnowledgeDetail(worldId.value, id)
   if (knowledge) {
-    // Create a minimal draft from list data; full detail would be loaded lazily
-    editorStore.initDraft('knowledge', id, {
-      knowledge_id: knowledge.knowledge_id,
-      kind: knowledge.kind,
-      subject_type: knowledge.subject_type,
-      subject_id: knowledge.subject_id,
-      facet_type: knowledge.facet_type,
-      content: { summary_text: knowledge.summary_text },
-      apparent_content: null,
-      access_policy: { known_by: [], scope: [{ type: 'Public' }], conditions: [] },
-      subject_awareness: { kind: 'Aware' },
-      metadata: { created_at: knowledge.updated_at, updated_at: knowledge.updated_at },
-      valid_from: null,
-      valid_until: null,
-      source_session_id: null,
-      source_scene_turn_id: null,
-      derived_from_event_id: null,
-      schema_version: '0.1',
-      created_at: knowledge.updated_at,
-      updated_at: knowledge.updated_at,
-    } as any, false)
+    editorStore.initDraft('knowledge', id, { ...knowledge }, false)
   }
 }
 

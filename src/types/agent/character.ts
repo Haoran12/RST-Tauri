@@ -1,57 +1,27 @@
-// Agent Character Types
-// Corresponds to Rust types in src-tauri/src/agent/models/character.rs
+export type ManaAttribute = 'Metal' | 'Wood' | 'Water' | 'Fire' | 'Earth' | 'Wind'
 
-/**
- * Mana expression tendency
- */
 export type ManaExpressionTendency = 'Inward' | 'Neutral' | 'Expressive'
 
-/**
- * Injury severity
- */
-export type InjurySeverity = 'None' | 'Minor' | 'Moderate' | 'Severe' | 'Critical' | 'Crippling'
+export type ManaExpressionMode = 'Sealed' | 'Suppressed' | 'Natural' | 'Released' | 'Dominating'
 
-/**
- * Injury state
- */
-export interface InjuryState {
-  injury_id: string
-  body_part: string
-  severity: InjurySeverity
-  description: string
-  received_at: string
-  expected_recovery_turns?: number
-}
+export type ManaPresenceRadiusTier = 'SelfOnly' | 'Touch' | 'Close' | 'Room' | 'Area' | 'Scene'
 
-/**
- * Environmental exposure state
- */
-export interface EnvironmentalExposure {
-  cold_accumulation: number
-  heat_accumulation: number
-  toxin_accumulation: number
-  mana_drain_accumulation: number
-  last_exposure_turn: string | null
-}
+export type ManaExpressionIntentionality = 'Intentional' | 'Unintentional' | 'Forced'
 
-/**
- * Temporary character state
- */
-export interface TemporaryCharacterState {
-  injuries: InjuryState[]
-  fatigue: number
-  pain_load: number
-  mana_reserve: number | null
-  active_conditions: string[]
-  environmental_exposure: EnvironmentalExposure
-  position_in_scene: unknown | null
-  active_skill_cooldowns: Record<string, number>
-  temporary_modifiers: unknown[]
-}
+export type InjurySeverity = 'Bruise' | 'Light' | 'Moderate' | 'Severe' | 'Critical'
 
-/**
- * Base attributes
- */
+export type SizeClass = 'Tiny' | 'Small' | 'Humanoid' | 'Large' | 'Huge' | 'Kaiju'
+
+export type StateDomain =
+  | 'Body'
+  | 'Resource'
+  | 'Position'
+  | 'Perception'
+  | 'Mind'
+  | 'Soul'
+  | 'Scene'
+  | 'KnowledgeReveal'
+
 export interface BaseAttributes {
   physical: number
   agility: number
@@ -61,100 +31,145 @@ export interface BaseAttributes {
   soul_strength: number
 }
 
-/**
- * Baseline body profile
- */
-export interface BaselineBodyProfile {
-  height_cm: number
-  weight_kg: number
-  build: string
-  distinctive_features: string[]
-  sensory_baseline: {
-    vision: number
-    hearing: number
-    smell: number
-    touch: number
-    proprioception: number
-    mana: number
-  }
+export interface ManaSenseBaseline {
+  acuity: number
+  overload_threshold: number
+  attribute_bias: ManaAttribute | null
 }
 
-/**
- * Character record
- */
+export interface BaselineBodyProfile {
+  species: string
+  comfort_temperature_range: [number, number]
+  mana_sense_baseline: ManaSenseBaseline
+  mana_attribute_affinity: ManaAttribute[]
+  size_class: SizeClass
+}
+
+export interface InjuryState {
+  injury_id: string
+  body_region: string
+  severity: InjurySeverity
+  effect_tags: string[]
+  source_event_id: string | null
+}
+
+export interface ManaExpressionState {
+  mode: ManaExpressionMode
+  display_ratio: number
+  pressure_ratio: number
+  radius_tier: ManaPresenceRadiusTier
+  intentionality: ManaExpressionIntentionality
+  source_id: string | null
+  expires_at_turn: string | null
+}
+
+export interface ManaSuppressionState {
+  source_id: string
+  multiplier: number
+  expires_at_turn: string | null
+}
+
+export interface EnvironmentalExposureState {
+  cold_strain: number
+  heat_strain: number
+  respiration_strain: number
+  last_updated_turn: string | null
+}
+
+export interface ConditionState {
+  condition_id: string
+  domain: StateDomain
+  condition_kind: string
+  intensity: number
+  source_id: string | null
+}
+
+export interface CooldownState {
+  ability_id: string
+  remaining_turns: number
+}
+
+export interface TemporaryCharacterState {
+  injuries: InjuryState[]
+  fatigue: number
+  pain_load: number
+  mana_reserve_current: number | null
+  mana_expression: ManaExpressionState
+  mana_suppression: ManaSuppressionState[]
+  environmental_exposure: EnvironmentalExposureState
+  active_conditions: ConditionState[]
+  cooldowns: CooldownState[]
+  transient_signals: string[]
+  schema_version: string
+}
+
 export interface CharacterRecord {
   character_id: string
   base_attributes: BaseAttributes
   baseline_body_profile: BaselineBodyProfile
   mana_expression_tendency: ManaExpressionTendency
   mana_expression_tendency_factor_override: number | null
-  mind_model_card_knowledge_id: string | null
+  mind_model_card_knowledge_id: string
   temporary_state: TemporaryCharacterState
   schema_version: string
   created_at: string
   updated_at: string
 }
 
-/**
- * Create a default base attributes
- */
 export function createDefaultBaseAttributes(): BaseAttributes {
   return {
-    physical: 10,
-    agility: 10,
-    endurance: 10,
-    insight: 10,
+    physical: 100,
+    agility: 100,
+    endurance: 100,
+    insight: 100,
     mana_power: 0,
-    soul_strength: 10,
+    soul_strength: 100,
   }
 }
 
-/**
- * Create a default baseline body profile
- */
 export function createDefaultBaselineBodyProfile(): BaselineBodyProfile {
   return {
-    height_cm: 170,
-    weight_kg: 65,
-    build: 'average',
-    distinctive_features: [],
-    sensory_baseline: {
-      vision: 1.0,
-      hearing: 1.0,
-      smell: 1.0,
-      touch: 1.0,
-      proprioception: 1.0,
-      mana: 0.5,
+    species: '人类',
+    comfort_temperature_range: [18, 26],
+    mana_sense_baseline: {
+      acuity: 0.5,
+      overload_threshold: 1.0,
+      attribute_bias: null,
     },
+    mana_attribute_affinity: [],
+    size_class: 'Humanoid',
   }
 }
 
-/**
- * Create a default temporary character state
- */
 export function createDefaultTemporaryState(): TemporaryCharacterState {
   return {
     injuries: [],
     fatigue: 0,
     pain_load: 0,
-    mana_reserve: null,
-    active_conditions: [],
-    environmental_exposure: {
-      cold_accumulation: 0,
-      heat_accumulation: 0,
-      toxin_accumulation: 0,
-      mana_drain_accumulation: 0,
-      last_exposure_turn: null,
+    mana_reserve_current: null,
+    mana_expression: {
+      mode: 'Natural',
+      display_ratio: 1,
+      pressure_ratio: 1,
+      radius_tier: 'Close',
+      intentionality: 'Intentional',
+      source_id: null,
+      expires_at_turn: null,
     },
-    position_in_scene: null,
-    active_skill_cooldowns: {},
-    temporary_modifiers: [],
+    mana_suppression: [],
+    environmental_exposure: {
+      cold_strain: 0,
+      heat_strain: 0,
+      respiration_strain: 0,
+      last_updated_turn: null,
+    },
+    active_conditions: [],
+    cooldowns: [],
+    transient_signals: [],
+    schema_version: '0.1',
   }
 }
 
-/**
- * Create a new character record
- */
 export function createCharacterRecord(
   characterId: string,
   overrides?: Partial<CharacterRecord>
@@ -166,7 +181,7 @@ export function createCharacterRecord(
     baseline_body_profile: createDefaultBaselineBodyProfile(),
     mana_expression_tendency: 'Neutral',
     mana_expression_tendency_factor_override: null,
-    mind_model_card_knowledge_id: null,
+    mind_model_card_knowledge_id: '',
     temporary_state: createDefaultTemporaryState(),
     schema_version: '0.1',
     created_at: now,

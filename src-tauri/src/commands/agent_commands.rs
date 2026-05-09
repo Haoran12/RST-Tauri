@@ -9,6 +9,9 @@ use crate::agent::models::session::{
     AgentSession, ProvisionalSessionTruth, SessionTurn, TurnRole, WorldMainlineCursor,
 };
 use crate::agent::models::{RuntimeTurnCanonStatus, SessionTurnCanonStatus};
+use crate::agent::world_editor::commit::WorldEditorChanges;
+use crate::agent::world_editor::validator::ValidationSeverity;
+use crate::agent::world_editor::{WorldEditorCommitter, WorldEditorValidator};
 use crate::agent::runtime::{AgentRuntime, TurnResult};
 use crate::agent::simulation::canon_status_manager::{PromotionEvaluationResult, PromotionResult};
 use crate::agent::simulation::provisional_truth_manager::{
@@ -20,7 +23,7 @@ use crate::agent::simulation::{
 use crate::agent::storage::agent_store::AgentStore;
 use crate::storage::paths::{app_data_root, safe_join, validate_path_component};
 use crate::AppState;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::Row;
@@ -483,20 +486,14 @@ pub async fn get_world_editor_snapshot(
 
 #[tauri::command]
 pub async fn validate_world_editor_patch(
-    _app: AppHandle,
-    _state: State<'_, Arc<AppState>>,
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
     world_id: String,
     patch: FrontendWorldEditorPatch,
 ) -> Result<WorldEditorValidationResultDto, String> {
     let mut blockers = Vec::new();
     let mut warnings = Vec::new();
-    let mut info = vec![WorldEditorValidationItemDto {
-        severity: "info".to_string(),
-        code: "editor_prototype".to_string(),
-        message: "当前 World Editor 前端原型已恢复可打开；后端 validation 仍为最小接线。".to_string(),
-        field_path: None,
-        entity_id: None,
-    }];
+    let mut info = Vec::new();
 
     if patch.world_id != world_id {
         blockers.push(WorldEditorValidationItemDto {
@@ -508,25 +505,32 @@ pub async fn validate_world_editor_patch(
         });
     }
 
-    for operation in &patch.operations {
-        match operation.kind.as_str() {
-            "UpsertKnowledgeEntry" | "UpsertCharacterRecord" | "UpsertLocationNode" | "UpsertWorldRules" => {}
-            "DeleteKnowledgeEntry" | "DeleteCharacterRecord" | "DeleteLocationNode" => {}
-            other => warnings.push(WorldEditorValidationItemDto {
-                severity: "warning".to_string(),
-                code: "unsupported_operation".to_string(),
-                message: format!("当前最小后端接线尚未实现操作 {}", other),
-                field_path: Some("operations".to_string()),
-                entity_id: None,
-            }),
+    let store = get_agent_store(&app, state.inner(), &world_id).await?;
+    let pool = store.pool().clone();
+
+    match build_world_editor_changes(&pool, &patch).await {
+        Ok(changes) => {
+            append_validation_items(
+                &mut blockers,
+                &mut warnings,
+                &mut info,
+                validate_world_editor_changes(&changes)?,
+            );
         }
+        Err(error) => blockers.push(WorldEditorValidationItemDto {
+            severity: "blocker".to_string(),
+            code: "invalid_patch".to_string(),
+            message: error,
+            field_path: Some("operations".to_string()),
+            entity_id: None,
+        }),
     }
 
     Ok(WorldEditorValidationResultDto {
         is_valid: blockers.is_empty(),
         blockers,
         warnings,
-        info: std::mem::take(&mut info),
+        info,
     })
 }
 
@@ -537,8 +541,9 @@ pub async fn commit_world_editor_patch(
     world_id: String,
     patch: FrontendWorldEditorPatch,
 ) -> Result<WorldEditorCommitResultDto, String> {
-    let _store = get_agent_store(&app, state.inner(), &world_id).await?;
-    let current_revision = load_world_editor_revision(_store.pool(), &world_id).await?;
+    let store = get_agent_store(&app, state.inner(), &world_id).await?;
+    let pool = store.pool().clone();
+    let current_revision = load_world_editor_revision(store.pool(), &world_id).await?;
 
     if patch.base_editor_revision != current_revision {
         return Ok(WorldEditorCommitResultDto {
@@ -552,30 +557,44 @@ pub async fn commit_world_editor_patch(
         });
     }
 
-    if patch.operations.len() == 1 && patch.operations[0].kind == "UpsertWorldRules" {
-        let payload = patch.operations[0].payload.clone().unwrap_or(Value::Null);
-        let yaml_text = payload
-            .as_str()
-            .ok_or_else(|| "UpsertWorldRules payload 必须是 YAML 字符串".to_string())?;
+    let world_rules_yaml = extract_world_rules_yaml(&patch)?;
+    if let Some(yaml_text) = world_rules_yaml {
         let data_dir = get_data_dir(&app)?;
         let world_base_path = safe_join(&data_dir, &format!("worlds/{}/world_base.yaml", world_id))?;
         std::fs::write(&world_base_path, yaml_text)
             .map_err(|e| format!("Failed to write world_base.yaml: {}", e))?;
-
-        return Ok(WorldEditorCommitResultDto {
-            success: true,
-            commit_id: Some(format!("editor_commit_{}", Utc::now().timestamp_millis())),
-            new_revision: current_revision + 1,
-            error: None,
-        });
     }
 
-    Ok(WorldEditorCommitResultDto {
-        success: false,
-        commit_id: None,
-        new_revision: current_revision,
-        error: Some("当前最小后端接线仅支持 world_base.yaml 提交；结构化 CRUD 仍待与现行模型对齐。".to_string()),
-    })
+    let changes = match build_world_editor_changes(&pool, &patch).await {
+        Ok(changes) => changes,
+        Err(error) => {
+            return Ok(WorldEditorCommitResultDto {
+                success: false,
+                commit_id: None,
+                new_revision: current_revision,
+                error: Some(error),
+            })
+        }
+    };
+
+    let committer = WorldEditorCommitter::new(pool);
+    match committer
+        .commit(&world_id, patch.base_editor_revision, changes)
+        .await
+    {
+        Ok(result) => Ok(WorldEditorCommitResultDto {
+            success: true,
+            commit_id: Some(result.commit_id),
+            new_revision: result.resulting_revision,
+            error: None,
+        }),
+        Err(error) => Ok(WorldEditorCommitResultDto {
+            success: false,
+            commit_id: None,
+            new_revision: current_revision,
+            error: Some(error),
+        }),
+    }
 }
 
 #[tauri::command]
@@ -587,6 +606,62 @@ pub async fn analyze_world_editor_impact(
     _entity_id: String,
 ) -> Result<Vec<WorldEditorImpactItemDto>, String> {
     Ok(Vec::new())
+}
+
+#[tauri::command]
+pub async fn get_location_node_detail(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    world_id: String,
+    location_id: String,
+) -> Result<Value, String> {
+    let store = get_agent_store(&app, state.inner(), &world_id).await?;
+    let row = sqlx::query(
+        r#"
+        SELECT location_id, name, polity_id, parent_id, canonical_level,
+               type_label, tags, status, metadata, schema_version, created_at, updated_at
+        FROM location_nodes
+        WHERE location_id = ?
+        "#,
+    )
+    .bind(&location_id)
+    .fetch_optional(store.pool())
+    .await
+    .map_err(|e| format!("Failed to load location detail: {}", e))?
+    .ok_or_else(|| format!("Location not found: {}", location_id))?;
+
+    let aliases = sqlx::query(
+        "SELECT alias, locale, normalized_alias FROM location_aliases WHERE location_id = ? ORDER BY alias ASC",
+    )
+    .bind(&location_id)
+    .fetch_all(store.pool())
+    .await
+    .map_err(|e| format!("Failed to load location aliases: {}", e))?
+    .into_iter()
+    .map(|alias_row| {
+        serde_json::json!({
+            "alias": alias_row.get::<String, _>("alias"),
+            "locale": alias_row.get::<Option<String>, _>("locale"),
+            "normalized_alias": alias_row.get::<String, _>("normalized_alias"),
+        })
+    })
+    .collect::<Vec<_>>();
+
+    Ok(serde_json::json!({
+        "location_id": row.get::<String, _>("location_id"),
+        "name": row.get::<String, _>("name"),
+        "aliases": aliases,
+        "polity_id": row.get::<Option<String>, _>("polity_id"),
+        "parent_id": row.get::<Option<String>, _>("parent_id"),
+        "canonical_level": row.get::<String, _>("canonical_level"),
+        "type_label": row.get::<String, _>("type_label"),
+        "tags": parse_json_value(row.get("tags")),
+        "status": row.get::<String, _>("status"),
+        "metadata": parse_json_value(row.get("metadata")),
+        "schema_version": row.get::<String, _>("schema_version"),
+        "created_at": row.get::<String, _>("created_at"),
+        "updated_at": row.get::<String, _>("updated_at"),
+    }))
 }
 
 #[tauri::command]
@@ -1455,6 +1530,408 @@ async fn detect_world_editor_status(
 
 fn parse_json_value(raw: String) -> Value {
     serde_json::from_str(&raw).unwrap_or(Value::Null)
+}
+
+fn parse_rfc3339_timestamp(value: &str) -> Result<DateTime<Utc>, String> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|dt| dt.with_timezone(&Utc))
+        .map_err(|e| format!("Invalid RFC3339 timestamp '{}': {}", value, e))
+}
+
+fn append_validation_items(
+    blockers: &mut Vec<WorldEditorValidationItemDto>,
+    warnings: &mut Vec<WorldEditorValidationItemDto>,
+    info: &mut Vec<WorldEditorValidationItemDto>,
+    issues: Vec<crate::agent::world_editor::validator::ValidationIssue>,
+) {
+    for issue in issues {
+        let item = WorldEditorValidationItemDto {
+            severity: match issue.severity {
+                ValidationSeverity::Error => "blocker".to_string(),
+                ValidationSeverity::Warning => "warning".to_string(),
+            },
+            code: "world_editor_validation".to_string(),
+            message: issue.message,
+            field_path: Some(issue.field_path),
+            entity_id: None,
+        };
+        match issue.severity {
+            ValidationSeverity::Error => blockers.push(item),
+            ValidationSeverity::Warning => warnings.push(item),
+        }
+    }
+
+    info.push(WorldEditorValidationItemDto {
+        severity: "info".to_string(),
+        code: "world_editor_validation_complete".to_string(),
+        message: "World Editor patch 已执行真实模型校验。".to_string(),
+        field_path: None,
+        entity_id: None,
+    });
+}
+
+fn validate_world_editor_changes(
+    changes: &WorldEditorChanges,
+) -> Result<Vec<crate::agent::world_editor::validator::ValidationIssue>, String> {
+    let mut issues = Vec::new();
+
+    for location in changes
+        .location_creates
+        .iter()
+        .chain(changes.location_updates.iter())
+    {
+        issues.extend(WorldEditorValidator::validate_location(location)?);
+    }
+
+    for knowledge in changes
+        .knowledge_creates
+        .iter()
+        .chain(changes.knowledge_updates.iter())
+    {
+        issues.extend(WorldEditorValidator::validate_knowledge(knowledge)?);
+    }
+
+    for character in changes
+        .character_creates
+        .iter()
+        .chain(changes.character_updates.iter())
+    {
+        issues.extend(WorldEditorValidator::validate_character(character)?);
+    }
+
+    Ok(issues)
+}
+
+fn extract_world_rules_yaml(patch: &FrontendWorldEditorPatch) -> Result<Option<String>, String> {
+    let mut yaml: Option<String> = None;
+    for operation in &patch.operations {
+        if operation.kind != "UpsertWorldRules" {
+            continue;
+        }
+        let payload = operation.payload.clone().unwrap_or(Value::Null);
+        let yaml_text = payload
+            .as_str()
+            .ok_or_else(|| "UpsertWorldRules payload 必须是 YAML 字符串".to_string())?;
+        yaml = Some(yaml_text.to_string());
+    }
+    Ok(yaml)
+}
+
+async fn build_world_editor_changes(
+    pool: &sqlx::SqlitePool,
+    patch: &FrontendWorldEditorPatch,
+) -> Result<WorldEditorChanges, String> {
+    let mut changes = WorldEditorChanges::default();
+
+    for operation in &patch.operations {
+        match operation.kind.as_str() {
+            "UpsertKnowledgeEntry" => {
+                let payload = operation
+                    .payload
+                    .clone()
+                    .ok_or_else(|| "UpsertKnowledgeEntry 缺少 payload".to_string())?;
+                let entry = frontend_knowledge_to_model(payload)?;
+                if knowledge_exists(pool, &entry.knowledge_id).await? {
+                    changes.knowledge_updates.push(entry);
+                } else {
+                    changes.knowledge_creates.push(entry);
+                }
+            }
+            "DeleteKnowledgeEntry" => {
+                let knowledge_id = operation
+                    .knowledge_id
+                    .clone()
+                    .ok_or_else(|| "DeleteKnowledgeEntry 缺少 knowledge_id".to_string())?;
+                changes.knowledge_deletes.push(knowledge_id);
+            }
+            "UpsertCharacterRecord" => {
+                let payload = operation
+                    .payload
+                    .clone()
+                    .ok_or_else(|| "UpsertCharacterRecord 缺少 payload".to_string())?;
+                let character = serde_json::from_value::<CharacterRecord>(payload)
+                    .map_err(|e| format!("Invalid CharacterRecord payload: {}", e))?;
+                if character_exists(pool, &character.character_id).await? {
+                    changes.character_updates.push(character);
+                } else {
+                    changes.character_creates.push(character);
+                }
+            }
+            "DeleteCharacterRecord" => {
+                let character_id = operation
+                    .character_id
+                    .clone()
+                    .ok_or_else(|| "DeleteCharacterRecord 缺少 character_id".to_string())?;
+                changes.character_deletes.push(character_id);
+            }
+            "UpsertLocationNode" => {
+                let payload = operation
+                    .payload
+                    .clone()
+                    .ok_or_else(|| "UpsertLocationNode 缺少 payload".to_string())?;
+                let location = frontend_location_to_model(payload)?;
+                if location_exists(pool, &location.location_id).await? {
+                    changes.location_updates.push(location);
+                } else {
+                    changes.location_creates.push(location);
+                }
+            }
+            "DeleteLocationNode" => {
+                let location_id = operation
+                    .location_id
+                    .clone()
+                    .ok_or_else(|| "DeleteLocationNode 缺少 location_id".to_string())?;
+                changes.location_deletes.push(location_id);
+            }
+            "UpsertWorldRules" => {}
+            other => {
+                return Err(format!("暂不支持的 World Editor 操作: {}", other));
+            }
+        }
+    }
+
+    Ok(changes)
+}
+
+fn frontend_knowledge_to_model(payload: Value) -> Result<crate::agent::models::knowledge::KnowledgeEntry, String> {
+    let dto: FrontendKnowledgeEntryDto = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid KnowledgeEntry payload: {}", e))?;
+
+    let kind = parse_knowledge_kind(&dto.kind)?;
+    let subject = parse_knowledge_subject(&dto.subject_type, dto.subject_id.clone(), dto.facet_type.clone())?;
+    let access_policy = serde_json::from_value(dto.access_policy)
+        .map_err(|e| format!("Invalid access_policy payload: {}", e))?;
+    let subject_awareness = serde_json::from_value(dto.subject_awareness)
+        .map_err(|e| format!("Invalid subject_awareness payload: {}", e))?;
+    let metadata = serde_json::from_value(dto.metadata)
+        .map_err(|e| format!("Invalid metadata payload: {}", e))?;
+
+    Ok(crate::agent::models::knowledge::KnowledgeEntry {
+        knowledge_id: dto.knowledge_id,
+        kind,
+        subject,
+        content: dto.content,
+        apparent_content: dto.apparent_content,
+        access_policy,
+        subject_awareness,
+        metadata,
+        valid_from: parse_optional_time_anchor_value(dto.valid_from)?,
+        valid_until: parse_optional_time_anchor_value(dto.valid_until)?,
+        source_session_id: dto.source_session_id,
+        source_scene_turn_id: dto.source_scene_turn_id,
+        derived_from_event_id: dto.derived_from_event_id,
+        schema_version: dto.schema_version,
+        created_at: parse_rfc3339_timestamp(&dto.created_at)?,
+        updated_at: parse_rfc3339_timestamp(&dto.updated_at)?,
+    })
+}
+
+fn frontend_location_to_model(payload: Value) -> Result<crate::agent::models::location::LocationNode, String> {
+    let object = payload
+        .as_object()
+        .ok_or_else(|| "Invalid LocationNode payload: expected object".to_string())?;
+
+    let location_id = required_string(object, "location_id")?;
+    let name = required_string(object, "name")?;
+    let canonical_level_raw = required_string(object, "canonical_level")?;
+    let canonical_level = parse_location_level(&canonical_level_raw)?;
+    let status_raw = required_string(object, "status")?;
+    let status = parse_location_status(&status_raw)?;
+    let type_label = optional_string(object, "type_label").unwrap_or_else(|| canonical_level_raw.clone());
+    let schema_version = optional_string(object, "schema_version").unwrap_or_else(|| "0.1".to_string());
+    let created_at = parse_optional_datetime_string(optional_string(object, "created_at"))?.unwrap_or_else(Utc::now);
+    let updated_at = parse_optional_datetime_string(optional_string(object, "updated_at"))?.unwrap_or_else(Utc::now);
+    let polity_id = nullable_string_field(object, "polity_id")?;
+    let parent_id = nullable_string_field(object, "parent_id")?;
+    let tags = object
+        .get("tags")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+    let metadata = object
+        .get("metadata")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let aliases = object
+        .get("aliases")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+
+    Ok(crate::agent::models::location::LocationNode {
+        location_id,
+        name,
+        aliases: serde_json::from_value(aliases)
+            .map_err(|e| format!("Invalid location aliases payload: {}", e))?,
+        polity_id,
+        parent_id,
+        canonical_level,
+        type_label,
+        tags: serde_json::from_value(tags).map_err(|e| format!("Invalid location tags payload: {}", e))?,
+        status,
+        metadata,
+        schema_version,
+        created_at,
+        updated_at,
+    })
+}
+
+async fn knowledge_exists(pool: &sqlx::SqlitePool, knowledge_id: &str) -> Result<bool, String> {
+    exists_by_id(pool, "knowledge_entries", "knowledge_id", knowledge_id).await
+}
+
+async fn character_exists(pool: &sqlx::SqlitePool, character_id: &str) -> Result<bool, String> {
+    exists_by_id(pool, "character_records", "character_id", character_id).await
+}
+
+async fn location_exists(pool: &sqlx::SqlitePool, location_id: &str) -> Result<bool, String> {
+    exists_by_id(pool, "location_nodes", "location_id", location_id).await
+}
+
+async fn exists_by_id(
+    pool: &sqlx::SqlitePool,
+    table: &str,
+    column: &str,
+    value: &str,
+) -> Result<bool, String> {
+    let sql = format!("SELECT 1 FROM {} WHERE {} = ? LIMIT 1", table, column);
+    let exists = sqlx::query_scalar::<_, i64>(&sql)
+        .bind(value)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("Failed to check {} existence: {}", table, e))?;
+    Ok(exists.is_some())
+}
+
+fn parse_knowledge_kind(
+    raw: &str,
+) -> Result<crate::agent::models::knowledge::KnowledgeKind, String> {
+    use crate::agent::models::knowledge::KnowledgeKind;
+    match raw {
+        "world_fact" => Ok(KnowledgeKind::WorldFact),
+        "region_fact" => Ok(KnowledgeKind::RegionFact),
+        "faction_fact" => Ok(KnowledgeKind::FactionFact),
+        "character_facet" => Ok(KnowledgeKind::CharacterFacet),
+        "historical_event" => Ok(KnowledgeKind::HistoricalEvent),
+        "memory" => Ok(KnowledgeKind::Memory),
+        _ => Err(format!("Invalid knowledge kind: {}", raw)),
+    }
+}
+
+fn parse_knowledge_subject(
+    subject_type: &str,
+    subject_id: Option<String>,
+    facet_type: Option<String>,
+) -> Result<crate::agent::models::knowledge::KnowledgeSubject, String> {
+    use crate::agent::models::knowledge::KnowledgeSubject;
+    Ok(match subject_type {
+        "world" => KnowledgeSubject::World,
+        "region" => KnowledgeSubject::Region(
+            subject_id.ok_or_else(|| "Region knowledge requires subject_id".to_string())?,
+        ),
+        "faction" => KnowledgeSubject::Faction(
+            subject_id.ok_or_else(|| "Faction knowledge requires subject_id".to_string())?,
+        ),
+        "character" => KnowledgeSubject::Character {
+            id: subject_id.ok_or_else(|| "Character knowledge requires subject_id".to_string())?,
+            facet: parse_character_facet_type(
+                &facet_type.ok_or_else(|| "Character knowledge requires facet_type".to_string())?,
+            )?,
+        },
+        "event" => KnowledgeSubject::Event {
+            event_id: subject_id.ok_or_else(|| "Event knowledge requires subject_id".to_string())?,
+        },
+        _ => return Err(format!("Invalid knowledge subject_type: {}", subject_type)),
+    })
+}
+
+fn parse_character_facet_type(
+    raw: &str,
+) -> Result<crate::agent::models::knowledge::CharacterFacetType, String> {
+    use crate::agent::models::knowledge::CharacterFacetType;
+    match raw {
+        "Appearance" | "appearance" => Ok(CharacterFacetType::Appearance),
+        "Identity" | "identity" => Ok(CharacterFacetType::Identity),
+        "TrueName" | "true_name" => Ok(CharacterFacetType::TrueName),
+        "Species" | "species" => Ok(CharacterFacetType::Species),
+        "Bloodline" | "bloodline" => Ok(CharacterFacetType::Bloodline),
+        "CultivationRealm" | "cultivation_realm" => Ok(CharacterFacetType::CultivationRealm),
+        "KnownAbility" | "known_ability" => Ok(CharacterFacetType::KnownAbility),
+        "HiddenAbility" | "hidden_ability" => Ok(CharacterFacetType::HiddenAbility),
+        "Personality" | "personality" => Ok(CharacterFacetType::Personality),
+        "Background" | "background" => Ok(CharacterFacetType::Background),
+        "Motivation" | "motivation" => Ok(CharacterFacetType::Motivation),
+        "Trauma" | "trauma" => Ok(CharacterFacetType::Trauma),
+        "MindModelCard" | "mind_model_card" => Ok(CharacterFacetType::MindModelCard),
+        _ => Err(format!("Invalid character facet type: {}", raw)),
+    }
+}
+
+fn parse_location_level(
+    raw: &str,
+) -> Result<crate::agent::models::location::LocationLevel, String> {
+    use crate::agent::models::location::LocationLevel;
+    match raw {
+        "WorldRoot" => Ok(LocationLevel::WorldRoot),
+        "Realm" => Ok(LocationLevel::Realm),
+        "Continent" => Ok(LocationLevel::Continent),
+        "NaturalRegion" => Ok(LocationLevel::NaturalRegion),
+        "Polity" => Ok(LocationLevel::Polity),
+        "MajorRegion" => Ok(LocationLevel::MajorRegion),
+        "LocalRegion" => Ok(LocationLevel::LocalRegion),
+        "Settlement" => Ok(LocationLevel::Settlement),
+        "DistrictOrSite" => Ok(LocationLevel::DistrictOrSite),
+        "RoomOrSubsite" => Ok(LocationLevel::RoomOrSubsite),
+        _ => Err(format!("Invalid location level: {}", raw)),
+    }
+}
+
+fn parse_location_status(
+    raw: &str,
+) -> Result<crate::agent::models::location::LocationStatus, String> {
+    use crate::agent::models::location::LocationStatus;
+    match raw {
+        "Active" | "active" => Ok(LocationStatus::Active),
+        "Deprecated" | "deprecated" => Ok(LocationStatus::Deprecated),
+        "PendingConfirmation" | "pending_confirmation" => Ok(LocationStatus::PendingConfirmation),
+        _ => Err(format!("Invalid location status: {}", raw)),
+    }
+}
+
+fn parse_optional_time_anchor_value(value: Option<Value>) -> Result<Option<TimeAnchor>, String> {
+    value
+        .map(|inner| {
+            serde_json::from_value(inner).map_err(|e| format!("Invalid TimeAnchor payload: {}", e))
+        })
+        .transpose()
+}
+
+fn parse_optional_datetime_string(value: Option<String>) -> Result<Option<DateTime<Utc>>, String> {
+    value.map(|raw| parse_rfc3339_timestamp(&raw)).transpose()
+}
+
+fn required_string(
+    object: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<String, String> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| format!("Location payload missing string field '{}'", key))
+}
+
+fn optional_string(object: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
+    object.get(key).and_then(Value::as_str).map(str::to_string)
+}
+
+fn nullable_string_field(
+    object: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Option<String>, String> {
+    match object.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) => Ok(Some(value.clone())),
+        Some(_) => Err(format!("Location payload field '{}' must be string or null", key)),
+    }
 }
 
 fn allocate_world_id(name: &str, existing: &HashSet<String>) -> Result<String, String> {

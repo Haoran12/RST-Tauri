@@ -235,6 +235,7 @@ pub fn run() {
             commands::commit_world_editor_patch,
             commands::analyze_world_editor_impact,
             commands::get_knowledge_entry_detail,
+            commands::get_location_node_detail,
             commands::get_agent_trace_events,
             commands::get_reaction_window_entries,
             commands::create_time_anchor,

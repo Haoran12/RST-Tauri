@@ -16,13 +16,13 @@ import {
   WarningOutline,
 } from '@vicons/ionicons5'
 import { useAgentWorldEditorStore } from '@/stores/agentWorldEditor'
-import type { LocationNodeSummary } from '@/types/agent/worldEditor'
+import type { LocationNodeDetailDto } from '@/types/agent/worldEditor'
 
 const editorStore = useAgentWorldEditorStore()
 
 const draft = computed(() => {
   if (editorStore.selectedEntityType !== 'location') return null
-  return editorStore.draft?.draft as LocationNodeSummary | undefined
+  return editorStore.draft?.draft as LocationNodeDetailDto | undefined
 })
 
 const isNew = computed(() => editorStore.draft?.isNew ?? false)
@@ -79,10 +79,25 @@ function wouldCreateCycle(draggedId: string, newParentId: string): boolean {
 }
 
 const flattenedTree = computed(() => {
-  const result: Array<LocationNodeSummary & { depth: number }> = []
+  const result: Array<LocationNodeDetailDto & { depth: number }> = []
   function walk(nodes: typeof editorStore.locationTree) {
     for (const node of nodes) {
-      result.push(node)
+      result.push({
+        location_id: node.location_id,
+        name: node.name,
+        aliases: [],
+        polity_id: null,
+        parent_id: node.parent_id,
+        canonical_level: node.canonical_level,
+        type_label: node.canonical_level,
+        tags: [],
+        status: node.status,
+        metadata: {},
+        schema_version: '0.1',
+        created_at: '',
+        updated_at: '',
+        depth: node.depth,
+      })
       if (node.children.length) walk(node.children)
     }
   }

@@ -52,6 +52,28 @@ export interface LocationNodeSummary {
   status: string
 }
 
+export interface LocationAliasDto {
+  alias: string
+  locale: string | null
+  normalized_alias: string
+}
+
+export interface LocationNodeDetailDto {
+  location_id: string
+  name: string
+  aliases: LocationAliasDto[]
+  polity_id: string | null
+  parent_id: string | null
+  canonical_level: string
+  type_label: string
+  tags: string[]
+  status: string
+  metadata: Record<string, unknown>
+  schema_version: string
+  created_at: string
+  updated_at: string
+}
+
 export interface KnowledgeEntrySummary {
   knowledge_id: string
   kind: string
