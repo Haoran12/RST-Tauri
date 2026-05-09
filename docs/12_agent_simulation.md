@@ -133,7 +133,7 @@ pub enum PrecipitationKind {
 
 六项基础属性（`physical` / `agility` / `endurance` / `insight` / `mana_power` / `soul_strength`）使用同一数值标尺和同一默认档位边界。属性 raw 值和运行时计算值使用 `f64` 存储与计算，以便比例修正、状态叠加和调参；普通 UI 默认四舍五入显示为整数。UI 展示值只服务阅读，不参与档位、差距或仲裁判断。
 
-属性"档位"用于把 raw 能力底盘翻译为 LLM 可读层级；属性"差距"用于可观察对抗中的相对判断。两者都不让 LLM 自己估算 raw 数值。档位边界默认沿用原 `mana_power` 锚点（凡人 100 / 入门 500–800 / 瓶颈 1300–1450 / 大成 2400 / 仙灵修行瓶颈 5000 / 神祇 苍角 8800 / 高阶仙灵 NaN），World 可在 `./data/worlds/<world_id>/world_base.yaml` 中重写；YAML 中阈值可写整数或小数，编译后统一为 `f64`。运行时由 `ConfigCompiler` 编译成 `WorldRulesSnapshot`，Resolver / Filter 只读快照，不在感知派生过程中读取配置文件。
+属性"档位"用于把 raw 能力底盘翻译为 LLM 可读层级；属性"差距"用于可观察对抗中的相对判断。两者都不让 LLM 自己估算 raw 数值。档位边界默认沿用原 `mana_power` 锚点（凡人 100 / 入门 500–800 / 瓶颈 1300–1450 / 大成 2400 / 仙灵修行瓶颈 5000 / 神祇 苍角 8800 / 高阶仙灵 NaN），World 可在 `./data/worlds/<world_id>/world_argument.yaml` 中重写；YAML 中阈值可写整数或小数，编译后统一为 `f64`。运行时由 `ConfigCompiler` 编译成 `WorldRulesSnapshot`，Resolver / Filter 只读快照，不在感知派生过程中读取配置文件。
 
 ```rust
 pub enum AttributeKind {

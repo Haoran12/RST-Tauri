@@ -115,7 +115,7 @@
 | 对抗解算与感知层用同一 mana_power | 持久倾向或运行时封息/抑制/外放直接改写实际对抗 | 对抗解算读 effective（不含显露倾向、运行时状态与压制），感知读 displayed（含显露倾向、运行时状态、压制、伪装）；两层显式分离 |
 | 大佬硬吃小弟 | 完全无视技巧/状态导致碾压式叙事 | 加算修正区 × soul_factor 可制造以弱胜强；以毒/偷袭/算计实现而非抹平 mana_power |
 | `mana_potency` 与 `mana_power` 双口径 | 同一能力被两套字段/规则重复表达 | 正式字段只用 `mana_power`；`mana_potency` 不作为基础属性或规则名 |
-| 不同世界灵力数值无法兼容 | 某些世界无修真 / 数值范围迥异 | AttributeTier 边界与 AttributeDelta 桶阈值存于 world_base.yaml; 不同世界各自一份阈值表; 角色卡解析与档位翻译共用同一 `WorldRulesSnapshot` |
+| 不同世界灵力数值无法兼容 | 某些世界无修真 / 数值范围迥异 | AttributeTier 边界与 AttributeDelta 桶阈值存于 world_argument.yaml; 不同世界各自一份阈值表; 角色卡解析与档位翻译共用同一 `WorldRulesSnapshot` |
 | 灵觉过载处理 | 高灵气环境失真 | 过载阈值 + 感知降级 + 验证 |
 
 ### 1.6 调用预算与性能

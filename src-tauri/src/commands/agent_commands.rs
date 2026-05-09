@@ -21,6 +21,10 @@ use crate::agent::simulation::{
     CanonStatusManager, HistoricalTruthResolver, ProvisionalTruthManager,
 };
 use crate::agent::storage::agent_store::AgentStore;
+use crate::config::world_argument::{
+    ensure_world_argument_file, load_world_argument_from_dir, parse_world_argument_yaml,
+    WORLD_ARGUMENT_FILE_NAME,
+};
 use crate::storage::paths::{app_data_root, safe_join, validate_path_component};
 use crate::AppState;
 use chrono::{DateTime, Utc};
@@ -322,7 +326,7 @@ pub async fn list_agent_worlds(
     Ok(worlds)
 }
 
-/// 创建一个新的 Agent World，并初始化目录、world.sqlite 与 world_base.yaml。
+/// 创建一个新的 Agent World，并初始化目录、world.sqlite 与 world_argument.yaml。
 #[tauri::command]
 pub async fn create_agent_world(
     app: AppHandle,
@@ -346,11 +350,7 @@ pub async fn create_agent_world(
     std::fs::create_dir_all(&assets_dir)
         .map_err(|e| format!("Failed to create world directory '{}': {}", world_id, e))?;
 
-    let world_base_path = safe_join(&world_dir, "world_base.yaml")?;
-    if !world_base_path.exists() {
-        std::fs::write(&world_base_path, default_world_base_yaml(trimmed_name))
-            .map_err(|e| format!("Failed to write world_base.yaml for '{}': {}", world_id, e))?;
-    }
+    ensure_world_argument_file(&world_dir, trimmed_name)?;
 
     let store = get_agent_store(&app, state.inner(), &world_id).await?;
     let mainline_cursor = store.get_mainline_cursor().await?;
@@ -480,7 +480,7 @@ pub async fn get_world_editor_snapshot(
         knowledges,
         characters,
         relationships,
-        world_rules_keys: vec!["world_base.yaml".to_string()],
+        world_rules_keys: vec![WORLD_ARGUMENT_FILE_NAME.to_string()],
     })
 }
 
@@ -507,6 +507,25 @@ pub async fn validate_world_editor_patch(
 
     let store = get_agent_store(&app, state.inner(), &world_id).await?;
     let pool = store.pool().clone();
+
+    if let Some(yaml_text) = extract_world_rules_yaml(&patch)? {
+        match parse_world_argument_yaml(&yaml_text) {
+            Ok(_) => info.push(WorldEditorValidationItemDto {
+                severity: "info".to_string(),
+                code: "world_argument_valid".to_string(),
+                message: "world_argument.yaml 已通过 YAML 解析与 schema 校验。".to_string(),
+                field_path: Some(WORLD_ARGUMENT_FILE_NAME.to_string()),
+                entity_id: None,
+            }),
+            Err(error) => blockers.push(WorldEditorValidationItemDto {
+                severity: "blocker".to_string(),
+                code: "invalid_world_argument".to_string(),
+                message: error,
+                field_path: Some(WORLD_ARGUMENT_FILE_NAME.to_string()),
+                entity_id: None,
+            }),
+        }
+    }
 
     match build_world_editor_changes(&pool, &patch).await {
         Ok(changes) => {
@@ -559,10 +578,13 @@ pub async fn commit_world_editor_patch(
 
     let world_rules_yaml = extract_world_rules_yaml(&patch)?;
     if let Some(yaml_text) = world_rules_yaml {
+        parse_world_argument_yaml(&yaml_text)
+            .map_err(|e| format!("Refusing to write invalid {}: {}", WORLD_ARGUMENT_FILE_NAME, e))?;
         let data_dir = get_data_dir(&app)?;
-        let world_base_path = safe_join(&data_dir, &format!("worlds/{}/world_base.yaml", world_id))?;
-        std::fs::write(&world_base_path, yaml_text)
-            .map_err(|e| format!("Failed to write world_base.yaml: {}", e))?;
+        let world_argument_path =
+            safe_join(&data_dir, &format!("worlds/{}/{}", world_id, WORLD_ARGUMENT_FILE_NAME))?;
+        std::fs::write(&world_argument_path, yaml_text)
+            .map_err(|e| format!("Failed to write {}: {}", WORLD_ARGUMENT_FILE_NAME, e))?;
     }
 
     let changes = match build_world_editor_changes(&pool, &patch).await {
@@ -595,6 +617,27 @@ pub async fn commit_world_editor_patch(
             error: Some(error),
         }),
     }
+}
+
+#[tauri::command]
+pub async fn get_world_argument_detail(
+    app: AppHandle,
+    _state: State<'_, Arc<AppState>>,
+    world_id: String,
+) -> Result<String, String> {
+    validate_path_component(&world_id)
+        .map_err(|e| format!("Invalid world_id '{}': {}", world_id, e))?;
+
+    let data_dir = get_data_dir(&app)?;
+    let world_dir = safe_join(&data_dir, &format!("worlds/{}", world_id))?;
+    let (config, path) = load_world_argument_from_dir(&world_dir)?;
+
+    let source_text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+    parse_world_argument_yaml(&source_text)?;
+
+    serde_yaml::to_string(&config)
+        .map_err(|e| format!("Failed to serialize {}: {}", WORLD_ARGUMENT_FILE_NAME, e))
 }
 
 #[tauri::command]
@@ -2076,28 +2119,6 @@ fn slugify_world_name(name: &str) -> String {
 
     output.trim_matches('_').to_string()
 }
-
-fn default_world_base_yaml(world_name: &str) -> String {
-    format!(
-        concat!(
-            "schema_version: 1\n",
-            "world:\n",
-            "  display_name: \"{}\"\n",
-            "attribute_tiers:\n",
-            "  note: \"占位默认规则；后续接通真实 world_base 编译前保持最小模板。\"\n",
-            "mana_expression:\n",
-            "  default_tendency: Neutral\n",
-            "combat_resolution:\n",
-            "  profile: default\n"
-        ),
-        escape_yaml_double_quoted(world_name)
-    )
-}
-
-fn escape_yaml_double_quoted(input: &str) -> String {
-    input.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
 #[cfg(test)]
 mod tests {
     use super::{allocate_world_id, slugify_world_name};

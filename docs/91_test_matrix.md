@@ -183,7 +183,7 @@
 - [ ] SQLite 使用 WAL + 读连接池 + 单写提交；等待远程 LLM 时没有打开写事务。
 - [ ] 应用启动 / 打开 World 时生成 `RuntimeConfigSnapshot` / `WorldRulesSnapshot`，同一回合内配置变更不影响正在执行的 Resolver。
 - [ ] Agent 回合、Trace、LLM Logs 和异常事件同时记录 `runtime_config_snapshot_id` 与 `world_rules_snapshot_id`；ST / 全局运行事件只需要 runtime 配置 ID。
-- [ ] AttributeTier、AttributeDelta、CombatOutcomeTier 使用同一份 World 配置快照；修改 `world_base.yaml` 后从下一回合生效。
+- [ ] AttributeTier、AttributeDelta、CombatOutcomeTier 使用同一份 World 配置快照；修改 `world_argument.yaml` 后从下一回合生效。
 - [ ] 基础属性和 mana_power 存储 / 计算为 f64；普通 UI 取整展示不改变存储值，除非用户显式编辑保存。
 - [ ] `ManaExpressionTendency` 三档持久化在角色档案中，按默认或人物级覆盖的 `tendency_factor` 参与 `display_ratio`，不表示当前场景正在压制或外放。
 - [ ] `ManaExpressionMode` 五档运行时状态由配置限幅；LLM 只能请求封息/抑制/自然/外放/威压，不能输出 display_ratio / pressure_ratio。

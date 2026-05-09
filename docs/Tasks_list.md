@@ -356,7 +356,7 @@
 | 2026-05-06 | 角色卡详情接入自动保存：字段变更标记 dirty，右侧编辑区整体失焦、切换角色或卸载离开时自动保存当前角色卡 |
 | 2026-05-06 | 依据 `E:\AIPlay\cccode` 源码修正 Claude Code Interface：契约改为 Messages API `/v1/messages` + `Authorization: Bearer`，实际 provider 改用顶层 system blocks、user/assistant messages、tool schema 结构化输出和 Anthropic Messages 响应解析 |
 | 2026-05-06 | 修复 ST 预设宏与世界书注入断链：新增统一 `st/macros` 替换层，恢复 `{{char}}` / `{{user}}` / `{0}` / `{{wi}}` 等宏在 preset、角色卡字段、Persona、世界书关键词与内容中的运行时展开；世界书扫描补上 role->角色/Persona 名回退；默认 prompt_order 将 `personaDescription` 重新纳入主链，并补 Rust 回归测试 |
-| 2026-05-06 | 补齐 Agent World 创建链路：新增 `create_agent_world` Tauri 命令，初始化 `data/worlds/<world_id>/`、`world.sqlite`、`world_base.yaml` 与主线光标；前端 Agent 首页 / World 页增加新建 World 入口与零 World 空状态修复，不再出现“以 World 为顶层却无法创建 World”的断头流程 |
+| 2026-05-06 | 补齐 Agent World 创建链路：新增 `create_agent_world` Tauri 命令，初始化 `data/worlds/<world_id>/`、`world.sqlite`、`world_argument.yaml` 与主线光标；前端 Agent 首页 / World 页增加新建 World 入口与零 World 空状态修复，不再出现“以 World 为顶层却无法创建 World”的断头流程 |
 | 2026-05-07 | 修复 ST 会话流式发送路径：补充 Tauri event listen/unlisten capability，发送 store 等待真实 stream end 后再结束生成状态，并用响应式替换方式更新 assistant 消息气泡内容与滚动位置 |
 | 2026-05-07 | 修复 ST 聊天响应为空与配置选择问题：provider 流式请求补 `stream` 字段并改用带缓冲 SSE 解码，ST 会话页可直接选择当前预设 / 主 API，发送时尊重预设流式开关，运行时按当前 API 契约过滤和近似映射采样参数 |
 | 2026-05-07 | 将 `E:\AIPlay\cards\夏瑾DS预设v0.40.json` 对齐为本应用预设实际标准：文档改为 ST 扁平 `PresetFile` 主标准，预设编辑页补齐顶层 ST 字段与 PromptItem 注入元数据编辑，运行时改为按 `prompts + prompt_order + chatHistory` 前后切分装配 system prompt 与消息链 |
@@ -365,3 +365,4 @@
 | 2026-05-10 | 修复 Agent World -> World Editor 白屏：补上 World Editor Tauri 最小命令接线（snapshot / validate / commit / detail / trace/reaction stub）、新增路由级错误边界避免单页异常拖垮整块主视图，并将 CharacterRecordEditor 的字段读取改为兼容当前 Rust `CharacterRecord` 模型，避免选中角色时因前后端模型漂移触发渲染崩溃 |
 | 2026-05-10 | 修复 Agent World -> World Editor 渲染异常：将顶部“未保存”提示的 `NTooltip` 改为仅在 dirty 时整体渲染，避免 `trigger` 插槽在干净草稿下返回 0 个子节点并触发 `[vueuc/follower]: slot[default] should have exactly one child` |
 | 2026-05-10 | 修复 Agent World Editor 中 Character 与 MindModelCard 互相卡死的提交流程：角色草稿可联动携带绑定的 `MindModelCard` Knowledge 草稿，同一 patch 一起校验/提交；新建角色时自动配套创建 MindModelCard 草稿，角色编辑器内可直接创建/编辑绑定卡；后端补充 patch 内交叉引用校验，明确识别“不是该角色的 MindModelCard”这类非法引用 |
+| 2026-05-10 | 将 Agent World 规则文件从 `world_base.yaml` 重命名为 `world_argument.yaml`：补齐默认 schema、旧文件迁移兼容、World Editor 真实 YAML 读取/校验，以及运行时 `world_argument.yaml -> WorldRulesSnapshot` 编译链路；属性档位判断开始读取世界参数快照而不再固定硬编码阈值 |

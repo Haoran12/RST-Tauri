@@ -142,7 +142,7 @@ CREATE TABLE world_editor_commits (
     changed_character_ids TEXT NOT NULL,           -- JSON array
     changed_relationship_ids TEXT NOT NULL,        -- JSON array: objective_relationships 变更 ID
     changed_temporal_state_ids TEXT NOT NULL,      -- JSON array
-    changed_config_keys TEXT NOT NULL,             -- JSON array: world_base.yaml / world rules key path
+    changed_config_keys TEXT NOT NULL,             -- JSON array: world_argument.yaml / world rules key path
     rollback_patch TEXT NOT NULL,                  -- JSON: 反向 patch 或变更前镜像
     validation_summary TEXT NOT NULL,              -- JSON: 提交时校验摘要、warning 与影响面
     author_note TEXT,

@@ -176,7 +176,7 @@ export const DEFAULT_BINDINGS: Record<string, StructuredTextBinding> = {
   },
   agent_world_rules: {
     resourceKind: 'agent_world_rules',
-    fieldPath: 'world_base.yaml',
+    fieldPath: 'world_argument.yaml',
     allowedModes: ['yaml'],
     defaultMode: 'yaml',
     storageKind: 'yaml_file',

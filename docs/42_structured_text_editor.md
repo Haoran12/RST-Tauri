@@ -64,7 +64,7 @@ Agent World Editor 中的结构化内容字段接入 Structured Text Editor：
 | 资源 | 字段 | 默认模式 | 保存形态 |
 |---|---|---|---|
 | KnowledgeEntry | `content`、`apparent_content`、`self_belief` | JSON | `serde_json::Value` |
-| World rules | `world_base.yaml` 高级编辑视图 | YAML | YAML 文件，经 ConfigValidator 编译 |
+| World rules | `world_argument.yaml` 高级编辑视图 | YAML | YAML 文件，经 ConfigValidator 编译 |
 | 扩展字段 | `extensions`、`metadata`、低频 Provider / world settings 扩展 | JSON | object |
 | LLM-readable 叶子字段 | `summary_text`、`descriptors`、`notes` | Plain | string |
 
@@ -101,7 +101,7 @@ JSON 模式面向采用严格 JSON 语法书写的文本。它既可用于真正
 
 ### 3.3 YAML
 
-YAML 模式面向采用 YAML 语法书写的文本。它既可用于 `world_base.yaml` 等真实 YAML 配置，也可用于 ST content、prompt 模板和 LLM-readable 字符串，把长文本组织成层级清晰、便于 LLM 理解的 YAML 文本：
+YAML 模式面向采用 YAML 语法书写的文本。它既可用于 `world_argument.yaml` 等真实 YAML 配置，也可用于 ST content、prompt 模板和 LLM-readable 字符串，把长文本组织成层级清晰、便于 LLM 理解的 YAML 文本：
 
 - 实时解析 YAML；不可解析时给出 blocker 诊断。
 - 格式化使用 2 spaces 缩进，禁止 tab 缩进。

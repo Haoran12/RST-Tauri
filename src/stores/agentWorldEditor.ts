@@ -212,7 +212,7 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
       entityId: id,
       draft: data,
       original: isNew ? null : JSON.parse(JSON.stringify(data)),
-      isDirty: true,
+      isDirty: isNew,
       isNew,
     }
     validationResult.value = null
@@ -231,7 +231,7 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
       entityId: id,
       draft: character,
       original: isNew ? null : JSON.parse(JSON.stringify(character)),
-      isDirty: true,
+      isDirty: isNew,
       isNew,
       linkedKnowledgeDraft,
       linkedKnowledgeOriginal: linkedKnowledgeDraft
@@ -245,6 +245,11 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
 
   function updateDraftField(path: string, value: unknown) {
     if (!draft.value) return
+    if (keysAreRootScalar(path, draft.value.draft)) {
+      draft.value.draft = value
+      draft.value.isDirty = true
+      return
+    }
     const keys = path.split('.')
     let target: Record<string, unknown> = draft.value.draft as Record<string, unknown>
     for (let i = 0; i < keys.length - 1; i++) {
@@ -253,6 +258,10 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
     }
     target[keys[keys.length - 1]] = value
     draft.value.isDirty = true
+  }
+
+  function keysAreRootScalar(path: string, target: unknown): boolean {
+    return !path.includes('.') && (typeof target !== 'object' || target === null)
   }
 
   function updateLinkedKnowledgeField(path: string, value: unknown) {

@@ -233,6 +233,7 @@ pub fn run() {
             commands::get_world_editor_snapshot,
             commands::validate_world_editor_patch,
             commands::commit_world_editor_patch,
+            commands::get_world_argument_detail,
             commands::analyze_world_editor_impact,
             commands::get_knowledge_entry_detail,
             commands::get_location_node_detail,

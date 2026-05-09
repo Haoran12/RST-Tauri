@@ -233,7 +233,7 @@ Ran's SmartTavern：基于 Tauri 的双模式 AI 聊天应用。
 | 感知 vs 对抗解算分离 | 感知用 `displayed_mana_power`（含显露倾向、运行时状态、压制、伪装），对抗解算用 `effective_mana_power`（不含显露倾向、运行时状态与压制） | 压制/外放是认知层与环境压力手段，不直接改变真实对抗 |
 | 对抗解算公式 | `combat_power = effective × max(0.1, 1 + Σ_modifiers) × soul_factor`，加算修正区 + 灵魂独立乘区 | 多因子加和可控，灵魂破损保留乘性凸显质变打击 |
 | 跨档差阈值 | 感知层 150 / 300 / 1000 / 2000；对抗解算共享 150 / 300 / 1000，1000+ 即 Crushing | 150 起感觉差距、1000+ 基本无力应对，2000+ 进入无法测度的体感描述 |
-| 运行配置策略 | 默认配置 + `app_runtime.yaml` + World `world_base.yaml` 合并校验后发布 `RuntimeConfigSnapshot` / `WorldRulesSnapshot` | 阈值和清理策略可配置，但 Resolver / Filter / Retention 热路径不做配置 IO |
+| 运行配置策略 | 默认配置 + `app_runtime.yaml` + World `world_argument.yaml` 合并校验后发布 `RuntimeConfigSnapshot` / `WorldRulesSnapshot` | 阈值和清理策略可配置，但 Resolver / Filter / Retention 热路径不做配置 IO |
 | LLM 数值字段 | 用 ConfidenceShift 等离散级别，由程序映射为数值 | LLM 直出浮点不稳定 |
 | Agent Prompt 契约 | 静态节点提示词版本化；动态输入只传对应 schema JSON；Trace 记录 prompt_template_id/version/hash | 防止提示词漂移、隐藏事实混入 prompt、回放无法定位 |
 | Agent 输入 token 预算 | 默认 8K 关键注意力带、16K 软上限、可配置最大上下文；PromptBuilder 按 P0/P1/P2/P3 估算、压缩和裁剪 | 控制成本与上下文溢出，同时保证权限、schema、当前任务硬规则和角色心智焦点不被误删 |

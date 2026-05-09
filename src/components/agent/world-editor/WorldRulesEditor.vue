@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
+import { useRoute } from 'vue-router'
 import {
   NButton,
   NCard,
@@ -18,47 +20,106 @@ import { DEFAULT_BINDINGS } from '@/types/structuredText'
 
 const editorStore = useAgentWorldEditorStore()
 const message = useMessage()
+const route = useRoute()
 
 const worldRulesBinding = DEFAULT_BINDINGS.agent_world_rules
 
 const draftYaml = ref<string>('')
+const worldId = computed(() => {
+  const id = route.params.worldId
+  return typeof id === 'string' ? id : ''
+})
 
 const isNewDraft = computed(() => {
   return editorStore.selectedEntityType === 'world_rules' && editorStore.draft?.isNew !== false
 })
 
-// Initialize draft when world_rules is selected
-if (editorStore.selectedEntityType === 'world_rules') {
-  if (editorStore.draft?.draft) {
-    draftYaml.value = String(editorStore.draft.draft)
-  } else {
-    draftYaml.value = `# World Base Rules
-# 编辑后需通过 ConfigValidator 校验方可提交
-
-world_name: ""
+const FALLBACK_WORLD_ARGUMENT = `schema_version: 1
+world:
+  display_name: ""
 calendar:
   default_calendar_id: ""
   eras: []
-rules:
-  combat_enabled: true
-  mana_system_enabled: true
-  knowledge_reveal_enabled: true
-llm_profile:
-  default_preset_id: ""
-  scene_initializer_prompt: ""
+attribute_rules:
+  tier_thresholds:
+    mundane: [0.0, 200.0]
+    awakened: [200.0, 1000.0]
+    adept: [1000.0, 1800.0]
+    master: [1800.0, 2600.0]
+    ascendant: [2600.0, 5600.0]
+    transcendent: [5600.0, null]
+  delta_thresholds:
+    indistinguishable_abs_lt: 150.0
+    slight_abs_lt: 300.0
+    notable_abs_lt: 1000.0
+    far_abs_lt: 2000.0
+mana_rules:
+  display_ratio_clamp: [0.0, 2.0]
+  tendency_factors:
+    inward: -0.5
+    neutral: -0.2
+    expressive: 0.1
+  mode_factors:
+    sealed: -0.7
+    suppressed: -0.3
+    natural: 0.0
+    released: 0.2
+    dominating: 0.4
+  expression_modes:
+    sealed: { radius: self_only, pressure_multiplier: 0.0 }
+    suppressed: { radius: close, pressure_multiplier: 0.5 }
+    natural: { radius: room, pressure_multiplier: 1.0 }
+    released: { radius: area, pressure_multiplier: 1.15 }
+    dominating: { radius: scene, pressure_multiplier: 1.3 }
+  concealment_suspected_gap: 200.0
+combat_rules:
+  delta_thresholds:
+    indistinguishable_abs_lt: 150.0
+    slight_abs_lt: 300.0
+    marked_abs_lt: 1000.0
+  min_effectiveness: 0.1
+  soul_tier_factors:
+    mundane: 0.8
+    awakened: 0.9
+    adept: 1.0
+    master: 1.05
+    ascendant: 1.1
+    transcendent: 1.15
+  soul_damage_floor: 0.2
 `
-    editorStore.initDraft('world_rules', 'world_base', draftYaml.value, true)
+
+async function loadWorldArgumentDraft() {
+  if (editorStore.selectedEntityType !== 'world_rules') return
+  if (editorStore.draft?.draft) {
+    draftYaml.value = String(editorStore.draft.draft)
+    return
+  }
+
+  try {
+    const yaml = await invoke<string>('get_world_argument_detail', {
+      worldId: worldId.value,
+    })
+    draftYaml.value = yaml
+    editorStore.initDraft('world_rules', 'world_argument', yaml, false)
+  } catch (e) {
+    draftYaml.value = FALLBACK_WORLD_ARGUMENT
+    editorStore.initDraft('world_rules', 'world_argument', FALLBACK_WORLD_ARGUMENT, true)
+    message.error(`加载 ${'world_argument.yaml'} 失败: ${String(e)}`)
   }
 }
 
 function updateYaml(value: string) {
   draftYaml.value = value
-  editorStore.updateDraftField('world_base', value)
+  editorStore.updateDraftField('world_argument', value)
 }
 
 async function handleValidateYaml() {
-  message.info('YAML 格式校验需通过后端 ConfigValidator 完成')
+  message.info('world_argument.yaml 的格式与 schema 校验会在后端 validation 阶段执行')
 }
+
+onMounted(() => {
+  void loadWorldArgumentDraft()
+})
 </script>
 
 <template>
@@ -68,7 +129,7 @@ async function handleValidateYaml() {
         <NTag size="small" :type="isNewDraft ? 'success' : 'default'">
           {{ isNewDraft ? '新建' : '编辑' }}
         </NTag>
-        <span class="entity-id">world_base.yaml</span>
+        <span class="entity-id">world_argument.yaml</span>
       </div>
       <NSpace>
         <NTag size="small" type="warning">
@@ -103,7 +164,7 @@ async function handleValidateYaml() {
           <template #icon><NIcon><WarningOutline /></NIcon></template>
           提示
         </NTag>
-        <span>World Rules 保存前必须经过 ConfigValidator 和 World Editor validation。顶层 structured content 不允许以 Plain 模式提交。</span>
+        <span>World Rules 保存前必须经过后端 YAML 解析、schema 校验和 World Editor validation。顶层 structured content 不允许以 Plain 模式提交。</span>
       </div>
     </NCard>
   </div>

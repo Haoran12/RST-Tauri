@@ -34,7 +34,7 @@ Agent 模式包含五类 LLM 节点，权限不同：
 
 每类节点可绑定不同 API 配置。运行时在调用节点前按 `AgentLlmProfile` 解析实际 `api_config_id`：节点绑定优先，其次 World 覆盖，最后全局默认 Agent 配置。API 配置只影响 Provider / model / 参数，不改变节点权限。
 
-运行时同时固定两份配置快照。打开 World 时，`ConfigLoader` 加载全局 `app_runtime.yaml` 并发布 `RuntimeConfigSnapshot`，再合并该 World 的 `world_base.yaml` 并发布 `WorldRulesSnapshot`。每个 Agent 回合开始时捕获 `runtime_config_snapshot_id` 与 `world_rules_snapshot_id`；本回合所有 PromptBuilder 预算判断、Provider 限流和日志 retention 判断只读 runtime 快照，`SceneFilter`、`EmbodimentResolver`、`AttributeResolver`、`CombatMathResolver` 只读 world rules 快照。用户在回合执行中保存配置时，新配置只能从下一回合生效。
+运行时同时固定两份配置快照。打开 World 时，`ConfigLoader` 加载全局 `app_runtime.yaml` 并发布 `RuntimeConfigSnapshot`，再合并该 World 的 `world_argument.yaml` 并发布 `WorldRulesSnapshot`。每个 Agent 回合开始时捕获 `runtime_config_snapshot_id` 与 `world_rules_snapshot_id`；本回合所有 PromptBuilder 预算判断、Provider 限流和日志 retention 判断只读 runtime 快照，`SceneFilter`、`EmbodimentResolver`、`AttributeResolver`、`CombatMathResolver` 只读 world rules 快照。用户在回合执行中保存配置时，新配置只能从下一回合生效。
 
 ## 3. 融合调用
 

@@ -93,7 +93,7 @@ canonical Truth 的判定不只看状态字符串：只有 `world_turns.runtime_
 | 过去线硬冲突但继续游玩 | PartiallyCanon / NonCanon | ConflictWarned / NonCanon | NonCanon | 不存在 |
 | 未来预演 | NonCanon | NonCanon | FuturePreview | 不存在 |
 
-`TimeAnchor` 必须是程序可比较的结构化时间锚点，而不是只给 LLM 阅读的自然语言。不同 World 可在 `world_base.yaml` 中定义日历，但编译后的运行时必须能比较同一 World 内两个锚点的先后：
+`TimeAnchor` 必须是程序可比较的结构化时间锚点，而不是只给 LLM 阅读的自然语言。不同 World 可在 `world_argument.yaml` 中定义日历，但编译后的运行时必须能比较同一 World 内两个锚点的先后：
 
 ```rust
 pub struct TimeAnchor {

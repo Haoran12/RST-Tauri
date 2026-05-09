@@ -4,11 +4,12 @@
 //!
 //! Implements the fixed snapshot mechanism from docs/11_agent_runtime.md §2:
 //! - RuntimeConfigSnapshot captured from app_runtime.yaml at turn start
-//! - WorldRulesSnapshot captured from world_base.yaml at turn start
+//! - WorldRulesSnapshot captured from world_argument.yaml at turn start
 //! - All operations during the turn use the fixed snapshots
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -21,6 +22,8 @@ use crate::agent::knowledge::KnowledgeStore;
 use crate::agent::models::*;
 use crate::agent::simulation::ReactionWindowManager;
 use crate::agent::storage::AgentStore;
+use crate::config::world_argument::{load_world_argument_from_dir, WORLD_ARGUMENT_FILE_NAME};
+use sqlx::Row;
 
 // =============================================================================
 // Public Types
@@ -167,24 +170,61 @@ impl AgentRuntime {
     /// This must be called at the start of each turn to ensure consistent
     /// configuration throughout the turn. The snapshots are fixed and will
     /// not change even if the user modifies configuration mid-turn.
-    fn capture_turn_snapshots(
+    async fn capture_turn_snapshots(
         &self,
         world_id: &str,
     ) -> Result<(RuntimeConfigSnapshot, Option<WorldRulesSnapshot>), String> {
-        // Capture runtime config snapshot
         let runtime_snapshot = self
             .snapshot_manager
             .borrow_mut()
             .capture_runtime_snapshot(vec!["app_runtime.yaml".to_string()]);
 
-        // Capture world rules snapshot
+        let world_dir = self.resolve_world_directory().await?;
+        let (world_argument, source_path) = load_world_argument_from_dir(&world_dir)?;
+        let source_name = source_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(WORLD_ARGUMENT_FILE_NAME)
+            .to_string();
+
         let world_snapshot = self
             .snapshot_manager
             .borrow_mut()
-            .capture_world_snapshot(world_id.to_string(), vec!["world_base.yaml".to_string()])
+            .capture_world_snapshot(world_id.to_string(), vec![source_name], &world_argument)
             .map_err(|e| format!("Failed to capture world snapshot: {}", e))?;
 
         Ok((runtime_snapshot, Some(world_snapshot)))
+    }
+
+    async fn resolve_world_directory(&self) -> Result<PathBuf, String> {
+        let pool = {
+            let store = self.store.read().await;
+            store.pool().clone()
+        };
+
+        let rows = sqlx::query("PRAGMA database_list")
+            .fetch_all(&pool)
+            .await
+            .map_err(|e| format!("Failed to inspect SQLite database path: {}", e))?;
+
+        let file_path = rows
+            .into_iter()
+            .find_map(|row| {
+                let name: Result<String, _> = row.try_get("name");
+                let file: Result<String, _> = row.try_get("file");
+                match (name, file) {
+                    (Ok(db_name), Ok(path)) if db_name == "main" && !path.trim().is_empty() => {
+                        Some(path)
+                    }
+                    _ => None,
+                }
+            })
+            .ok_or_else(|| "Could not resolve world SQLite file path".to_string())?;
+
+        PathBuf::from(file_path)
+            .parent()
+            .map(|path| path.to_path_buf())
+            .ok_or_else(|| "World SQLite file has no parent directory".to_string())
     }
 
     /// Process a user turn
@@ -202,7 +242,8 @@ impl AgentRuntime {
 
         // Capture configuration snapshots BEFORE any other operations
         // This ensures consistent configuration throughout the turn
-        let (runtime_snapshot, world_snapshot) = self.capture_turn_snapshots(&session.world_id)?;
+        let (runtime_snapshot, world_snapshot) =
+            self.capture_turn_snapshots(&session.world_id).await?;
 
         // Start turn trace
         let trace_id = self.trace_recorder.borrow_mut().start_turn(
@@ -321,7 +362,8 @@ impl AgentRuntime {
         );
 
         // Step 4a: AttributeResolver
-        let effective_attrs = self.resolve_attributes(&working_state, &characters)?;
+        let effective_attrs =
+            self.resolve_attributes(&working_state, &characters, world_snapshot.as_ref())?;
 
         // Step 5: Generate event delta
         working_state.event_delta = self.generate_event_delta(&working_state)?;
@@ -768,6 +810,7 @@ impl AgentRuntime {
         &self,
         working_state: &TurnWorkingState,
         characters: &[CharacterRecord],
+        world_snapshot: Option<&WorldRulesSnapshot>,
     ) -> Result<HashMap<String, EffectiveAttributeProfile>, String> {
         let mut profiles = HashMap::new();
         for character in characters {
@@ -807,7 +850,12 @@ impl AgentRuntime {
 
             let tiers = values
                 .iter()
-                .map(|(kind, value)| (*kind, AttributeTier::from_value(*value)))
+                .map(|(kind, value)| {
+                    let tier = world_snapshot
+                        .map(|snapshot| snapshot.attribute_tier_for_value(*value))
+                        .unwrap_or_else(|| AttributeTier::from_value(*value));
+                    (*kind, tier)
+                })
                 .collect();
             let descriptors = values
                 .iter()

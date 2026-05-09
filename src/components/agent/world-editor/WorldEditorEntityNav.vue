@@ -277,11 +277,11 @@ function createNewCharacter() {
       <NList hoverable clickable style="background: transparent">
         <NListItem
           :class="{ active: editorStore.selectedEntityType === 'world_rules' }"
-          @click="editorStore.selectEntity('world_rules', 'world_base')"
+          @click="editorStore.selectEntity('world_rules', 'world_argument')"
         >
           <div class="rule-list-item">
             <NIcon :size="14"><SettingsOutline /></NIcon>
-            <span>world_base.yaml</span>
+            <span>world_argument.yaml</span>
           </div>
         </NListItem>
       </NList>
