@@ -20,7 +20,10 @@ use crate::agent::simulation::{
 use crate::agent::storage::agent_store::AgentStore;
 use crate::storage::paths::{app_data_root, safe_join, validate_path_component};
 use crate::AppState;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sqlx::Row;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -76,6 +79,157 @@ pub struct AgentWorldListItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateAgentWorldInput {
     pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorldEditorSnapshotDto {
+    pub world_id: String,
+    pub editor_revision: u64,
+    pub world_status: String,
+    pub locations: Vec<WorldEditorLocationSummaryDto>,
+    pub knowledges: Vec<WorldEditorKnowledgeSummaryDto>,
+    pub characters: Vec<WorldEditorCharacterSummaryDto>,
+    pub relationships: Vec<WorldEditorRelationshipSummaryDto>,
+    pub world_rules_keys: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorldEditorLocationSummaryDto {
+    pub location_id: String,
+    pub name: String,
+    pub canonical_level: String,
+    pub parent_id: Option<String>,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorldEditorKnowledgeSummaryDto {
+    pub knowledge_id: String,
+    pub kind: String,
+    pub subject_type: String,
+    pub subject_id: Option<String>,
+    pub facet_type: Option<String>,
+    pub summary_text: String,
+    pub has_god_only: bool,
+    pub has_apparent_content: bool,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorldEditorCharacterSummaryDto {
+    pub character_id: String,
+    pub base_attributes_summary: String,
+    pub mana_expression_tendency: String,
+    pub temporary_state_summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorldEditorRelationshipSummaryDto {
+    pub relation_id: String,
+    pub subject_character_id: String,
+    pub target_character_id: String,
+    pub relation_kind: String,
+    pub access_level: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FrontendWorldEditorPatch {
+    pub world_id: String,
+    pub base_editor_revision: u64,
+    pub operations: Vec<FrontendWorldEditorOperation>,
+    pub author_note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FrontendWorldEditorOperation {
+    pub kind: String,
+    pub payload: Option<Value>,
+    pub location_id: Option<String>,
+    pub knowledge_id: Option<String>,
+    pub character_id: Option<String>,
+    pub relation_id: Option<String>,
+    pub state_record_id: Option<String>,
+    pub normalized_alias: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorldEditorValidationItemDto {
+    pub severity: String,
+    pub code: String,
+    pub message: String,
+    pub field_path: Option<String>,
+    pub entity_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorldEditorValidationResultDto {
+    pub is_valid: bool,
+    pub blockers: Vec<WorldEditorValidationItemDto>,
+    pub warnings: Vec<WorldEditorValidationItemDto>,
+    pub info: Vec<WorldEditorValidationItemDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorldEditorCommitResultDto {
+    pub success: bool,
+    pub commit_id: Option<String>,
+    pub new_revision: u64,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorldEditorImpactItemDto {
+    pub kind: String,
+    pub target_entity_type: String,
+    pub target_entity_id: String,
+    pub description: String,
+    pub affected_count: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FrontendKnowledgeEntryDto {
+    pub knowledge_id: String,
+    pub kind: String,
+    pub subject_type: String,
+    pub subject_id: Option<String>,
+    pub facet_type: Option<String>,
+    pub content: Value,
+    pub apparent_content: Option<Value>,
+    pub access_policy: Value,
+    pub subject_awareness: Value,
+    pub metadata: Value,
+    pub valid_from: Option<Value>,
+    pub valid_until: Option<Value>,
+    pub source_session_id: Option<String>,
+    pub source_scene_turn_id: Option<String>,
+    pub derived_from_event_id: Option<String>,
+    pub schema_version: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentTraceEventDto {
+    pub event_id: String,
+    pub event_type: String,
+    pub timestamp: String,
+    pub scene_turn_id: Option<String>,
+    pub character_id: Option<String>,
+    pub summary: String,
+    pub details: Value,
+    pub level: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReactionWindowEntryDto {
+    pub entry_id: String,
+    pub scene_turn_id: String,
+    pub character_id: String,
+    pub reaction_type: String,
+    pub content: String,
+    pub confidence: f64,
+    pub latency_ms: u32,
+    pub created_at: String,
 }
 
 /// 列出 Agent Worlds 及首页所需摘要。
@@ -206,6 +360,301 @@ pub async fn create_agent_world(
         mainline_time_anchor: Some(mainline_cursor.mainline_time_anchor),
         updated_at: Some(mainline_cursor.updated_at.to_rfc3339()),
     })
+}
+
+#[tauri::command]
+pub async fn get_world_editor_snapshot(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    world_id: String,
+) -> Result<WorldEditorSnapshotDto, String> {
+    let store = get_agent_store(&app, state.inner(), &world_id).await?;
+    let pool = store.pool();
+
+    let locations = sqlx::query(
+        r#"
+        SELECT location_id, name, canonical_level, parent_id, status
+        FROM location_nodes
+        ORDER BY created_at ASC, location_id ASC
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Failed to load world editor locations: {}", e))?
+    .into_iter()
+    .map(|row| WorldEditorLocationSummaryDto {
+        location_id: row.get("location_id"),
+        name: row.get("name"),
+        canonical_level: row.get("canonical_level"),
+        parent_id: row.get("parent_id"),
+        status: row.get("status"),
+    })
+    .collect::<Vec<_>>();
+
+    let knowledges = sqlx::query(
+        r#"
+        SELECT knowledge_id, kind, subject_type, subject_id, facet_type, content,
+               apparent_content, access_policy, updated_at
+        FROM knowledge_entries
+        ORDER BY updated_at DESC, knowledge_id ASC
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Failed to load world editor knowledges: {}", e))?
+    .into_iter()
+    .map(|row| {
+        let content_text: String = row.get("content");
+        let apparent_content_text: Option<String> = row.get("apparent_content");
+        let access_policy_text: String = row.get("access_policy");
+        let content_value: Value = serde_json::from_str(&content_text).unwrap_or(Value::Null);
+        let summary_text = content_value
+            .get("summary_text")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let has_god_only = access_policy_text.contains("GodOnly");
+
+        WorldEditorKnowledgeSummaryDto {
+            knowledge_id: row.get("knowledge_id"),
+            kind: row.get("kind"),
+            subject_type: row.get("subject_type"),
+            subject_id: row.get("subject_id"),
+            facet_type: row.get("facet_type"),
+            summary_text,
+            has_god_only,
+            has_apparent_content: apparent_content_text.is_some(),
+            updated_at: row.get("updated_at"),
+        }
+    })
+    .collect::<Vec<_>>();
+
+    let characters = store
+        .list_characters()
+        .await?
+        .into_iter()
+        .map(|character| WorldEditorCharacterSummaryDto {
+            character_id: character.character_id,
+            base_attributes_summary: format!(
+                "体{:.0}/敏{:.0}/耐{:.0}/悟{:.0}/灵{:.0}/魂{:.0}",
+                character.base_attributes.physical,
+                character.base_attributes.agility,
+                character.base_attributes.endurance,
+                character.base_attributes.insight,
+                character.base_attributes.mana_power,
+                character.base_attributes.soul_strength,
+            ),
+            mana_expression_tendency: format!("{:?}", character.mana_expression_tendency),
+            temporary_state_summary: format!(
+                "疲劳 {:.0}% / 痛感 {:.0}%",
+                character.temporary_state.fatigue * 100.0,
+                character.temporary_state.pain_load * 100.0,
+            ),
+        })
+        .collect::<Vec<_>>();
+
+    let relationships = store
+        .list_objective_relationships()
+        .await?
+        .into_iter()
+        .map(|relation| WorldEditorRelationshipSummaryDto {
+            relation_id: relation.relation_id,
+            subject_character_id: relation.subject_character_id,
+            target_character_id: relation.target_character_id,
+            relation_kind: format!("{:?}", relation.relation_kind),
+            access_level: relation.access_level,
+        })
+        .collect::<Vec<_>>();
+
+    let editor_revision = load_world_editor_revision(pool, &world_id).await?;
+    let world_status = detect_world_editor_status(pool, &world_id).await?;
+
+    Ok(WorldEditorSnapshotDto {
+        world_id,
+        editor_revision,
+        world_status,
+        locations,
+        knowledges,
+        characters,
+        relationships,
+        world_rules_keys: vec!["world_base.yaml".to_string()],
+    })
+}
+
+#[tauri::command]
+pub async fn validate_world_editor_patch(
+    _app: AppHandle,
+    _state: State<'_, Arc<AppState>>,
+    world_id: String,
+    patch: FrontendWorldEditorPatch,
+) -> Result<WorldEditorValidationResultDto, String> {
+    let mut blockers = Vec::new();
+    let mut warnings = Vec::new();
+    let mut info = vec![WorldEditorValidationItemDto {
+        severity: "info".to_string(),
+        code: "editor_prototype".to_string(),
+        message: "当前 World Editor 前端原型已恢复可打开；后端 validation 仍为最小接线。".to_string(),
+        field_path: None,
+        entity_id: None,
+    }];
+
+    if patch.world_id != world_id {
+        blockers.push(WorldEditorValidationItemDto {
+            severity: "blocker".to_string(),
+            code: "world_id_mismatch".to_string(),
+            message: "请求中的 world_id 与路由 worldId 不一致。".to_string(),
+            field_path: Some("world_id".to_string()),
+            entity_id: None,
+        });
+    }
+
+    for operation in &patch.operations {
+        match operation.kind.as_str() {
+            "UpsertKnowledgeEntry" | "UpsertCharacterRecord" | "UpsertLocationNode" | "UpsertWorldRules" => {}
+            "DeleteKnowledgeEntry" | "DeleteCharacterRecord" | "DeleteLocationNode" => {}
+            other => warnings.push(WorldEditorValidationItemDto {
+                severity: "warning".to_string(),
+                code: "unsupported_operation".to_string(),
+                message: format!("当前最小后端接线尚未实现操作 {}", other),
+                field_path: Some("operations".to_string()),
+                entity_id: None,
+            }),
+        }
+    }
+
+    Ok(WorldEditorValidationResultDto {
+        is_valid: blockers.is_empty(),
+        blockers,
+        warnings,
+        info: std::mem::take(&mut info),
+    })
+}
+
+#[tauri::command]
+pub async fn commit_world_editor_patch(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    world_id: String,
+    patch: FrontendWorldEditorPatch,
+) -> Result<WorldEditorCommitResultDto, String> {
+    let _store = get_agent_store(&app, state.inner(), &world_id).await?;
+    let current_revision = load_world_editor_revision(_store.pool(), &world_id).await?;
+
+    if patch.base_editor_revision != current_revision {
+        return Ok(WorldEditorCommitResultDto {
+            success: false,
+            commit_id: None,
+            new_revision: current_revision,
+            error: Some(format!(
+                "editor revision 已过期，当前 revision={}，提交基线={}",
+                current_revision, patch.base_editor_revision
+            )),
+        });
+    }
+
+    if patch.operations.len() == 1 && patch.operations[0].kind == "UpsertWorldRules" {
+        let payload = patch.operations[0].payload.clone().unwrap_or(Value::Null);
+        let yaml_text = payload
+            .as_str()
+            .ok_or_else(|| "UpsertWorldRules payload 必须是 YAML 字符串".to_string())?;
+        let data_dir = get_data_dir(&app)?;
+        let world_base_path = safe_join(&data_dir, &format!("worlds/{}/world_base.yaml", world_id))?;
+        std::fs::write(&world_base_path, yaml_text)
+            .map_err(|e| format!("Failed to write world_base.yaml: {}", e))?;
+
+        return Ok(WorldEditorCommitResultDto {
+            success: true,
+            commit_id: Some(format!("editor_commit_{}", Utc::now().timestamp_millis())),
+            new_revision: current_revision + 1,
+            error: None,
+        });
+    }
+
+    Ok(WorldEditorCommitResultDto {
+        success: false,
+        commit_id: None,
+        new_revision: current_revision,
+        error: Some("当前最小后端接线仅支持 world_base.yaml 提交；结构化 CRUD 仍待与现行模型对齐。".to_string()),
+    })
+}
+
+#[tauri::command]
+pub async fn analyze_world_editor_impact(
+    _app: AppHandle,
+    _state: State<'_, Arc<AppState>>,
+    _world_id: String,
+    _entity_type: String,
+    _entity_id: String,
+) -> Result<Vec<WorldEditorImpactItemDto>, String> {
+    Ok(Vec::new())
+}
+
+#[tauri::command]
+pub async fn get_knowledge_entry_detail(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    world_id: String,
+    knowledge_id: String,
+) -> Result<FrontendKnowledgeEntryDto, String> {
+    let store = get_agent_store(&app, state.inner(), &world_id).await?;
+    let row = sqlx::query(
+        r#"
+        SELECT knowledge_id, kind, subject_type, subject_id, facet_type, content,
+               apparent_content, access_policy, subject_awareness, metadata,
+               valid_from, valid_until, source_session_id, source_scene_turn_id,
+               derived_from_event_id, schema_version, created_at, updated_at
+        FROM knowledge_entries
+        WHERE knowledge_id = ?
+        "#,
+    )
+    .bind(&knowledge_id)
+    .fetch_optional(store.pool())
+    .await
+    .map_err(|e| format!("Failed to load knowledge detail: {}", e))?
+    .ok_or_else(|| format!("Knowledge not found: {}", knowledge_id))?;
+
+    Ok(FrontendKnowledgeEntryDto {
+        knowledge_id: row.get("knowledge_id"),
+        kind: row.get("kind"),
+        subject_type: row.get("subject_type"),
+        subject_id: row.get("subject_id"),
+        facet_type: row.get("facet_type"),
+        content: parse_json_value(row.get("content")),
+        apparent_content: row
+            .get::<Option<String>, _>("apparent_content")
+            .map(parse_json_value),
+        access_policy: parse_json_value(row.get("access_policy")),
+        subject_awareness: parse_json_value(row.get("subject_awareness")),
+        metadata: parse_json_value(row.get("metadata")),
+        valid_from: row.get::<Option<String>, _>("valid_from").map(parse_json_value),
+        valid_until: row.get::<Option<String>, _>("valid_until").map(parse_json_value),
+        source_session_id: row.get("source_session_id"),
+        source_scene_turn_id: row.get("source_scene_turn_id"),
+        derived_from_event_id: row.get("derived_from_event_id"),
+        schema_version: row.get("schema_version"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    })
+}
+
+#[tauri::command]
+pub async fn get_agent_trace_events(
+    _app: AppHandle,
+    _state: State<'_, Arc<AppState>>,
+    _world_id: String,
+    _limit: Option<u32>,
+) -> Result<Vec<AgentTraceEventDto>, String> {
+    Ok(Vec::new())
+}
+
+#[tauri::command]
+pub async fn get_reaction_window_entries(
+    _app: AppHandle,
+    _state: State<'_, Arc<AppState>>,
+    _world_id: String,
+    _session_id: Option<String>,
+) -> Result<Vec<ReactionWindowEntryDto>, String> {
+    Ok(Vec::new())
 }
 
 // ============================================================================
@@ -951,6 +1400,61 @@ fn collect_existing_world_ids(worlds_dir: &PathBuf) -> Result<HashSet<String>, S
         }
     }
     Ok(ids)
+}
+
+async fn load_world_editor_revision(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+) -> Result<u64, String> {
+    let revision: Option<i64> = sqlx::query_scalar(
+        "SELECT MAX(resulting_editor_revision) FROM world_editor_commits WHERE world_id = ?",
+    )
+    .bind(world_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| format!("Failed to load world editor revision: {}", e))?;
+
+    Ok(revision.unwrap_or(0).max(0) as u64)
+}
+
+async fn detect_world_editor_status(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+) -> Result<String, String> {
+    let active_turns: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM world_turns wt
+        INNER JOIN agent_sessions s ON s.session_id = wt.session_id
+        WHERE s.world_id = ? AND wt.status = 'active'
+        "#,
+    )
+    .bind(world_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| format!("Failed to count active turns: {}", e))?;
+
+    if active_turns > 0 {
+        return Ok("active_turn".to_string());
+    }
+
+    let pending_calls: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM llm_call_logs WHERE world_id = ? AND status = 'started'",
+    )
+    .bind(world_id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
+
+    if pending_calls > 0 {
+        return Ok("pending_llm".to_string());
+    }
+
+    Ok("paused".to_string())
+}
+
+fn parse_json_value(raw: String) -> Value {
+    serde_json::from_str(&raw).unwrap_or(Value::Null)
 }
 
 fn allocate_world_id(name: &str, existing: &HashSet<String>) -> Result<String, String> {

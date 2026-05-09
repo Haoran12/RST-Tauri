@@ -362,3 +362,4 @@
 | 2026-05-07 | 将 `E:\AIPlay\cards\夏瑾DS预设v0.40.json` 对齐为本应用预设实际标准：文档改为 ST 扁平 `PresetFile` 主标准，预设编辑页补齐顶层 ST 字段与 PromptItem 注入元数据编辑，运行时改为按 `prompts + prompt_order + chatHistory` 前后切分装配 system prompt 与消息链 |
 | 2026-05-07 | 修复预设 `ContextList` 提示词条目拖拽失效：确认 `prompt_order` 数据层无禁排约束后，将拖拽源收敛回拖拽手柄，恢复交互区事件隔离，并在列表项容器上显式处理 `dragover/drop`，避免整卡拖拽导致排序无法落到目标条目 |
 | 2026-05-07 | 将预设 `ContextList` 提示词排序从原生 HTML5 DnD 改为指针驱动实现：按住拖拽手柄时用全局 `pointermove` 命中条目并即时重排，松手后统一保存，绕开 Tauri WebView 下原生 `drop` 事件不稳定导致的“卡片有拖拽动画但顺序不变”问题 |
+| 2026-05-10 | 修复 Agent World -> World Editor 白屏：补上 World Editor Tauri 最小命令接线（snapshot / validate / commit / detail / trace/reaction stub）、新增路由级错误边界避免单页异常拖垮整块主视图，并将 CharacterRecordEditor 的字段读取改为兼容当前 Rust `CharacterRecord` 模型，避免选中角色时因前后端模型漂移触发渲染崩溃 |

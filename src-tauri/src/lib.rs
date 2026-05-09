@@ -230,6 +230,13 @@ pub fn run() {
             commands::get_world_mainline_cursor,
             commands::advance_world_mainline,
             commands::list_world_characters,
+            commands::get_world_editor_snapshot,
+            commands::validate_world_editor_patch,
+            commands::commit_world_editor_patch,
+            commands::analyze_world_editor_impact,
+            commands::get_knowledge_entry_detail,
+            commands::get_agent_trace_events,
+            commands::get_reaction_window_entries,
             commands::create_time_anchor,
             commands::compare_time_anchors,
             // Past timeline commands

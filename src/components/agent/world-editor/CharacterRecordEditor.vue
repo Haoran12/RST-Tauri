@@ -19,14 +19,13 @@ import {
 } from '@vicons/ionicons5'
 import StructuredTextEditor from '@/components/shared/structured-text-editor/StructuredTextEditor.vue'
 import { useAgentWorldEditorStore } from '@/stores/agentWorldEditor'
-import type { CharacterRecord } from '@/types/agent/character'
 import { DEFAULT_BINDINGS } from '@/types/structuredText'
 
 const editorStore = useAgentWorldEditorStore()
 
 const draft = computed(() => {
   if (editorStore.selectedEntityType !== 'character') return null
-  return editorStore.draft?.draft as CharacterRecord | undefined
+  return (editorStore.draft?.draft as any) ?? null
 })
 
 const isNew = computed(() => editorStore.draft?.isNew ?? false)
@@ -50,10 +49,10 @@ function updateBaseAttribute(key: string, value: number | null) {
 
 function updateSensoryBaseline(key: string, value: number | null) {
   if (value === null) return
-  const baseline = { ...(draft.value?.baseline_body_profile?.sensory_baseline ?? { vision: 1.0, hearing: 1.0, smell: 1.0, touch: 1.0, proprioception: 1.0, mana: 0.5 }) }
+  const baseline = { ...(draft.value?.baseline_body_profile?.mana_sense_baseline ?? { acuity: 0.5, overload_threshold: 1.0, attribute_bias: null }) }
   ;(baseline as Record<string, number>)[key] = value
   const profile = { ...(draft.value?.baseline_body_profile ?? {}) }
-  profile.sensory_baseline = baseline as any
+  profile.mana_sense_baseline = baseline as any
   updateField('baseline_body_profile', profile)
 }
 
@@ -62,6 +61,22 @@ function updateBodyProfileField(key: string, value: unknown) {
   ;(profile as Record<string, unknown>)[key] = value
   updateField('baseline_body_profile', profile)
 }
+
+const comfortTemperatureRange = computed<[number, number]>(() => {
+  const raw = draft.value?.baseline_body_profile?.comfort_temperature_range
+  if (Array.isArray(raw) && raw.length >= 2) {
+    return [Number(raw[0] ?? 0), Number(raw[1] ?? 0)]
+  }
+  return [0, 0]
+})
+
+const manaSenseBaseline = computed(() => {
+  return draft.value?.baseline_body_profile?.mana_sense_baseline ?? {
+    acuity: 0.5,
+    overload_threshold: 1.0,
+    attribute_bias: null,
+  }
+})
 
 const temporaryStateBinding = DEFAULT_BINDINGS.agent_knowledge_content
 </script>
@@ -119,8 +134,7 @@ const temporaryStateBinding = DEFAULT_BINDINGS.agent_knowledge_content
             v-model:value="draft.mind_model_card_knowledge_id"
             size="small"
             placeholder="指向 KnowledgeEntry (kind=CharacterFacet, facet=MindModelCard)"
-            clearable
-            @update:value="v => updateField('mind_model_card_knowledge_id', v || null)"
+            @update:value="v => updateField('mind_model_card_knowledge_id', v)"
           />
         </NFormItem>
       </NForm>
@@ -211,31 +225,29 @@ const temporaryStateBinding = DEFAULT_BINDINGS.agent_knowledge_content
     <NCard size="small" title="身体基线">
       <NGrid :cols="3" :x-gap="12" :y-gap="12">
         <NGi>
-          <NFormItem label="身高 (cm)">
-            <NInputNumber
-              :value="draft.baseline_body_profile.height_cm"
-              size="small"
-              :min="1"
-              @update:value="v => updateBodyProfileField('height_cm', v)"
-            />
-          </NFormItem>
-        </NGi>
-        <NGi>
-          <NFormItem label="体重 (kg)">
-            <NInputNumber
-              :value="draft.baseline_body_profile.weight_kg"
-              size="small"
-              :min="1"
-              @update:value="v => updateBodyProfileField('weight_kg', v)"
-            />
-          </NFormItem>
-        </NGi>
-        <NGi>
-          <NFormItem label="体型">
+          <NFormItem label="种族">
             <NInput
-              :value="draft.baseline_body_profile.build"
+              :value="draft.baseline_body_profile?.species"
               size="small"
-              @update:value="v => updateBodyProfileField('build', v)"
+              @update:value="v => updateBodyProfileField('species', v)"
+            />
+          </NFormItem>
+        </NGi>
+        <NGi>
+          <NFormItem label="舒适温度下限">
+            <NInputNumber
+              :value="comfortTemperatureRange[0]"
+              size="small"
+              @update:value="v => updateBodyProfileField('comfort_temperature_range', [v ?? 0, comfortTemperatureRange[1]])"
+            />
+          </NFormItem>
+        </NGi>
+        <NGi>
+          <NFormItem label="舒适温度上限">
+            <NInputNumber
+              :value="comfortTemperatureRange[1]"
+              size="small"
+              @update:value="v => updateBodyProfileField('comfort_temperature_range', [comfortTemperatureRange[0], v ?? 0])"
             />
           </NFormItem>
         </NGi>
@@ -244,77 +256,28 @@ const temporaryStateBinding = DEFAULT_BINDINGS.agent_knowledge_content
       <NDivider style="margin: 8px 0" />
 
       <div class="sensory-baseline">
-        <div class="sensory-title">感官基线</div>
-        <NGrid :cols="3" :x-gap="12" :y-gap="12">
+        <div class="sensory-title">Mana Sense 基线</div>
+        <NGrid :cols="2" :x-gap="12" :y-gap="12">
           <NGi>
-            <NFormItem label="视觉">
+            <NFormItem label="Acuity">
               <NInputNumber
-                :value="draft.baseline_body_profile.sensory_baseline.vision"
+                :value="manaSenseBaseline.acuity"
                 size="small"
                 :min="0"
                 :max="2"
                 :step="0.1"
-                @update:value="v => updateSensoryBaseline('vision', v)"
+                @update:value="v => updateSensoryBaseline('acuity', v)"
               />
             </NFormItem>
           </NGi>
           <NGi>
-            <NFormItem label="听觉">
+            <NFormItem label="Overload Threshold">
               <NInputNumber
-                :value="draft.baseline_body_profile.sensory_baseline.hearing"
+                :value="manaSenseBaseline.overload_threshold"
                 size="small"
                 :min="0"
-                :max="2"
                 :step="0.1"
-                @update:value="v => updateSensoryBaseline('hearing', v)"
-              />
-            </NFormItem>
-          </NGi>
-          <NGi>
-            <NFormItem label="嗅觉">
-              <NInputNumber
-                :value="draft.baseline_body_profile.sensory_baseline.smell"
-                size="small"
-                :min="0"
-                :max="2"
-                :step="0.1"
-                @update:value="v => updateSensoryBaseline('smell', v)"
-              />
-            </NFormItem>
-          </NGi>
-          <NGi>
-            <NFormItem label="触觉">
-              <NInputNumber
-                :value="draft.baseline_body_profile.sensory_baseline.touch"
-                size="small"
-                :min="0"
-                :max="2"
-                :step="0.1"
-                @update:value="v => updateSensoryBaseline('touch', v)"
-              />
-            </NFormItem>
-          </NGi>
-          <NGi>
-            <NFormItem label="本体感觉">
-              <NInputNumber
-                :value="draft.baseline_body_profile.sensory_baseline.proprioception"
-                size="small"
-                :min="0"
-                :max="2"
-                :step="0.1"
-                @update:value="v => updateSensoryBaseline('proprioception', v)"
-              />
-            </NFormItem>
-          </NGi>
-          <NGi>
-            <NFormItem label="灵觉">
-              <NInputNumber
-                :value="draft.baseline_body_profile.sensory_baseline.mana"
-                size="small"
-                :min="0"
-                :max="2"
-                :step="0.1"
-                @update:value="v => updateSensoryBaseline('mana', v)"
+                @update:value="v => updateSensoryBaseline('overload_threshold', v)"
               />
             </NFormItem>
           </NGi>

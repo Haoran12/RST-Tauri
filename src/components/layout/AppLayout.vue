@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import { useAppShellStore } from '@/stores/appShell'
 import AppNav from './AppNav.vue'
 import PanelLoading from './PanelLoading.vue'
+import RouteErrorBoundary from '@/components/shared/RouteErrorBoundary.vue'
 
 const route = useRoute()
 const appShell = useAppShellStore()
@@ -118,9 +119,11 @@ const mainContentStyle = {
       >
         <div class="route-host">
           <router-view v-slot="{ Component }">
-            <transition name="route-fade" mode="out-in">
-              <component :is="Component" :key="route.name" />
-            </transition>
+            <RouteErrorBoundary :reset-key="route.fullPath">
+              <transition name="route-fade" mode="out-in">
+                <component :is="Component" :key="route.fullPath" />
+              </transition>
+            </RouteErrorBoundary>
           </router-view>
         </div>
       </NLayoutContent>
