@@ -1599,7 +1599,92 @@ fn validate_world_editor_changes(
         issues.extend(WorldEditorValidator::validate_character(character)?);
     }
 
+    issues.extend(validate_world_editor_cross_references(changes));
+
     Ok(issues)
+}
+
+fn validate_world_editor_cross_references(
+    changes: &WorldEditorChanges,
+) -> Vec<crate::agent::world_editor::validator::ValidationIssue> {
+    use crate::agent::models::knowledge::{CharacterFacetType, KnowledgeKind, KnowledgeSubject};
+    use crate::agent::world_editor::validator::ValidationIssue;
+    use std::collections::{HashMap, HashSet};
+
+    let mut issues = Vec::new();
+
+    let patch_character_ids: HashSet<&str> = changes
+        .character_creates
+        .iter()
+        .chain(changes.character_updates.iter())
+        .map(|character| character.character_id.as_str())
+        .collect();
+
+    let patch_knowledge: HashMap<&str, (&KnowledgeKind, &KnowledgeSubject)> = changes
+        .knowledge_creates
+        .iter()
+        .chain(changes.knowledge_updates.iter())
+        .map(|entry| (entry.knowledge_id.as_str(), (&entry.kind, &entry.subject)))
+        .collect();
+
+    for entry in changes
+        .knowledge_creates
+        .iter()
+        .chain(changes.knowledge_updates.iter())
+    {
+        if let KnowledgeSubject::Character { id, .. } = &entry.subject {
+            if id.trim().is_empty() {
+                continue;
+            }
+            if !patch_character_ids.contains(id.as_str()) {
+                issues.push(ValidationIssue {
+                    severity: ValidationSeverity::Warning,
+                    field_path: "subject_id".to_string(),
+                    message: format!(
+                        "CharacterFacet 引用的角色 '{}' 未包含在当前 patch 中；若库内也不存在，提交阶段会失败。",
+                        id
+                    ),
+                });
+            }
+        }
+    }
+
+    for character in changes
+        .character_creates
+        .iter()
+        .chain(changes.character_updates.iter())
+    {
+        let knowledge_id = character.mind_model_card_knowledge_id.trim();
+        if knowledge_id.is_empty() {
+            continue;
+        }
+
+        if let Some((kind, subject)) = patch_knowledge.get(knowledge_id) {
+            let subject_matches = matches!(
+                (kind, subject),
+                (
+                    KnowledgeKind::CharacterFacet,
+                    KnowledgeSubject::Character {
+                        id,
+                        facet: CharacterFacetType::MindModelCard
+                    }
+                ) if id == &character.character_id
+            );
+
+            if !subject_matches {
+                issues.push(ValidationIssue {
+                    severity: ValidationSeverity::Error,
+                    field_path: "mind_model_card_knowledge_id".to_string(),
+                    message: format!(
+                        "mind_model_card_knowledge_id '{}' 在当前 patch 中存在，但不是该角色的 MindModelCard CharacterFacet。",
+                        knowledge_id
+                    ),
+                });
+            }
+        }
+    }
+
+    issues
 }
 
 fn extract_world_rules_yaml(patch: &FrontendWorldEditorPatch) -> Result<Option<String>, String> {

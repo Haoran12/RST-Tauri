@@ -24,7 +24,7 @@ import {
   SettingsOutline,
 } from '@vicons/ionicons5'
 import { useAgentWorldEditorStore } from '@/stores/agentWorldEditor'
-import { KNOWLEDGE_KIND_LABELS } from '@/types/agent/knowledge'
+import { KNOWLEDGE_KIND_LABELS, createMindModelCardKnowledgeEntry } from '@/types/agent/knowledge'
 import type { EditorEntityType } from '@/types/agent/worldEditor'
 import { createCharacterRecord } from '@/types/agent/character'
 
@@ -101,7 +101,20 @@ async function handleCharacterSelect(id: string) {
   if (!worldId.value) return
   const character = await editorStore.loadCharacterDetail(worldId.value, id)
   if (character) {
-    editorStore.initDraft('character', id, { ...character }, false)
+    let linkedKnowledge = null
+    if (character.mind_model_card_knowledge_id) {
+      linkedKnowledge = await editorStore.loadKnowledgeDetail(
+        worldId.value,
+        character.mind_model_card_knowledge_id
+      )
+    }
+    editorStore.initCharacterDraft(
+      id,
+      { ...character },
+      false,
+      linkedKnowledge ? { ...linkedKnowledge } : null,
+      false
+    )
   }
 }
 
@@ -132,8 +145,13 @@ function createNewKnowledge() {
 
 function createNewCharacter() {
   const id = `character_${Date.now()}`
+  const mindModelKnowledgeId = `knowledge_mind_model_${Date.now()}`
+  const character = createCharacterRecord(id, {
+    mind_model_card_knowledge_id: mindModelKnowledgeId,
+  })
+  const linkedKnowledge = createMindModelCardKnowledgeEntry(mindModelKnowledgeId, id)
   editorStore.selectEntity('character', id)
-  editorStore.initDraft('character', id, createCharacterRecord(id), true)
+  editorStore.initCharacterDraft(id, character, true, linkedKnowledge, true)
 }
 </script>
 

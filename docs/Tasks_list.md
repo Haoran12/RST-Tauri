@@ -364,3 +364,4 @@
 | 2026-05-07 | 将预设 `ContextList` 提示词排序从原生 HTML5 DnD 改为指针驱动实现：按住拖拽手柄时用全局 `pointermove` 命中条目并即时重排，松手后统一保存，绕开 Tauri WebView 下原生 `drop` 事件不稳定导致的“卡片有拖拽动画但顺序不变”问题 |
 | 2026-05-10 | 修复 Agent World -> World Editor 白屏：补上 World Editor Tauri 最小命令接线（snapshot / validate / commit / detail / trace/reaction stub）、新增路由级错误边界避免单页异常拖垮整块主视图，并将 CharacterRecordEditor 的字段读取改为兼容当前 Rust `CharacterRecord` 模型，避免选中角色时因前后端模型漂移触发渲染崩溃 |
 | 2026-05-10 | 修复 Agent World -> World Editor 渲染异常：将顶部“未保存”提示的 `NTooltip` 改为仅在 dirty 时整体渲染，避免 `trigger` 插槽在干净草稿下返回 0 个子节点并触发 `[vueuc/follower]: slot[default] should have exactly one child` |
+| 2026-05-10 | 修复 Agent World Editor 中 Character 与 MindModelCard 互相卡死的提交流程：角色草稿可联动携带绑定的 `MindModelCard` Knowledge 草稿，同一 patch 一起校验/提交；新建角色时自动配套创建 MindModelCard 草稿，角色编辑器内可直接创建/编辑绑定卡；后端补充 patch 内交叉引用校验，明确识别“不是该角色的 MindModelCard”这类非法引用 |

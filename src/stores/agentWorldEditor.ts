@@ -104,6 +104,11 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
       : null
   })
 
+  const linkedKnowledgeDraft = computed<KnowledgeEntry | null>(() => {
+    if (draft.value?.entityType !== 'character') return null
+    return draft.value.linkedKnowledgeDraft ?? null
+  })
+
   const blockers = computed<EditorValidationItem[]>(() => validationResult.value?.blockers ?? [])
   const warnings = computed<EditorValidationItem[]>(() => validationResult.value?.warnings ?? [])
   const infos = computed<EditorValidationItem[]>(() => validationResult.value?.info ?? [])
@@ -214,6 +219,30 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
     impactSummary.value = []
   }
 
+  function initCharacterDraft(
+    id: string | null,
+    character: CharacterRecord,
+    isNew = false,
+    linkedKnowledgeDraft: KnowledgeEntry | null = null,
+    linkedKnowledgeIsNew = false
+  ) {
+    draft.value = {
+      entityType: 'character',
+      entityId: id,
+      draft: character,
+      original: isNew ? null : JSON.parse(JSON.stringify(character)),
+      isDirty: true,
+      isNew,
+      linkedKnowledgeDraft,
+      linkedKnowledgeOriginal: linkedKnowledgeDraft
+        ? (linkedKnowledgeIsNew ? null : JSON.parse(JSON.stringify(linkedKnowledgeDraft)))
+        : null,
+      linkedKnowledgeIsNew,
+    }
+    validationResult.value = null
+    impactSummary.value = []
+  }
+
   function updateDraftField(path: string, value: unknown) {
     if (!draft.value) return
     const keys = path.split('.')
@@ -224,6 +253,32 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
     }
     target[keys[keys.length - 1]] = value
     draft.value.isDirty = true
+  }
+
+  function updateLinkedKnowledgeField(path: string, value: unknown) {
+    if (!draft.value || draft.value.entityType !== 'character' || !draft.value.linkedKnowledgeDraft) {
+      return
+    }
+    const keys = path.split('.')
+    let target: Record<string, unknown> = draft.value.linkedKnowledgeDraft as Record<string, unknown>
+    for (let i = 0; i < keys.length - 1; i++) {
+      target = target[keys[i]] as Record<string, unknown>
+      if (!target) return
+    }
+    target[keys[keys.length - 1]] = value
+    draft.value.isDirty = true
+  }
+
+  function setLinkedKnowledgeDraft(entry: KnowledgeEntry | null, isNew = false) {
+    if (!draft.value || draft.value.entityType !== 'character') return
+    draft.value.linkedKnowledgeDraft = entry
+    draft.value.linkedKnowledgeOriginal = entry
+      ? (isNew ? null : JSON.parse(JSON.stringify(entry)))
+      : null
+    draft.value.linkedKnowledgeIsNew = entry ? isNew : false
+    draft.value.isDirty = true
+    validationResult.value = null
+    impactSummary.value = []
   }
 
   async function validateDraft(worldId: string): Promise<WorldEditorValidationResult> {
@@ -325,6 +380,12 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
         kind: 'UpsertCharacterRecord',
         payload: draft.value.draft as Partial<CharacterRecord>,
       })
+      if (draft.value.linkedKnowledgeDraft) {
+        patch.operations.push({
+          kind: 'UpsertKnowledgeEntry',
+          payload: draft.value.linkedKnowledgeDraft as Partial<KnowledgeEntry>,
+        })
+      }
     } else if (draft.value.entityType === 'location' && draft.value.draft) {
       patch.operations.push({
         kind: 'UpsertLocationNode',
@@ -489,6 +550,7 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
     hasBlockers,
     filteredKnowledgeList,
     selectedKnowledge,
+    linkedKnowledgeDraft,
     blockers,
     warnings,
     infos,
@@ -498,7 +560,10 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
     loadSnapshot,
     selectEntity,
     initDraft,
+    initCharacterDraft,
     updateDraftField,
+    updateLinkedKnowledgeField,
+    setLinkedKnowledgeDraft,
     validateDraft,
     analyzeImpact,
     commitDraft,

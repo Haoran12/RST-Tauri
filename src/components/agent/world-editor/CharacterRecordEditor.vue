@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
+  NButton,
   NCard,
   NForm,
   NFormItem,
@@ -20,6 +21,7 @@ import {
 import StructuredTextEditor from '@/components/shared/structured-text-editor/StructuredTextEditor.vue'
 import { useAgentWorldEditorStore } from '@/stores/agentWorldEditor'
 import { DEFAULT_BINDINGS } from '@/types/structuredText'
+import { createMindModelCardKnowledgeEntry } from '@/types/agent/knowledge'
 
 const editorStore = useAgentWorldEditorStore()
 
@@ -29,6 +31,7 @@ const draft = computed(() => {
 })
 
 const isNew = computed(() => editorStore.draft?.isNew ?? false)
+const linkedKnowledgeDraft = computed(() => editorStore.linkedKnowledgeDraft)
 
 const manaTendencyOptions = [
   { label: '内敛 (Inward)', value: 'Inward' },
@@ -38,6 +41,37 @@ const manaTendencyOptions = [
 
 function updateField(path: string, value: unknown) {
   editorStore.updateDraftField(path, value)
+}
+
+function updateLinkedKnowledgeField(path: string, value: unknown) {
+  editorStore.updateLinkedKnowledgeField(path, value)
+}
+
+function updateCharacterId(value: string) {
+  updateField('character_id', value)
+  if (linkedKnowledgeDraft.value) {
+    updateLinkedKnowledgeField('subject_id', value)
+  }
+}
+
+function ensureLinkedMindModelDraft() {
+  if (!draft.value) return
+  const knowledgeId =
+    draft.value.mind_model_card_knowledge_id?.trim() || `knowledge_mind_model_${Date.now()}`
+  if (!draft.value.mind_model_card_knowledge_id?.trim()) {
+    updateField('mind_model_card_knowledge_id', knowledgeId)
+  }
+  editorStore.setLinkedKnowledgeDraft(
+    createMindModelCardKnowledgeEntry(knowledgeId, draft.value.character_id),
+    true
+  )
+}
+
+function updateMindModelKnowledgeId(value: string) {
+  updateField('mind_model_card_knowledge_id', value)
+  if (linkedKnowledgeDraft.value) {
+    updateLinkedKnowledgeField('knowledge_id', value)
+  }
 }
 
 function updateBaseAttribute(key: string, value: number | null) {
@@ -79,6 +113,7 @@ const manaSenseBaseline = computed(() => {
 })
 
 const temporaryStateBinding = DEFAULT_BINDINGS.agent_knowledge_content
+const mindModelContentBinding = DEFAULT_BINDINGS.agent_knowledge_content
 </script>
 
 <template>
@@ -116,7 +151,7 @@ const temporaryStateBinding = DEFAULT_BINDINGS.agent_knowledge_content
             v-model:value="draft.character_id"
             size="small"
             placeholder="character_001"
-            @update:value="v => updateField('character_id', v)"
+            @update:value="updateCharacterId"
           />
         </NFormItem>
 
@@ -130,14 +165,52 @@ const temporaryStateBinding = DEFAULT_BINDINGS.agent_knowledge_content
         </NFormItem>
 
         <NFormItem label="MindModelCard">
+          <NSpace vertical size="small" style="width: 100%">
+            <NInput
+              v-model:value="draft.mind_model_card_knowledge_id"
+              size="small"
+              placeholder="指向 KnowledgeEntry (kind=CharacterFacet, facet=MindModelCard)"
+              @update:value="updateMindModelKnowledgeId"
+            />
+            <NSpace size="small">
+              <NButton size="tiny" secondary @click="ensureLinkedMindModelDraft">
+                {{ linkedKnowledgeDraft ? '编辑绑定 MindModel' : '创建绑定 MindModel' }}
+              </NButton>
+              <NTag v-if="linkedKnowledgeDraft" size="tiny" type="success">
+                将随角色一并校验/提交
+              </NTag>
+            </NSpace>
+          </NSpace>
+        </NFormItem>
+      </NForm>
+    </NCard>
+
+    <NCard v-if="linkedKnowledgeDraft" size="small" title="绑定 MindModelCard">
+      <NForm label-placement="left" label-width="120">
+        <NFormItem label="Knowledge ID">
           <NInput
-            v-model:value="draft.mind_model_card_knowledge_id"
+            :value="linkedKnowledgeDraft.knowledge_id"
             size="small"
-            placeholder="指向 KnowledgeEntry (kind=CharacterFacet, facet=MindModelCard)"
-            @update:value="v => updateField('mind_model_card_knowledge_id', v)"
+            @update:value="updateMindModelKnowledgeId"
+          />
+        </NFormItem>
+        <NFormItem label="Subject ID">
+          <NInput
+            :value="linkedKnowledgeDraft.subject_id ?? ''"
+            size="small"
+            disabled
           />
         </NFormItem>
       </NForm>
+      <StructuredTextEditor
+        :model-value="JSON.stringify(linkedKnowledgeDraft.content ?? { summary_text: '' }, null, 2)"
+        mode="json"
+        :binding="mindModelContentBinding"
+        :min-height="220"
+        @update:model-value="(text) => {
+          try { updateLinkedKnowledgeField('content', JSON.parse(text)) } catch { /* ignore parse errors during editing */ }
+        }"
+      />
     </NCard>
 
     <!-- Base Attributes -->

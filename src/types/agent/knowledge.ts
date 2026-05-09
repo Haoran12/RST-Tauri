@@ -148,3 +148,32 @@ export const CHARACTER_FACET_LABELS: Record<CharacterFacetType, string> = {
   Trauma: '创伤',
   MindModelCard: '认知基线卡',
 }
+
+export function createMindModelCardKnowledgeEntry(
+  knowledgeId: string,
+  characterId: string,
+  overrides?: Partial<KnowledgeEntry>
+): KnowledgeEntry {
+  const now = new Date().toISOString()
+  return {
+    knowledge_id: knowledgeId,
+    kind: 'character_facet',
+    subject_type: 'character',
+    subject_id: characterId,
+    facet_type: 'MindModelCard',
+    content: { summary_text: '' },
+    apparent_content: null,
+    access_policy: { known_by: [], scope: [{ type: 'Public' }], conditions: [] },
+    subject_awareness: { kind: 'Aware' },
+    metadata: { created_at: now, updated_at: now },
+    valid_from: null,
+    valid_until: null,
+    source_session_id: null,
+    source_scene_turn_id: null,
+    derived_from_event_id: null,
+    schema_version: '0.1',
+    created_at: now,
+    updated_at: now,
+    ...overrides,
+  }
+}

@@ -148,6 +148,9 @@ export interface WorldEditorDraftState {
   original: unknown | null
   isDirty: boolean
   isNew: boolean
+  linkedKnowledgeDraft?: KnowledgeEntry | null
+  linkedKnowledgeOriginal?: KnowledgeEntry | null
+  linkedKnowledgeIsNew?: boolean
 }
 
 // ===== Trace / Runtime Debug Types =====
