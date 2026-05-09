@@ -5,6 +5,7 @@ import type { KnowledgeEntry } from './knowledge'
 import type { CharacterRecord } from './character'
 
 export type EditorEntityType =
+  | 'none'
   | 'world_settings'
   | 'location'
   | 'knowledge'

@@ -15,9 +15,11 @@ import type {
   ReactionWindowEntry,
   LocationTreeNode,
   LocationNodeSummary,
+  CharacterRecordSummary,
 } from '@/types/agent/worldEditor'
 import type { KnowledgeEntry, KnowledgeListItem } from '@/types/agent/knowledge'
 import type { CharacterRecord } from '@/types/agent/character'
+import { listWorldCharacters } from '@/services/agentApi'
 
 export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
   // ===== State =====
@@ -29,11 +31,11 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
   const worldStatus = ref<string>('paused')
   const editorRevision = ref(0)
 
-  const selectedEntityType = ref<EditorEntityType>('knowledge')
+  const selectedEntityType = ref<EditorEntityType>('none')
   const selectedEntityId = ref<string | null>(null)
 
   const knowledgeList = ref<KnowledgeListItem[]>([])
-  const characterList = ref<CharacterRecord[]>([])
+  const characterList = ref<CharacterRecordSummary[]>([])
   const locationList = ref<LocationNodeSummary[]>([])
 
   const draft = ref<WorldEditorDraftState | null>(null)
@@ -170,12 +172,15 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
         access_scope_summary: k.has_god_only ? 'GodOnly' : 'Mixed',
         updated_at: k.updated_at,
       }))
-      characterList.value = result.characters as unknown as CharacterRecord[]
+      characterList.value = result.characters
       locationList.value = result.locations
 
       // Reset lazy-load state
       knowledgeLoadedIds.value = new Set()
       knowledgeLoadingIds.value = new Set()
+      selectedEntityType.value = 'none'
+      selectedEntityId.value = null
+      clearDraft()
     } catch (e) {
       console.error('Failed to load world editor snapshot:', e)
       throw e
@@ -340,6 +345,14 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
     lastCommitResult.value = null
   }
 
+  function clearValidationResult() {
+    validationResult.value = null
+  }
+
+  function clearImpactSummary() {
+    impactSummary.value = []
+  }
+
   // ===== Knowledge Lazy Loading =====
 
   async function loadKnowledgeDetail(worldId: string, knowledgeId: string): Promise<KnowledgeEntry | null> {
@@ -359,6 +372,16 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
       return null
     } finally {
       knowledgeLoadingIds.value.delete(knowledgeId)
+    }
+  }
+
+  async function loadCharacterDetail(worldId: string, characterId: string): Promise<CharacterRecord | null> {
+    try {
+      const characters = await listWorldCharacters(worldId)
+      return characters.find((character) => character.character_id === characterId) ?? null
+    } catch (e) {
+      console.error('Failed to load character detail:', e)
+      return null
     }
   }
 
@@ -470,7 +493,10 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
     analyzeImpact,
     commitDraft,
     clearDraft,
+    clearValidationResult,
+    clearImpactSummary,
     loadKnowledgeDetail,
+    loadCharacterDetail,
     updateLocationParent,
     loadTraceEvents,
     loadReactionEntries,

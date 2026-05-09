@@ -54,7 +54,7 @@ async function runImpactAnalysis() {
 }
 
 function clearImpact() {
-  editorStore.impactSummary = []
+  editorStore.clearImpactSummary()
 }
 </script>
 

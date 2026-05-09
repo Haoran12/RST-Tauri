@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 import {
   NButton,
   NInput,
@@ -28,6 +29,7 @@ import type { EditorEntityType } from '@/types/agent/worldEditor'
 import { createCharacterRecord } from '@/types/agent/character'
 
 const editorStore = useAgentWorldEditorStore()
+const route = useRoute()
 
 const entityTabs: { type: EditorEntityType; label: string; icon: any }[] = [
   { type: 'location', label: '地点', icon: LocationOutline },
@@ -38,10 +40,15 @@ const entityTabs: { type: EditorEntityType; label: string; icon: any }[] = [
 ]
 
 const activeTab = computed<EditorEntityType>({
-  get: () => editorStore.selectedEntityType,
+  get: () => editorStore.selectedEntityType === 'none' ? 'knowledge' : editorStore.selectedEntityType,
   set: (v) => {
     editorStore.selectEntity(v, null)
   },
+})
+
+const worldId = computed(() => {
+  const id = route.params.worldId
+  return typeof id === 'string' ? id : ''
 })
 
 // Location Tree
@@ -109,9 +116,10 @@ function handleKnowledgeSelect(id: string) {
   }
 }
 
-function handleCharacterSelect(id: string) {
+async function handleCharacterSelect(id: string) {
   editorStore.selectEntity('character', id)
-  const character = editorStore.characterList.find(c => c.character_id === id)
+  if (!worldId.value) return
+  const character = await editorStore.loadCharacterDetail(worldId.value, id)
   if (character) {
     editorStore.initDraft('character', id, { ...character }, false)
   }
@@ -247,7 +255,7 @@ function createNewCharacter() {
           <div class="character-list-item">
             <span class="character-id">{{ item.character_id }}</span>
             <NTag size="tiny" type="info">
-              体{{ item.base_attributes.physical }} 敏{{ item.base_attributes.agility }} 耐{{ item.base_attributes.endurance }}
+              {{ item.base_attributes_summary }}
             </NTag>
           </div>
         </NListItem>

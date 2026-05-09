@@ -27,7 +27,7 @@ const severityConfig = {
 }
 
 function clearValidation() {
-  editorStore.validationResult = null
+  editorStore.clearValidationResult()
 }
 </script>
 
