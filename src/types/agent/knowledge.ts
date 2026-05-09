@@ -1,0 +1,150 @@
+// Agent Knowledge Types
+// Corresponds to Rust types in src-tauri/src/agent/models/knowledge.rs
+
+export type KnowledgeKind =
+  | 'world_fact'
+  | 'region_fact'
+  | 'faction_fact'
+  | 'character_facet'
+  | 'historical_event'
+  | 'memory'
+
+export type KnowledgeSubjectType = 'world' | 'region' | 'faction' | 'character' | 'event'
+
+export type CharacterFacetType =
+  | 'Appearance'
+  | 'Identity'
+  | 'TrueName'
+  | 'Species'
+  | 'Bloodline'
+  | 'CultivationRealm'
+  | 'KnownAbility'
+  | 'HiddenAbility'
+  | 'Personality'
+  | 'Background'
+  | 'Motivation'
+  | 'Trauma'
+  | 'MindModelCard'
+
+export type AccessScopeType =
+  | 'Public'
+  | 'GodOnly'
+  | 'Region'
+  | 'Faction'
+  | 'Realm'
+  | 'Role'
+  | 'Bloodline'
+
+export interface AccessScope {
+  type: AccessScopeType
+  value?: string
+}
+
+export interface AccessCondition {
+  kind: string
+  payload?: Record<string, unknown>
+}
+
+export interface AccessPolicy {
+  known_by: string[]
+  scope: AccessScope[]
+  conditions: AccessCondition[]
+}
+
+export type SubjectAwareness =
+  | { kind: 'Aware' }
+  | { kind: 'Unaware'; self_belief: unknown }
+
+export interface KnowledgeMetadata {
+  created_at: string
+  updated_at: string
+  valid_from?: unknown
+  valid_until?: unknown
+  source_session_id?: string
+  source_scene_turn_id?: string
+  derived_from_event_id?: string
+  emotional_weight?: number
+  last_accessed_at?: string
+  source?: string
+}
+
+export interface KnowledgeEntry {
+  knowledge_id: string
+  kind: KnowledgeKind
+  subject_type: KnowledgeSubjectType
+  subject_id: string | null
+  facet_type: CharacterFacetType | null
+  content: unknown
+  apparent_content: unknown | null
+  access_policy: AccessPolicy
+  subject_awareness: SubjectAwareness
+  metadata: KnowledgeMetadata
+  valid_from: unknown | null
+  valid_until: unknown | null
+  source_session_id: string | null
+  source_scene_turn_id: string | null
+  derived_from_event_id: string | null
+  schema_version: string
+  created_at: string
+  updated_at: string
+}
+
+export interface KnowledgeListItem {
+  knowledge_id: string
+  kind: KnowledgeKind
+  subject_type: KnowledgeSubjectType
+  subject_id: string | null
+  facet_type: CharacterFacetType | null
+  summary_text: string
+  access_scope_summary: string
+  updated_at: string
+}
+
+export interface KnowledgeRevealEvent {
+  event_id: string
+  knowledge_id: string
+  newly_known_by: string[]
+  trigger: string
+  scope_change?: unknown
+  scene_turn_id: string
+}
+
+export interface AccessibleEntry {
+  knowledge_id: string
+  kind: KnowledgeKind
+  subject_type: KnowledgeSubjectType
+  subject_id: string | null
+  accessible_content: unknown
+  source_hint: string
+}
+
+export interface AccessibleKnowledge {
+  character_id: string
+  scene_turn_id: string
+  entries: AccessibleEntry[]
+}
+
+export const KNOWLEDGE_KIND_LABELS: Record<KnowledgeKind, string> = {
+  world_fact: '世界事实',
+  region_fact: '地区事实',
+  faction_fact: '势力事实',
+  character_facet: '角色分面',
+  historical_event: '历史事件',
+  memory: '记忆',
+}
+
+export const CHARACTER_FACET_LABELS: Record<CharacterFacetType, string> = {
+  Appearance: '外貌',
+  Identity: '身份',
+  TrueName: '真名',
+  Species: '种族',
+  Bloodline: '血脉',
+  CultivationRealm: '修为境界',
+  KnownAbility: '已知能力',
+  HiddenAbility: '隐藏能力',
+  Personality: '性格',
+  Background: '出身背景',
+  Motivation: '动机',
+  Trauma: '创伤',
+  MindModelCard: '认知基线卡',
+}
