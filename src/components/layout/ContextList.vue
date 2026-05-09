@@ -802,7 +802,7 @@ watch(() => route.name, async (newName) => {
               <template #icon>
                 <NIcon><TrashOutline /></NIcon>
               </template>
-              删除
+              删除世界书
             </NButton>
           </template>
           确定删除此世界书吗？
@@ -944,7 +944,7 @@ watch(() => route.name, async (newName) => {
               <template #icon>
                 <NIcon><TrashOutline /></NIcon>
               </template>
-              删除
+              删除预设
             </NButton>
           </template>
           确定删除此预设吗？
@@ -1179,7 +1179,7 @@ watch(() => route.name, async (newName) => {
       <div class="modal-actions">
         <NButton @click="deletingSessionId = null">取消</NButton>
         <NButton type="error" @click="confirmDeleteSessionFromModal">
-          删除
+          删除会话
         </NButton>
       </div>
     </NModal>
