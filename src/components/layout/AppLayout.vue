@@ -31,7 +31,11 @@ const AgentInspectPanel = defineAsyncComponent({
 
 const isAgentMode = computed(() => route.path.startsWith('/agent'))
 
+const isWorldEditor = computed(() => route.name === 'agent-world-editor')
+
 const showContextList = computed(() => {
+  // World Editor has its own 3-column layout; do not show AppLayout context list
+  if (isWorldEditor.value) return false
   const contextPages = [
     'st-home',
     'st-chat',
@@ -46,8 +50,9 @@ const showContextList = computed(() => {
 })
 
 const showInspectPanel = computed(() => {
-  // Pages that show inspect panel
-  const inspectPages = ['st-chat', 'agent-worlds', 'agent-world-editor']
+  // World Editor has its own validation panel; do not show AppLayout inspect panel
+  if (isWorldEditor.value) return false
+  const inspectPages = ['st-chat', 'agent-worlds']
   return inspectPages.includes(route.name as string) && appShell.inspectPanelOpen
 })
 
