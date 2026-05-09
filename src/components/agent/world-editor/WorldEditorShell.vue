@@ -107,9 +107,9 @@ watch(() => editorStore.selectedEntityType, () => {
           {{ editorStore.worldStatus }}
         </NTag>
         <span class="revision-text">Revision {{ editorStore.editorRevision }}</span>
-        <NTooltip>
+        <NTooltip v-if="editorStore.draft?.isDirty">
           <template #trigger>
-            <NTag v-if="editorStore.draft?.isDirty" size="small" type="warning">
+            <NTag size="small" type="warning">
               <template #icon><NIcon><WarningOutline /></NIcon></template>
               未保存
             </NTag>

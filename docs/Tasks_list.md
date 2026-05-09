@@ -363,3 +363,4 @@
 | 2026-05-07 | 修复预设 `ContextList` 提示词条目拖拽失效：确认 `prompt_order` 数据层无禁排约束后，将拖拽源收敛回拖拽手柄，恢复交互区事件隔离，并在列表项容器上显式处理 `dragover/drop`，避免整卡拖拽导致排序无法落到目标条目 |
 | 2026-05-07 | 将预设 `ContextList` 提示词排序从原生 HTML5 DnD 改为指针驱动实现：按住拖拽手柄时用全局 `pointermove` 命中条目并即时重排，松手后统一保存，绕开 Tauri WebView 下原生 `drop` 事件不稳定导致的“卡片有拖拽动画但顺序不变”问题 |
 | 2026-05-10 | 修复 Agent World -> World Editor 白屏：补上 World Editor Tauri 最小命令接线（snapshot / validate / commit / detail / trace/reaction stub）、新增路由级错误边界避免单页异常拖垮整块主视图，并将 CharacterRecordEditor 的字段读取改为兼容当前 Rust `CharacterRecord` 模型，避免选中角色时因前后端模型漂移触发渲染崩溃 |
+| 2026-05-10 | 修复 Agent World -> World Editor 渲染异常：将顶部“未保存”提示的 `NTooltip` 改为仅在 dirty 时整体渲染，避免 `trigger` 插槽在干净草稿下返回 0 个子节点并触发 `[vueuc/follower]: slot[default] should have exactly one child` |
