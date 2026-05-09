@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton,
@@ -8,15 +8,12 @@ import {
   NInput,
   NList,
   NListItem,
-  NSelect,
   NSpin,
   NTag,
 } from 'naive-ui'
 import {
   AddOutline,
   SearchOutline,
-  GlobeOutline,
-  GitBranchOutline,
   TimeOutline,
 } from '@vicons/ionicons5'
 import { useAgentStore } from '@/stores/agent'
@@ -27,35 +24,15 @@ const router = useRouter()
 const agentStore = useAgentStore()
 
 const searchQuery = ref('')
-const selectedWorldId = ref<string>('')
 
-// ===== World Selection =====
-
-const worldOptions = computed(() => {
-  return agentStore.worlds.map(w => ({
-    label: `${w.world_id} (${w.session_count} 会话)`,
-    value: w.world_id,
-  }))
-})
-
-const currentWorld = computed(() =>
-  agentStore.worlds.find(w => w.world_id === selectedWorldId.value)
-)
-
-// Initialize selectedWorldId from route or store
-function resolveWorldId(): string {
-  const routeWorldId = route.params.worldId
-  if (typeof routeWorldId === 'string' && routeWorldId.length > 0) return routeWorldId
-  return agentStore.currentWorldId ?? ''
-}
-
-selectedWorldId.value = resolveWorldId()
+// Use global currentWorldId from store
+const worldId = computed(() => agentStore.currentWorldId ?? '')
 
 // ===== Session List =====
 
 const filteredSessions = computed(() => {
   const worldSessions = agentStore.sessions.filter(
-    s => s.world_id === selectedWorldId.value
+    s => s.world_id === worldId.value
   )
   const sorted = [...worldSessions].sort(
     (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
@@ -85,16 +62,6 @@ const sessionGroups = computed(() => {
 
 // ===== Navigation =====
 
-function switchWorld(worldId: string) {
-  if (!worldId || worldId === selectedWorldId.value) return
-  selectedWorldId.value = worldId
-  agentStore.loadWorld(worldId)
-  // If currently on a world-specific route, redirect to the new world
-  if (route.params.worldId) {
-    router.push({ name: 'agent-worlds', params: { worldId } })
-  }
-}
-
 function openSession(session: AgentSession) {
   router.push({
     name: 'agent-chat',
@@ -102,22 +69,7 @@ function openSession(session: AgentSession) {
   })
 }
 
-function openWorldWorkspace() {
-  if (!selectedWorldId.value) return
-  router.push({ name: 'agent-worlds', params: { worldId: selectedWorldId.value } })
-}
-
-function openWorldEditor() {
-  if (!selectedWorldId.value) return
-  router.push({ name: 'agent-world-editor', params: { worldId: selectedWorldId.value } })
-}
-
 function openCreateSession() {
-  if (!selectedWorldId.value) {
-    // Emit to parent or use a global event; here we push to world view which has the modal
-    router.push({ name: 'agent-worlds', params: { worldId: selectedWorldId.value || 'new' } })
-    return
-  }
   window.dispatchEvent(new CustomEvent('open-agent-session-create'))
 }
 
@@ -137,51 +89,10 @@ function getPlayerModeLabel(mode: string) {
       return mode
   }
 }
-
-// ===== Watchers =====
-
-watch(
-  () => route.params.worldId,
-  (routeWorldId) => {
-    if (typeof routeWorldId === 'string' && routeWorldId.length > 0) {
-      selectedWorldId.value = routeWorldId
-      agentStore.loadWorld(routeWorldId)
-    }
-  },
-  { immediate: true }
-)
-
-watch(selectedWorldId, async (worldId) => {
-  if (!worldId) return
-  await agentStore.loadWorld(worldId)
-})
 </script>
 
 <template>
   <div class="context-list">
-    <!-- World Switcher -->
-    <div class="world-switcher">
-      <div class="switcher-header">
-        <NIcon :size="16"><GlobeOutline /></NIcon>
-        <span class="switcher-label">World</span>
-        <NButton quaternary size="tiny" @click="openCreateSession">
-          <template #icon><NIcon><AddOutline /></NIcon></template>
-        </NButton>
-      </div>
-      <NSelect
-        v-model:value="selectedWorldId"
-        :options="worldOptions"
-        size="small"
-        placeholder="选择 World..."
-        @update:value="switchWorld"
-      />
-      <div v-if="currentWorld" class="world-meta">
-        <span>主线 {{ currentWorld.mainline_time_anchor?.display_text ?? '未初始化' }}</span>
-        <span>·</span>
-        <span>{{ currentWorld.character_count }} 角色</span>
-      </div>
-    </div>
-
     <!-- Session Search -->
     <div class="list-search">
       <NInput
@@ -196,22 +107,10 @@ watch(selectedWorldId, async (worldId) => {
       </NInput>
     </div>
 
-    <!-- Quick Actions -->
-    <div class="quick-actions">
-      <NButton size="tiny" secondary @click="openWorldWorkspace">
-        <template #icon><NIcon :size="14"><GitBranchOutline /></NIcon></template>
-        工作区
-      </NButton>
-      <NButton size="tiny" secondary @click="openWorldEditor">
-        <template #icon><NIcon :size="14"><GlobeOutline /></NIcon></template>
-        编辑器
-      </NButton>
-    </div>
-
     <!-- Session List -->
     <div class="list-content">
       <NSpin :show="agentStore.isLoading">
-        <template v-if="!selectedWorldId">
+        <template v-if="!worldId">
           <NEmpty description="请先选择一个 World" size="small" />
         </template>
         <template v-else-if="sessionGroups.length === 0">
@@ -268,51 +167,17 @@ watch(selectedWorldId, async (worldId) => {
   overflow: hidden;
 }
 
-.world-switcher {
-  padding: 10px 12px 8px;
-  border-bottom: 1px solid var(--color-border-subtle, #e0e0e6);
-  flex-shrink: 0;
-}
-
-.switcher-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
-}
-
-.switcher-label {
-  font-weight: 600;
-  font-size: 13px;
-  flex: 1;
-}
-
-.world-meta {
-  margin-top: 6px;
-  font-size: 11px;
-  color: var(--color-text-secondary, #6b7280);
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-
 .list-search {
-  padding: 8px 12px;
+  padding: 10px 12px;
   flex-shrink: 0;
-}
-
-.quick-actions {
-  padding: 0 12px 8px;
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
+  border-bottom: 1px solid var(--color-border-subtle, #e0e0e6);
 }
 
 .list-content {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 0 4px 8px;
+  padding: 8px 4px;
 }
 
 .session-group {

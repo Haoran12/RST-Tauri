@@ -63,7 +63,7 @@ const navSections = computed(() => displayMode.value === 'agent' ? agentSections
 
 const activeKey = computed(() => {
   const name = route.name as string
-  if (name === 'agent-chat' || name === 'agent-world-editor') return 'agent-worlds'
+  if (name === 'agent-chat') return 'agent-worlds'
   if (name === 'mode-select') return ''
   return name
 })

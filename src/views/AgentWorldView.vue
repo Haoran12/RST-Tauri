@@ -247,11 +247,11 @@ onBeforeUnmount(() => {
           </template>
           创建会话
         </NButton>
-        <NButton secondary @click="router.push({ name: 'agent-world-editor', params: { worldId } })">
+        <NButton secondary @click="router.push({ name: 'agent-knowledge' })">
           <template #icon>
             <NIcon><CreateOutline /></NIcon>
           </template>
-          World Editor
+          打开编辑器
         </NButton>
       </NSpace>
     </header>

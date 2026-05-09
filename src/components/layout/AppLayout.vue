@@ -4,6 +4,8 @@ import { computed, defineAsyncComponent } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppShellStore } from '@/stores/appShell'
 import AppNav from './AppNav.vue'
+import AgentModuleNav from './AgentModuleNav.vue'
+import AgentWorldTopBar from './AgentWorldTopBar.vue'
 import PanelLoading from './PanelLoading.vue'
 import RouteErrorBoundary from '@/components/shared/RouteErrorBoundary.vue'
 
@@ -32,16 +34,11 @@ const AgentInspectPanel = defineAsyncComponent({
 
 const isAgentMode = computed(() => route.path.startsWith('/agent'))
 
-const isWorldEditor = computed(() => route.name === 'agent-world-editor')
-
 const showContextList = computed(() => {
-  // World Editor has its own 3-column layout; do not show AppLayout context list
-  if (isWorldEditor.value) return false
   const contextPages = [
     'st-home',
     'st-chat',
-    'agent-home',
-    'agent-worlds',
+    'agent-chat',
     'resources-characters',
     'resources-worldbooks',
     'resources-presets',
@@ -51,8 +48,6 @@ const showContextList = computed(() => {
 })
 
 const showInspectPanel = computed(() => {
-  // World Editor has its own validation panel; do not show AppLayout inspect panel
-  if (isWorldEditor.value) return false
   const inspectPages = ['st-chat', 'agent-worlds']
   return inspectPages.includes(route.name as string) && appShell.inspectPanelOpen
 })
@@ -92,6 +87,9 @@ const mainContentStyle = {
     <!-- Primary Navigation -->
     <AppNav />
 
+    <!-- Agent Module Navigation -->
+    <AgentModuleNav v-if="isAgentMode" />
+
     <!-- Main Layout Area -->
     <NLayout
       class="main-layout"
@@ -117,6 +115,7 @@ const mainContentStyle = {
         :native-scrollbar="false"
         :content-style="mainContentStyle"
       >
+        <AgentWorldTopBar v-if="isAgentMode" />
         <div class="route-host">
           <router-view v-slot="{ Component }">
             <RouteErrorBoundary :reset-key="route.fullPath">
