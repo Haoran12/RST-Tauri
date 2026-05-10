@@ -354,12 +354,26 @@ function routeSessionId() {
 
 async function syncRouteSession() {
   const id = routeSessionId()
-  if (!id || chatStore.currentSession?.id === id) return
-  try {
-    await chatStore.loadSession(id)
-    scrollToBottom()
-  } catch (e) {
-    console.error('Failed to load session:', e)
+  if (chatStore.currentSession?.id === id) return
+
+  if (id) {
+    try {
+      await chatStore.loadSession(id)
+      scrollToBottom()
+    } catch (e) {
+      console.error('Failed to load session:', e)
+    }
+  } else if (!chatStore.currentSession && chatStore.sessions.length > 0) {
+    // 没有指定会话且当前没有活跃会话时，默认打开最新的会话
+    const latest = [...chatStore.sessions].sort(
+      (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+    )[0]
+    try {
+      await chatStore.loadSession(latest.id)
+      scrollToBottom()
+    } catch (e) {
+      console.error('Failed to load latest session:', e)
+    }
   }
 }
 
