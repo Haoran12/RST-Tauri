@@ -326,6 +326,25 @@ pub async fn list_agent_worlds(
     Ok(worlds)
 }
 
+/// 删除一个 Agent World 及其所有数据（包括目录和 SQLite 数据库）。
+#[tauri::command]
+pub async fn delete_agent_world(app: AppHandle, world_id: String) -> Result<(), String> {
+    validate_path_component(&world_id)
+        .map_err(|e| format!("Invalid world_id '{}': {}", world_id, e))?;
+
+    let data_dir = get_data_dir(&app)?;
+    let world_dir = safe_join(&data_dir, &format!("worlds/{}", world_id))?;
+
+    if !world_dir.exists() {
+        return Err(format!("World '{}' does not exist", world_id));
+    }
+
+    std::fs::remove_dir_all(&world_dir)
+        .map_err(|e| format!("Failed to delete world directory '{}': {}", world_id, e))?;
+
+    Ok(())
+}
+
 /// 创建一个新的 Agent World，并初始化目录、world.sqlite 与 world_argument.yaml。
 #[tauri::command]
 pub async fn create_agent_world(

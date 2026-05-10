@@ -130,6 +130,23 @@ function formatTime(value: string | null | undefined) {
   return date.toLocaleString()
 }
 
+function confirmDeleteWorld(worldId: string) {
+  dialog.warning({
+    title: '删除 World',
+    content: `确定删除 World "${worldId}"？此操作将永久删除该 World 下的所有会话、角色和数据，不可恢复。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await agentStore.deleteWorld(worldId)
+        message.success('World 已删除')
+      } catch (e) {
+        message.error(`删除失败: ${String(e)}`)
+      }
+    },
+  })
+}
+
 function confirmDeleteAgentSession(session: AgentSession) {
   dialog.warning({
     title: '删除会话',
@@ -207,13 +224,26 @@ onMounted(async () => {
                   角色 {{ world.character_count }}
                 </div>
               </div>
-              <NButton
-                size="small"
-                secondary
-                @click.stop="router.push({ name: 'agent-home' })"
-              >
-                进入
-              </NButton>
+              <NSpace>
+                <NButton
+                  size="small"
+                  secondary
+                  @click.stop="router.push({ name: 'agent-home' })"
+                >
+                  进入
+                </NButton>
+                <NButton
+                  size="small"
+                  type="error"
+                  secondary
+                  @click.stop="confirmDeleteWorld(world.world_id)"
+                >
+                  <template #icon>
+                    <NIcon><TrashOutline /></NIcon>
+                  </template>
+                  删除
+                </NButton>
+              </NSpace>
             </div>
           </NListItem>
         </NList>

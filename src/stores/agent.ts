@@ -9,7 +9,7 @@ import type {
 } from '@/types/agent/session'
 import type { CharacterRecord } from '@/types/agent/character'
 import type { AgentWorldListItem, CreateAgentWorldInput } from '@/types/agent/world'
-import { createAgentWorld, listAgentWorlds, deleteAgentSession } from '@/services/agentApi'
+import { createAgentWorld, listAgentWorlds, deleteAgentWorld, deleteAgentSession } from '@/services/agentApi'
 
 // ===== Input Types for Tauri Commands =====
 
@@ -217,6 +217,17 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   /**
+   * Delete a world
+   */
+  async function deleteWorld(worldId: string): Promise<void> {
+    await deleteAgentWorld(worldId)
+    worlds.value = worlds.value.filter((w) => w.world_id !== worldId)
+    if (currentWorldId.value === worldId) {
+      clearWorld()
+    }
+  }
+
+  /**
    * Delete a session
    */
   async function deleteSession(worldId: string, sessionId: string): Promise<void> {
@@ -257,6 +268,7 @@ export const useAgentStore = defineStore('agent', () => {
     // Actions
     loadWorldList,
     createWorld,
+    deleteWorld,
     loadWorld,
     loadMainlineCursor,
     loadSessions,

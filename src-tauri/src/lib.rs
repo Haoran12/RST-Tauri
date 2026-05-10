@@ -219,6 +219,7 @@ pub fn run() {
             // Agent session commands
             commands::list_agent_worlds,
             commands::create_agent_world,
+            commands::delete_agent_world,
             commands::create_agent_session,
             commands::list_agent_sessions,
             commands::get_agent_session,

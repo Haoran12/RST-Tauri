@@ -29,6 +29,10 @@ export async function createAgentWorld(input: CreateAgentWorldInput): Promise<Ag
   return await invoke<AgentWorldListItem>('create_agent_world', { input })
 }
 
+export async function deleteAgentWorld(worldId: string): Promise<void> {
+  return await invoke<void>('delete_agent_world', { worldId })
+}
+
 // ===== Session Management =====
 
 export interface CreateSessionInput {
