@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NCard, NGrid, NGi, NIcon, NPagination, NSelect, NSpace, NTag, useDialog, useMessage } from 'naive-ui'
-import { AlertCircleOutline, BookOutline, ChatbubbleOutline, KeyOutline, PersonOutline, SettingsOutline, TrashOutline } from '@vicons/ionicons5'
+import { NButton, NCard, NDivider, NForm, NFormItem, NGrid, NGi, NIcon, NInput, NModal, NPagination, NSelect, NSpace, NTag, useDialog, useMessage } from 'naive-ui'
+import { AddOutline, AlertCircleOutline, BookOutline, ChatbubbleOutline, KeyOutline, PersonOutline, SettingsOutline, TrashOutline } from '@vicons/ionicons5'
 import { useSettingsStore } from '@/stores/settings'
 import { useRuntimeStore } from '@/stores/runtime'
 import { useChatStore } from '@/stores/chat'
@@ -177,6 +177,57 @@ function confirmDeleteStSession(session: { id: string; name: string }) {
   })
 }
 
+// Create session modal
+const showCreateModal = ref(false)
+const newSessionName = ref('')
+const newSessionCharacter = ref<string | null>(null)
+const newSessionWorldbooks = ref<string[]>([])
+
+const worldbookOptions = computed(() =>
+  worldbooksStore.worldbookList.map((w) => ({
+    label: w.name,
+    value: w.id,
+  }))
+)
+
+function openCreateModal() {
+  newSessionName.value = ''
+  newSessionCharacter.value = null
+  newSessionWorldbooks.value = []
+  showCreateModal.value = true
+}
+
+async function handleCreateSession() {
+  const name = newSessionName.value.trim()
+  if (!name) {
+    message.warning('请输入会话名')
+    return
+  }
+  try {
+    await chatStore.createSession(
+      name,
+      newSessionCharacter.value || undefined
+    )
+    const session = chatStore.currentSession
+    if (session && newSessionWorldbooks.value.length > 0) {
+      await chatStore.updateSessionSettings(session.id, {
+        name: session.name,
+        character_id: session.character_id ?? null,
+        enabled_world_info: newSessionWorldbooks.value,
+        user_persona: { name: '', description: '' },
+      })
+    }
+    message.success('会话创建成功')
+    showCreateModal.value = false
+    await hydrate()
+    if (session) {
+      router.push({ name: 'st-chat', params: { sessionId: session.id } })
+    }
+  } catch (e) {
+    message.error(`创建失败: ${String(e)}`)
+  }
+}
+
 onMounted(async () => {
   try {
     await hydrate()
@@ -256,14 +307,22 @@ onMounted(async () => {
 
       <NCard size="small" title="ST 会话">
         <template #header-extra>
-          <NSelect
-            v-model:value="selectedCharacterFilter"
-            :options="characterFilterOptions"
-            placeholder="按角色卡筛选"
-            size="small"
-            style="width: 180px"
-            @update:value="page = 1"
-          />
+          <NSpace>
+            <NButton size="small" type="success" @click="openCreateModal">
+              <template #icon>
+                <NIcon><AddOutline /></NIcon>
+              </template>
+              新建会话
+            </NButton>
+            <NSelect
+              v-model:value="selectedCharacterFilter"
+              :options="characterFilterOptions"
+              placeholder="按角色卡筛选"
+              size="small"
+              style="width: 180px"
+              @update:value="page = 1"
+            />
+          </NSpace>
         </template>
 
         <div v-if="paginatedSessions.length" class="session-grid">
@@ -305,6 +364,61 @@ onMounted(async () => {
         </div>
       </NCard>
     </div>
+
+    <!-- 新建 ST 会话弹窗 -->
+    <NModal
+      v-model:show="showCreateModal"
+      preset="card"
+      title="新建 ST 会话"
+      style="width: min(480px, 90vw)"
+      :mask-closable="false"
+    >
+      <NForm label-placement="left" label-width="80">
+        <NFormItem label="会话名" required>
+          <NInput
+            v-model:value="newSessionName"
+            placeholder="输入会话名称"
+            :maxlength="100"
+            show-count
+            clearable
+          />
+        </NFormItem>
+
+        <NDivider style="margin: 12px 0" />
+
+        <NFormItem label="角色卡">
+          <NSelect
+            v-model:value="newSessionCharacter"
+            :options="characterFilterOptions.filter(opt => opt.value !== '')"
+            placeholder="选择关联的角色卡（可选）"
+            clearable
+          />
+        </NFormItem>
+
+        <NFormItem label="世界书">
+          <NSelect
+            v-model:value="newSessionWorldbooks"
+            :options="worldbookOptions"
+            placeholder="选择要启用的世界书（可选，可多选）"
+            multiple
+            clearable
+          />
+        </NFormItem>
+      </NForm>
+
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="showCreateModal = false">取消</NButton>
+          <NButton
+            type="primary"
+            :disabled="!newSessionName.trim()"
+            @click="handleCreateSession"
+          >
+            创建会话
+          </NButton>
+        </NSpace>
+      </template>
+    </NModal>
   </div>
 </template>
 
