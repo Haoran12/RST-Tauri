@@ -28,7 +28,12 @@ import {
 } from '@vicons/ionicons5'
 import StructuredTextEditor from '@/components/shared/structured-text-editor/StructuredTextEditor.vue'
 import { useAgentWorldEditorStore } from '@/stores/agentWorldEditor'
-import type { KnowledgeEntry, KnowledgeSubjectType } from '@/types/agent/knowledge'
+import {
+  createAccessScope,
+  createDefaultAccessPolicy,
+  type KnowledgeEntry,
+  type KnowledgeSubjectType,
+} from '@/types/agent/knowledge'
 import { KNOWLEDGE_KIND_LABELS, CHARACTER_FACET_LABELS } from '@/types/agent/knowledge'
 import { DEFAULT_BINDINGS } from '@/types/structuredText'
 
@@ -74,14 +79,14 @@ function updateField(path: string, value: unknown) {
 }
 
 function updateAccessPolicy(field: string, value: unknown) {
-  const policy = { ...(draft.value?.access_policy ?? { known_by: [], scope: [], conditions: [] }) }
+  const policy = { ...(draft.value?.access_policy ?? createDefaultAccessPolicy()) }
   ;(policy as Record<string, unknown>)[field] = value
   updateField('access_policy', policy)
 }
 
 function addScope() {
   const scope = [...(draft.value?.access_policy.scope ?? [])]
-  scope.push({ type: 'Public' })
+  scope.push(createAccessScope('Public'))
   updateAccessPolicy('scope', scope)
 }
 

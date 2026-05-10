@@ -20,7 +20,7 @@ import {
 } from '@vicons/ionicons5'
 import { useAgentStore } from '@/stores/agent'
 import { useAgentWorldEditorStore } from '@/stores/agentWorldEditor'
-import { KNOWLEDGE_KIND_LABELS } from '@/types/agent/knowledge'
+import { KNOWLEDGE_KIND_LABELS, createDefaultKnowledgeEntry } from '@/types/agent/knowledge'
 import KnowledgeEntryEditor from '@/components/agent/world-editor/KnowledgeEntryEditor.vue'
 
 const message = useMessage()
@@ -55,26 +55,7 @@ async function handleKnowledgeSelect(id: string) {
 function createNewKnowledge() {
   const id = `knowledge_${Date.now()}`
   editorStore.selectEntity('knowledge', id)
-  editorStore.initDraft('knowledge', id, {
-    knowledge_id: id,
-    kind: 'world_fact',
-    subject_type: 'world',
-    subject_id: null,
-    facet_type: null,
-    content: { summary_text: '' },
-    apparent_content: null,
-    access_policy: { known_by: [], scope: [{ type: 'Public' }], conditions: [] },
-    subject_awareness: { kind: 'Aware' },
-    metadata: { created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-    valid_from: null,
-    valid_until: null,
-    source_session_id: null,
-    source_scene_turn_id: null,
-    derived_from_event_id: null,
-    schema_version: '0.1',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  } as any, true)
+  editorStore.initDraft('knowledge', id, createDefaultKnowledgeEntry(id), true)
 }
 
 async function handleValidate() {

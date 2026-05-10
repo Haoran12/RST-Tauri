@@ -3,7 +3,7 @@
 //! KnowledgeEntry, AccessPolicy, SubjectAwareness, TruthGuidance, KnowledgeRevealEvent
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
 
 use super::common::*;
 use super::scene::ManaAttribute; // Used in ManaHaze and KnowledgeEntry content
@@ -82,14 +82,17 @@ pub enum CharacterFacetType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccessPolicy {
     /// Name-list access (character IDs who can access)
+    #[serde(default)]
     pub known_by: Vec<String>,
     /// Scope-based access
+    #[serde(default)]
     pub scope: Vec<AccessScope>,
     /// Condition-based access (runtime evaluation)
+    #[serde(default)]
     pub conditions: Vec<AccessCondition>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub enum AccessScope {
     /// All inhabitants can access
     Public,
@@ -107,7 +110,7 @@ pub enum AccessScope {
     Bloodline(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub enum AccessCondition {
     /// In same scene and can observe
     InSameSceneObservable,
@@ -132,7 +135,7 @@ pub enum AccessExpression {
 }
 
 /// Subject awareness - for CharacterFacet knowledge
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub enum SubjectAwareness {
     /// Subject knows about this facet (content is accessible)
     Aware,
@@ -143,17 +146,254 @@ pub enum SubjectAwareness {
 /// Knowledge metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KnowledgeMetadata {
+    #[serde(default = "default_utc_now")]
     pub created_at: DateTime<Utc>,
+    #[serde(default = "default_utc_now")]
     pub updated_at: DateTime<Utc>,
+    #[serde(default)]
     pub valid_from: Option<TimeAnchor>,
+    #[serde(default)]
     pub valid_until: Option<TimeAnchor>,
+    #[serde(default)]
     pub source_session_id: Option<String>,
+    #[serde(default)]
     pub source_scene_turn_id: Option<String>,
+    #[serde(default)]
     pub derived_from_event_id: Option<String>,
     /// Memory-specific fields
+    #[serde(default)]
     pub emotional_weight: Option<f64>,
+    #[serde(default)]
     pub last_accessed_at: Option<DateTime<Utc>>,
+    #[serde(default)]
     pub source: Option<MemorySource>,
+}
+
+impl<'de> Deserialize<'de> for AccessScope {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer).map_err(de::Error::custom)?;
+        parse_access_scope_value(value).map_err(de::Error::custom)
+    }
+}
+
+impl<'de> Deserialize<'de> for AccessCondition {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer).map_err(de::Error::custom)?;
+        parse_access_condition_value(value).map_err(de::Error::custom)
+    }
+}
+
+impl<'de> Deserialize<'de> for SubjectAwareness {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer).map_err(de::Error::custom)?;
+        parse_subject_awareness_value(value).map_err(de::Error::custom)
+    }
+}
+
+fn default_utc_now() -> DateTime<Utc> {
+    Utc::now()
+}
+
+fn parse_access_scope_value(value: serde_json::Value) -> Result<AccessScope, String> {
+    match value {
+        serde_json::Value::String(kind) => match kind.as_str() {
+            "Public" => Ok(AccessScope::Public),
+            "GodOnly" => Ok(AccessScope::GodOnly),
+            other => Err(format!(
+                "unknown variant `{}`, expected one of `Public`, `GodOnly`, `Region`, `Faction`, `Realm`, `Role`, `Bloodline`",
+                other
+            )),
+        },
+        serde_json::Value::Object(mut map) => {
+            if let Some(kind) = map
+                .remove("type")
+                .and_then(|value| value.as_str().map(|s| s.to_string()))
+            {
+                return parse_access_scope_kind(&kind, map.remove("value"));
+            }
+
+            if map.len() == 1 {
+                let (kind, payload) = map.into_iter().next().unwrap();
+                return parse_access_scope_kind(&kind, Some(payload));
+            }
+
+            Err("expected access scope string or single-variant object".to_string())
+        }
+        other => Err(format!(
+            "expected access scope string or object, got {}",
+            other
+        )),
+    }
+}
+
+fn parse_access_scope_kind(
+    kind: &str,
+    payload: Option<serde_json::Value>,
+) -> Result<AccessScope, String> {
+    let payload_text = match payload {
+        Some(serde_json::Value::String(value)) => value,
+        Some(serde_json::Value::Null) | None => String::new(),
+        Some(other) => other.to_string(),
+    };
+
+    match kind {
+        "Public" => Ok(AccessScope::Public),
+        "GodOnly" => Ok(AccessScope::GodOnly),
+        "Region" => Ok(AccessScope::Region(payload_text)),
+        "Faction" => Ok(AccessScope::Faction(payload_text)),
+        "Realm" => Ok(AccessScope::Realm(payload_text)),
+        "Role" => Ok(AccessScope::Role(payload_text)),
+        "Bloodline" => Ok(AccessScope::Bloodline(payload_text)),
+        other => Err(format!(
+            "unknown variant `{}`, expected one of `Public`, `GodOnly`, `Region`, `Faction`, `Realm`, `Role`, `Bloodline`",
+            other
+        )),
+    }
+}
+
+fn parse_access_condition_value(value: serde_json::Value) -> Result<AccessCondition, String> {
+    match value {
+        serde_json::Value::String(kind) => parse_access_condition_kind(&kind, None),
+        serde_json::Value::Object(mut map) => {
+            if let Some(kind) = map
+                .remove("kind")
+                .and_then(|value| value.as_str().map(|s| s.to_string()))
+            {
+                let payload = map.remove("payload").or_else(|| {
+                    if map.is_empty() {
+                        None
+                    } else {
+                        Some(serde_json::Value::Object(map))
+                    }
+                });
+                return parse_access_condition_kind(&kind, payload);
+            }
+
+            if map.len() == 1 {
+                let (kind, payload) = map.into_iter().next().unwrap();
+                return parse_access_condition_kind(&kind, Some(payload));
+            }
+
+            Err("expected access condition string or single-variant object".to_string())
+        }
+        other => Err(format!(
+            "expected access condition string or object, got {}",
+            other
+        )),
+    }
+}
+
+fn parse_access_condition_kind(
+    kind: &str,
+    payload: Option<serde_json::Value>,
+) -> Result<AccessCondition, String> {
+    match kind {
+        "InSameSceneObservable" => Ok(AccessCondition::InSameSceneObservable),
+        "HasSkill" => Ok(AccessCondition::HasSkill(extract_payload_string(payload))),
+        "CultivationAtLeast" => Ok(AccessCondition::CultivationAtLeast(
+            extract_payload_string(payload),
+        )),
+        "SocialAccessAtLeast" => {
+            let payload = payload.unwrap_or_else(|| serde_json::json!({}));
+            let object = payload.as_object().cloned().unwrap_or_default();
+            Ok(AccessCondition::SocialAccessAtLeast {
+                target: object
+                    .get("target")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                threshold: object
+                    .get("threshold")
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap_or_default(),
+            })
+        }
+        "CustomPredicate" => {
+            let payload = payload.ok_or_else(|| {
+                "CustomPredicate requires a structured payload".to_string()
+            })?;
+            let expression = serde_json::from_value(payload)
+                .map_err(|e| format!("invalid CustomPredicate payload: {}", e))?;
+            Ok(AccessCondition::CustomPredicate(expression))
+        }
+        other => Err(format!(
+            "unknown variant `{}`, expected one of `InSameSceneObservable`, `SocialAccessAtLeast`, `HasSkill`, `CultivationAtLeast`, `CustomPredicate`",
+            other
+        )),
+    }
+}
+
+fn extract_payload_string(payload: Option<serde_json::Value>) -> String {
+    match payload {
+        Some(serde_json::Value::String(value)) => value,
+        Some(serde_json::Value::Object(mut object)) => object
+            .remove("value")
+            .and_then(|value| value.as_str().map(|s| s.to_string()))
+            .unwrap_or_default(),
+        Some(serde_json::Value::Null) | None => String::new(),
+        Some(other) => other.to_string(),
+    }
+}
+
+fn parse_subject_awareness_value(value: serde_json::Value) -> Result<SubjectAwareness, String> {
+    match value {
+        serde_json::Value::String(kind) => match kind.as_str() {
+            "Aware" => Ok(SubjectAwareness::Aware),
+            "Unaware" => Ok(SubjectAwareness::Unaware {
+                self_belief: serde_json::Value::Null,
+            }),
+            other => Err(format!(
+                "unknown variant `{}`, expected one of `Aware`, `Unaware`",
+                other
+            )),
+        },
+        serde_json::Value::Object(mut map) => {
+            if let Some(kind) = map
+                .remove("kind")
+                .and_then(|value| value.as_str().map(|s| s.to_string()))
+            {
+                return match kind.as_str() {
+                    "Aware" => Ok(SubjectAwareness::Aware),
+                    "Unaware" => Ok(SubjectAwareness::Unaware {
+                        self_belief: map.remove("self_belief").unwrap_or(serde_json::Value::Null),
+                    }),
+                    other => Err(format!(
+                        "unknown variant `{}`, expected one of `Aware`, `Unaware`",
+                        other
+                    )),
+                };
+            }
+
+            if map.contains_key("Aware") {
+                return Ok(SubjectAwareness::Aware);
+            }
+
+            if let Some(payload) = map.remove("Unaware") {
+                let self_belief = match payload {
+                    serde_json::Value::Object(mut object) => object
+                        .remove("self_belief")
+                        .unwrap_or(serde_json::Value::Null),
+                    other => other,
+                };
+                return Ok(SubjectAwareness::Unaware { self_belief });
+            }
+
+            Err("expected subject awareness string or variant object".to_string())
+        }
+        other => Err(format!(
+            "expected subject awareness string or object, got {}",
+            other
+        )),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -488,4 +728,80 @@ pub struct FactionAppliesTo {
     pub role: Option<String>,
     pub rank: Option<String>,
     pub member_ids: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AccessCondition, AccessPolicy, AccessScope, KnowledgeMetadata, SubjectAwareness};
+    use serde_json::json;
+
+    #[test]
+    fn access_policy_accepts_world_editor_scope_shape() {
+        let policy: AccessPolicy = serde_json::from_value(json!({
+            "known_by": ["character_a"],
+            "scope": [
+                { "type": "Public" },
+                { "type": "Region", "value": "region_001" },
+                { "Faction": "faction_001" }
+            ],
+            "conditions": []
+        }))
+        .expect("policy should deserialize");
+
+        assert_eq!(policy.known_by, vec!["character_a"]);
+        assert!(matches!(policy.scope[0], AccessScope::Public));
+        assert!(matches!(policy.scope[1], AccessScope::Region(ref value) if value == "region_001"));
+        assert!(
+            matches!(policy.scope[2], AccessScope::Faction(ref value) if value == "faction_001")
+        );
+    }
+
+    #[test]
+    fn subject_awareness_accepts_editor_shape() {
+        let awareness: SubjectAwareness = serde_json::from_value(json!({
+            "kind": "Unaware",
+            "self_belief": {
+                "summary_text": "误以为自己毫无灵力"
+            }
+        }))
+        .expect("subject awareness should deserialize");
+
+        assert!(matches!(
+            awareness,
+            SubjectAwareness::Unaware { ref self_belief }
+                if self_belief.get("summary_text").and_then(|value| value.as_str()) == Some("误以为自己毫无灵力")
+        ));
+    }
+
+    #[test]
+    fn knowledge_metadata_defaults_missing_optional_fields() {
+        let metadata: KnowledgeMetadata = serde_json::from_value(json!({
+            "created_at": "2026-05-10T12:00:00Z",
+            "updated_at": "2026-05-10T12:30:00Z"
+        }))
+        .expect("metadata should deserialize");
+
+        assert_eq!(metadata.source_session_id, None);
+        assert_eq!(metadata.derived_from_event_id, None);
+        assert_eq!(metadata.emotional_weight, None);
+        assert_eq!(metadata.last_accessed_at, None);
+    }
+
+    #[test]
+    fn access_condition_accepts_editor_shape() {
+        let condition: AccessCondition = serde_json::from_value(json!({
+            "kind": "SocialAccessAtLeast",
+            "payload": {
+                "target": "character_b",
+                "threshold": 0.75
+            }
+        }))
+        .expect("condition should deserialize");
+
+        assert!(matches!(
+            condition,
+            AccessCondition::SocialAccessAtLeast { ref target, threshold }
+                if target == "character_b" && (threshold - 0.75).abs() < f64::EPSILON
+        ));
+    }
 }

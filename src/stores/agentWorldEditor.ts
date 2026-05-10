@@ -211,11 +211,16 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
   }
 
   function initDraft<T>(type: EditorEntityType, id: string | null, data: T, isNew = false) {
+    const normalizedData =
+      type === 'knowledge'
+        ? (normalizeKnowledgeEntry(data as KnowledgeEntry) as T)
+        : data
+
     draft.value = {
       entityType: type,
       entityId: id,
-      draft: data,
-      original: isNew ? null : JSON.parse(JSON.stringify(data)),
+      draft: normalizedData,
+      original: isNew ? null : JSON.parse(JSON.stringify(normalizedData)),
       isDirty: isNew,
       isNew,
     }
