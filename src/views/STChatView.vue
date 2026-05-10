@@ -454,6 +454,7 @@ onMounted(async () => {
       runtimeStore.loadGlobalState(),
       worldbooksStore.loadWorldbooks(),
       presetsStore.loadPresetList(),
+      charactersStore.loadCharacters(),
     ])
     settingsStore.setActiveApiConfig(runtimeStore.activeApiConfigId)
     await syncRouteSession()
