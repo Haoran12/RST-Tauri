@@ -26,6 +26,8 @@ export type CharacterFacetType =
   | 'Trauma'
   | 'MindModelCard'
 
+export type RiskTolerance = 'VeryLow' | 'Low' | 'Moderate' | 'High' | 'VeryHigh'
+
 export type AccessScopeType =
   | 'Public'
   | 'GodOnly'
@@ -89,6 +91,16 @@ export interface KnowledgeEntry {
   updated_at: string
 }
 
+export interface MindModelCardContent {
+  summary_text: string
+  attention_biases: string[]
+  risk_tolerance: RiskTolerance
+  default_social_strategy: string
+  value_priorities: string[]
+  cognitive_patterns: string[]
+  extensions: Record<string, unknown>
+}
+
 export interface KnowledgeListItem {
   knowledge_id: string
   kind: KnowledgeKind
@@ -149,19 +161,84 @@ export const CHARACTER_FACET_LABELS: Record<CharacterFacetType, string> = {
   MindModelCard: '认知基线卡',
 }
 
+export function createDefaultMindModelCardContent(
+  overrides?: Partial<MindModelCardContent>
+): MindModelCardContent {
+  return {
+    summary_text: '',
+    attention_biases: [],
+    risk_tolerance: 'Moderate',
+    default_social_strategy: '',
+    value_priorities: [],
+    cognitive_patterns: [],
+    extensions: {},
+    ...overrides,
+  }
+}
+
+export function normalizeMindModelCardContent(value: unknown): MindModelCardContent {
+  const source =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {}
+
+  return createDefaultMindModelCardContent({
+    summary_text: typeof source.summary_text === 'string' ? source.summary_text : '',
+    attention_biases: Array.isArray(source.attention_biases)
+      ? source.attention_biases.filter((item): item is string => typeof item === 'string')
+      : [],
+    risk_tolerance: isRiskTolerance(source.risk_tolerance)
+      ? source.risk_tolerance
+      : 'Moderate',
+    default_social_strategy:
+      typeof source.default_social_strategy === 'string' ? source.default_social_strategy : '',
+    value_priorities: Array.isArray(source.value_priorities)
+      ? source.value_priorities.filter((item): item is string => typeof item === 'string')
+      : [],
+    cognitive_patterns: Array.isArray(source.cognitive_patterns)
+      ? source.cognitive_patterns.filter((item): item is string => typeof item === 'string')
+      : [],
+    extensions:
+      source.extensions && typeof source.extensions === 'object' && !Array.isArray(source.extensions)
+        ? (source.extensions as Record<string, unknown>)
+        : {},
+  })
+}
+
+export function normalizeKnowledgeEntry(entry: KnowledgeEntry): KnowledgeEntry {
+  if (entry.facet_type !== 'MindModelCard') {
+    return entry
+  }
+
+  return {
+    ...entry,
+    content: normalizeMindModelCardContent(entry.content),
+  }
+}
+
+function isRiskTolerance(value: unknown): value is RiskTolerance {
+  return (
+    value === 'VeryLow' ||
+    value === 'Low' ||
+    value === 'Moderate' ||
+    value === 'High' ||
+    value === 'VeryHigh'
+  )
+}
+
 export function createMindModelCardKnowledgeEntry(
   knowledgeId: string,
   characterId: string,
   overrides?: Partial<KnowledgeEntry>
 ): KnowledgeEntry {
   const now = new Date().toISOString()
-  return {
+  return normalizeKnowledgeEntry({
     knowledge_id: knowledgeId,
     kind: 'character_facet',
     subject_type: 'character',
     subject_id: characterId,
     facet_type: 'MindModelCard',
-    content: { summary_text: '' },
+    content: createDefaultMindModelCardContent(),
     apparent_content: null,
     access_policy: { known_by: [], scope: [{ type: 'Public' }], conditions: [] },
     subject_awareness: { kind: 'Aware' },
@@ -175,5 +252,5 @@ export function createMindModelCardKnowledgeEntry(
     created_at: now,
     updated_at: now,
     ...overrides,
-  }
+  })
 }

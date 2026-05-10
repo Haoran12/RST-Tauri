@@ -9,7 +9,6 @@ import {
   SettingsOutline,
   TerminalOutline,
   KeyOutline,
-  MapOutline,
   PersonOutline,
   CodeSlashOutline,
   LocationOutline,
@@ -48,14 +47,14 @@ const stSections: NavItem[][] = [
 const agentSections: NavItem[][] = [
   [
     { label: 'Agent 首页', key: 'agent-home', icon: HomeOutline },
+    { label: '会话', key: 'agent-sessions', icon: ChatbubbleOutline },
   ],
   [
-    { label: '地点', key: 'agent-locations', icon: LocationOutline },
-    { label: 'Knowledge', key: 'agent-knowledge', icon: BookOutline },
     { label: '人物', key: 'agent-characters', icon: PeopleOutline },
+    { label: 'Knowledge', key: 'agent-knowledge', icon: BookOutline },
+    { label: '地点', key: 'agent-locations', icon: LocationOutline },
     { label: '关系', key: 'agent-relationships', icon: LinkOutline },
     { label: '世界规则', key: 'agent-rules', icon: SettingsOutline },
-    { label: '会话', key: 'agent-sessions', icon: ChatbubbleOutline },
   ],
   [
     { label: 'API 配置', key: 'api-configs', icon: KeyOutline },

@@ -365,4 +365,5 @@
 | 2026-05-10 | 修复 Agent World -> World Editor 白屏：补上 World Editor Tauri 最小命令接线（snapshot / validate / commit / detail / trace/reaction stub）、新增路由级错误边界避免单页异常拖垮整块主视图，并将 CharacterRecordEditor 的字段读取改为兼容当前 Rust `CharacterRecord` 模型，避免选中角色时因前后端模型漂移触发渲染崩溃 |
 | 2026-05-10 | 修复 Agent World -> World Editor 渲染异常：将顶部“未保存”提示的 `NTooltip` 改为仅在 dirty 时整体渲染，避免 `trigger` 插槽在干净草稿下返回 0 个子节点并触发 `[vueuc/follower]: slot[default] should have exactly one child` |
 | 2026-05-10 | 修复 Agent World Editor 中 Character 与 MindModelCard 互相卡死的提交流程：角色草稿可联动携带绑定的 `MindModelCard` Knowledge 草稿，同一 patch 一起校验/提交；新建角色时自动配套创建 MindModelCard 草稿，角色编辑器内可直接创建/编辑绑定卡；后端补充 patch 内交叉引用校验，明确识别“不是该角色的 MindModelCard”这类非法引用 |
+| 2026-05-10 | 修复 Agent 角色编辑器内 MindModelCard 字段不全导致的校验阻塞：前端为 `MindModelCardContent` 补齐完整默认结构并在加载旧 Knowledge 时自动归一化；角色编辑器改为直接暴露摘要 / 风险偏好 / 社交策略 / 注意力偏置 / 价值优先级 / 认知模式字段；后端 validator 增加 `MindModelCard` content schema 校验并补单元测试 |
 | 2026-05-10 | 将 Agent World 规则文件从 `world_base.yaml` 重命名为 `world_argument.yaml`：补齐默认 schema、旧文件迁移兼容、World Editor 真实 YAML 读取/校验，以及运行时 `world_argument.yaml -> WorldRulesSnapshot` 编译链路；属性档位判断开始读取世界参数快照而不再固定硬编码阈值 |

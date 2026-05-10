@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRouter } from 'vue-router'
 import {
   NButton,
   NEmpty,
@@ -12,14 +12,12 @@ import {
   NTag,
 } from 'naive-ui'
 import {
-  AddOutline,
   SearchOutline,
   TimeOutline,
 } from '@vicons/ionicons5'
 import { useAgentStore } from '@/stores/agent'
 import type { AgentSession } from '@/types/agent/session'
 
-const route = useRoute()
 const router = useRouter()
 const agentStore = useAgentStore()
 

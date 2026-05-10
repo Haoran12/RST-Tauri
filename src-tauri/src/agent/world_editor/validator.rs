@@ -171,6 +171,7 @@ impl WorldEditorValidator {
                 "unaware character facets should usually provide apparent_content or self_belief",
             ));
         }
+        validate_knowledge_content_schema(&mut issues, entry);
 
         Ok(issues)
     }
@@ -447,5 +448,107 @@ fn validate_access_policy(issues: &mut Vec<ValidationIssue>, policy: &AccessPoli
             }
             _ => {}
         }
+    }
+}
+
+fn validate_knowledge_content_schema(issues: &mut Vec<ValidationIssue>, entry: &KnowledgeEntry) {
+    match (&entry.kind, &entry.subject) {
+        (
+            KnowledgeKind::CharacterFacet,
+            KnowledgeSubject::Character {
+                facet: CharacterFacetType::MindModelCard,
+                ..
+            },
+        ) => {
+            if let Err(parse_error) =
+                serde_json::from_value::<MindModelCardContent>(entry.content.clone())
+            {
+                issues.push(error(
+                    "content",
+                    format!("MindModelCard content schema invalid: {}", parse_error),
+                ));
+            }
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WorldEditorValidator;
+    use crate::agent::models::knowledge::{
+        AccessPolicy, AccessScope, CharacterFacetType, KnowledgeEntry, KnowledgeKind,
+        KnowledgeMetadata, KnowledgeSubject, SubjectAwareness,
+    };
+    use chrono::Utc;
+    use serde_json::json;
+
+    fn build_mind_model_entry(content: serde_json::Value) -> KnowledgeEntry {
+        let now = Utc::now();
+        KnowledgeEntry {
+            knowledge_id: "knowledge_mind_model_test".to_string(),
+            kind: KnowledgeKind::CharacterFacet,
+            subject: KnowledgeSubject::Character {
+                id: "character_test".to_string(),
+                facet: CharacterFacetType::MindModelCard,
+            },
+            content,
+            apparent_content: None,
+            access_policy: AccessPolicy {
+                known_by: Vec::new(),
+                scope: vec![AccessScope::Public],
+                conditions: Vec::new(),
+            },
+            subject_awareness: SubjectAwareness::Aware,
+            metadata: KnowledgeMetadata {
+                created_at: now,
+                updated_at: now,
+                valid_from: None,
+                valid_until: None,
+                source_session_id: None,
+                source_scene_turn_id: None,
+                derived_from_event_id: None,
+                emotional_weight: None,
+                last_accessed_at: None,
+                source: None,
+            },
+            valid_from: None,
+            valid_until: None,
+            source_session_id: None,
+            source_scene_turn_id: None,
+            derived_from_event_id: None,
+            schema_version: "0.1".to_string(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn validate_knowledge_accepts_complete_mind_model_card_content() {
+        let entry = build_mind_model_entry(json!({
+            "summary_text": "谨慎分析后再行动",
+            "attention_biases": ["威胁信号", "权力差距"],
+            "risk_tolerance": "Moderate",
+            "default_social_strategy": "先观察再交换信息",
+            "value_priorities": ["生存", "情报"],
+            "cognitive_patterns": ["先收集证据", "避免正面冲突"],
+            "extensions": {}
+        }));
+
+        let issues = WorldEditorValidator::validate_knowledge(&entry).expect("validation");
+        assert!(issues.is_empty());
+    }
+
+    #[test]
+    fn validate_knowledge_rejects_sparse_mind_model_card_content() {
+        let entry = build_mind_model_entry(json!({
+            "summary_text": "只有摘要"
+        }));
+
+        let issues = WorldEditorValidator::validate_knowledge(&entry).expect("validation");
+        assert!(issues.iter().any(|issue| {
+            issue.field_path == "content"
+                && issue.message.contains("MindModelCard content schema invalid")
+        }));
     }
 }

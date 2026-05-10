@@ -21,7 +21,12 @@ import {
 import StructuredTextEditor from '@/components/shared/structured-text-editor/StructuredTextEditor.vue'
 import { useAgentWorldEditorStore } from '@/stores/agentWorldEditor'
 import { DEFAULT_BINDINGS } from '@/types/structuredText'
-import { createMindModelCardKnowledgeEntry } from '@/types/agent/knowledge'
+import {
+  createMindModelCardKnowledgeEntry,
+  createDefaultMindModelCardContent,
+  normalizeMindModelCardContent,
+  type MindModelCardContent,
+} from '@/types/agent/knowledge'
 
 const editorStore = useAgentWorldEditorStore()
 
@@ -37,6 +42,14 @@ const manaTendencyOptions = [
   { label: '内敛 (Inward)', value: 'Inward' },
   { label: '中性 (Neutral)', value: 'Neutral' },
   { label: '外放 (Expressive)', value: 'Expressive' },
+]
+
+const riskToleranceOptions = [
+  { label: '极低 (VeryLow)', value: 'VeryLow' },
+  { label: '低 (Low)', value: 'Low' },
+  { label: '中等 (Moderate)', value: 'Moderate' },
+  { label: '高 (High)', value: 'High' },
+  { label: '极高 (VeryHigh)', value: 'VeryHigh' },
 ]
 
 function updateField(path: string, value: unknown) {
@@ -72,6 +85,29 @@ function updateMindModelKnowledgeId(value: string) {
   if (linkedKnowledgeDraft.value) {
     updateLinkedKnowledgeField('knowledge_id', value)
   }
+}
+
+function updateMindModelContentField(
+  key: keyof MindModelCardContent,
+  value: MindModelCardContent[keyof MindModelCardContent]
+) {
+  if (!linkedKnowledgeDraft.value) return
+  const content = normalizeMindModelCardContent(linkedKnowledgeDraft.value.content)
+  updateLinkedKnowledgeField('content', {
+    ...content,
+    [key]: value,
+  })
+}
+
+function stringifyLineList(items: string[]) {
+  return items.join('\n')
+}
+
+function parseLineList(text: string) {
+  return text
+    .split(/\r?\n/)
+    .map(item => item.trim())
+    .filter(Boolean)
 }
 
 function updateBaseAttribute(key: string, value: number | null) {
@@ -113,7 +149,12 @@ const manaSenseBaseline = computed(() => {
 })
 
 const temporaryStateBinding = DEFAULT_BINDINGS.agent_knowledge_content
-const mindModelContentBinding = DEFAULT_BINDINGS.agent_knowledge_content
+const mindModelExtensionsBinding = DEFAULT_BINDINGS.agent_knowledge_content
+const mindModelContent = computed(() =>
+  linkedKnowledgeDraft.value
+    ? normalizeMindModelCardContent(linkedKnowledgeDraft.value.content)
+    : createDefaultMindModelCardContent()
+)
 </script>
 
 <template>
@@ -201,16 +242,74 @@ const mindModelContentBinding = DEFAULT_BINDINGS.agent_knowledge_content
             disabled
           />
         </NFormItem>
+        <NFormItem label="摘要">
+          <NInput
+            :value="mindModelContent.summary_text"
+            size="small"
+            placeholder="角色的默认认知/决策基线"
+            @update:value="value => updateMindModelContentField('summary_text', value)"
+          />
+        </NFormItem>
+        <NFormItem label="风险偏好">
+          <NSelect
+            :value="mindModelContent.risk_tolerance"
+            size="small"
+            :options="riskToleranceOptions"
+            @update:value="value => updateMindModelContentField('risk_tolerance', value)"
+          />
+        </NFormItem>
+        <NFormItem label="默认社交策略">
+          <NInput
+            :value="mindModelContent.default_social_strategy"
+            size="small"
+            placeholder="先试探、再交换信息、最后施压"
+            @update:value="value => updateMindModelContentField('default_social_strategy', value)"
+          />
+        </NFormItem>
+        <NFormItem label="注意力偏置">
+          <NInput
+            :value="stringifyLineList(mindModelContent.attention_biases)"
+            type="textarea"
+            size="small"
+            placeholder="每行一项"
+            :autosize="{ minRows: 3, maxRows: 6 }"
+            @update:value="value => updateMindModelContentField('attention_biases', parseLineList(value))"
+          />
+        </NFormItem>
+        <NFormItem label="价值优先级">
+          <NInput
+            :value="stringifyLineList(mindModelContent.value_priorities)"
+            type="textarea"
+            size="small"
+            placeholder="每行一项"
+            :autosize="{ minRows: 3, maxRows: 6 }"
+            @update:value="value => updateMindModelContentField('value_priorities', parseLineList(value))"
+          />
+        </NFormItem>
+        <NFormItem label="认知模式">
+          <NInput
+            :value="stringifyLineList(mindModelContent.cognitive_patterns)"
+            type="textarea"
+            size="small"
+            placeholder="每行一项"
+            :autosize="{ minRows: 3, maxRows: 6 }"
+            @update:value="value => updateMindModelContentField('cognitive_patterns', parseLineList(value))"
+          />
+        </NFormItem>
+        <NFormItem label="扩展字段">
+          <StructuredTextEditor
+            :model-value="JSON.stringify(mindModelContent.extensions ?? {}, null, 2)"
+            mode="json"
+            :binding="mindModelExtensionsBinding"
+            :min-height="160"
+            @update:model-value="(text) => {
+              try {
+                updateMindModelContentField('extensions', JSON.parse(text) as Record<string, unknown>)
+              } catch { }
+            }"
+          />
+        </NFormItem>
       </NForm>
-      <StructuredTextEditor
-        :model-value="JSON.stringify(linkedKnowledgeDraft.content ?? { summary_text: '' }, null, 2)"
-        mode="json"
-        :binding="mindModelContentBinding"
-        :min-height="220"
-        @update:model-value="(text) => {
-          try { updateLinkedKnowledgeField('content', JSON.parse(text)) } catch { /* ignore parse errors during editing */ }
-        }"
-      />
     </NCard>
 
     <!-- Base Attributes -->

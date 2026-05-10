@@ -18,7 +18,11 @@ import type {
   LocationNodeDetailDto,
   CharacterRecordSummary,
 } from '@/types/agent/worldEditor'
-import type { KnowledgeEntry, KnowledgeListItem } from '@/types/agent/knowledge'
+import {
+  normalizeKnowledgeEntry,
+  type KnowledgeEntry,
+  type KnowledgeListItem,
+} from '@/types/agent/knowledge'
 import type { CharacterRecord } from '@/types/agent/character'
 import { listWorldCharacters } from '@/services/agentApi'
 
@@ -226,6 +230,10 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
     linkedKnowledgeDraft: KnowledgeEntry | null = null,
     linkedKnowledgeIsNew = false
   ) {
+    const normalizedLinkedKnowledge = linkedKnowledgeDraft
+      ? normalizeKnowledgeEntry(linkedKnowledgeDraft)
+      : null
+
     draft.value = {
       entityType: 'character',
       entityId: id,
@@ -233,9 +241,9 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
       original: isNew ? null : JSON.parse(JSON.stringify(character)),
       isDirty: isNew,
       isNew,
-      linkedKnowledgeDraft,
-      linkedKnowledgeOriginal: linkedKnowledgeDraft
-        ? (linkedKnowledgeIsNew ? null : JSON.parse(JSON.stringify(linkedKnowledgeDraft)))
+      linkedKnowledgeDraft: normalizedLinkedKnowledge,
+      linkedKnowledgeOriginal: normalizedLinkedKnowledge
+        ? (linkedKnowledgeIsNew ? null : JSON.parse(JSON.stringify(normalizedLinkedKnowledge)))
         : null,
       linkedKnowledgeIsNew,
     }
@@ -280,9 +288,10 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
 
   function setLinkedKnowledgeDraft(entry: KnowledgeEntry | null, isNew = false) {
     if (!draft.value || draft.value.entityType !== 'character') return
-    draft.value.linkedKnowledgeDraft = entry
-    draft.value.linkedKnowledgeOriginal = entry
-      ? (isNew ? null : JSON.parse(JSON.stringify(entry)))
+    const normalizedEntry = entry ? normalizeKnowledgeEntry(entry) : null
+    draft.value.linkedKnowledgeDraft = normalizedEntry
+    draft.value.linkedKnowledgeOriginal = normalizedEntry
+      ? (isNew ? null : JSON.parse(JSON.stringify(normalizedEntry)))
       : null
     draft.value.linkedKnowledgeIsNew = entry ? isNew : false
     draft.value.isDirty = true
@@ -434,7 +443,7 @@ export const useAgentWorldEditorStore = defineStore('agentWorldEditor', () => {
         knowledgeId,
       })
       knowledgeLoadedIds.value.add(knowledgeId)
-      return entry
+      return normalizeKnowledgeEntry(entry)
     } catch (e) {
       console.error('Failed to load knowledge detail:', e)
       return null
