@@ -72,14 +72,20 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   // Create new session
-  async function createSession(name: string, characterId?: string) {
+  async function createSession(
+    name: string,
+    characterId?: string,
+    userPersona?: STUserPersona
+  ) {
     const session: ChatSession = {
       id: crypto.randomUUID(),
       name,
       character_id: characterId,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-      chat_metadata: normalizeChatMetadata(),
+      chat_metadata: normalizeChatMetadata({
+        user_persona: userPersona,
+      }),
       messages: [],
     }
 

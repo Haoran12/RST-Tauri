@@ -3,8 +3,11 @@ import { ref, computed, onMounted, nextTick, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton,
+  NDivider,
   NDropdown,
   NEmpty,
+  NForm,
+  NFormItem,
   NIcon,
   NInput,
   NModal,
@@ -28,6 +31,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useRuntimeStore } from '@/stores/runtime'
 import { useWorldbooksStore } from '@/stores/worldbooks'
 import { usePresetsStore } from '@/stores/presets'
+import { useCharactersStore } from '@/stores/characters'
 import type { CharacterCard, ChatAttachmentRef, ChatMessage } from '@/types/st'
 import type { AssembleRequestInput } from '@/types/runtime'
 import { modalSizeStyles } from '@/composables/useModalSize'
@@ -43,6 +47,7 @@ const settingsStore = useSettingsStore()
 const runtimeStore = useRuntimeStore()
 const worldbooksStore = useWorldbooksStore()
 const presetsStore = usePresetsStore()
+const charactersStore = useCharactersStore()
 
 const inputText = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
@@ -53,6 +58,14 @@ const editingMessageId = ref<string | null>(null)
 const editingContent = ref('')
 const showSessionMenu = ref(false)
 const showPromptPreview = ref(false)
+
+// 编辑会话弹窗
+const showEditModal = ref(false)
+const editSessionName = ref('')
+const editSessionCharacter = ref<string | null>(null)
+const editSessionWorldbooks = ref<string[]>([])
+const editUserPersonaName = ref('')
+const editUserPersonaDescription = ref('')
 
 const hasActiveApiConfig = computed(() => settingsStore.activeApiConfig !== null)
 const canSend = computed(() => {
@@ -72,6 +85,20 @@ const presetOptions = computed(() => {
     value: preset.name,
   }))
 })
+
+const worldbookOptions = computed(() =>
+  worldbooksStore.worldbookList.map((w) => ({
+    label: w.name,
+    value: w.id,
+  })),
+)
+
+const characterOptions = computed(() =>
+  charactersStore.characters.map((item) => ({
+    label: item.character.data.name || '未命名角色',
+    value: item.id,
+  })),
+)
 
 async function handleSend() {
   if (!canSend.value) return
@@ -379,6 +406,45 @@ async function syncRouteSession() {
   }
 }
 
+function openEditModal() {
+  const session = chatStore.currentSession
+  if (!session) return
+  editSessionName.value = session.name
+  editSessionCharacter.value = session.character_id ?? null
+  const metadata = session.chat_metadata
+  editSessionWorldbooks.value = metadata?.enabled_world_info ?? (
+    metadata?.world_info ? [metadata.world_info] : []
+  )
+  editUserPersonaName.value = metadata?.user_persona?.name ?? ''
+  editUserPersonaDescription.value = metadata?.user_persona?.description ?? ''
+  showEditModal.value = true
+}
+
+async function handleEditSession() {
+  const name = editSessionName.value.trim()
+  if (!name) {
+    message.warning('请输入会话名')
+    return
+  }
+  const session = chatStore.currentSession
+  if (!session) return
+  try {
+    await chatStore.updateSessionSettings(session.id, {
+      name,
+      character_id: editSessionCharacter.value,
+      enabled_world_info: editSessionWorldbooks.value,
+      user_persona: {
+        name: editUserPersonaName.value.trim(),
+        description: editUserPersonaDescription.value.trim(),
+      },
+    })
+    message.success('会话信息已更新')
+    showEditModal.value = false
+  } catch (e) {
+    message.error(`更新失败: ${String(e)}`)
+  }
+}
+
 onMounted(async () => {
   isInitialLoading.value = true
   try {
@@ -447,8 +513,8 @@ onBeforeUnmount(() => {
           <NButton quaternary circle @click="router.push({ name: 'st-home' })">
             <template #icon><NIcon :component="ChevronBackOutline" /></template>
           </NButton>
-          <div class="chat-title">
-            <h1>{{ chatStore.currentSession?.name ?? '聊天' }}</h1>
+          <div class="chat-title" @click="openEditModal">
+            <h1 class="session-title-clickable">{{ chatStore.currentSession?.name ?? '聊天' }}</h1>
           </div>
           <div class="chat-selectors">
             <NSelect
@@ -584,6 +650,82 @@ onBeforeUnmount(() => {
       v-model:show="showPromptPreview"
       :input="promptPreviewInput"
     />
+
+    <!-- 编辑会话弹窗 -->
+    <NModal
+      v-model:show="showEditModal"
+      preset="card"
+      title="编辑会话信息"
+      style="width: min(480px, 90vw)"
+      :mask-closable="false"
+    >
+      <NForm label-placement="left" label-width="80">
+        <NFormItem label="会话名" required>
+          <NInput
+            v-model:value="editSessionName"
+            placeholder="输入会话名称"
+            :maxlength="100"
+            show-count
+            clearable
+          />
+        </NFormItem>
+
+        <NDivider style="margin: 12px 0" />
+
+        <NFormItem label="角色卡">
+          <NSelect
+            v-model:value="editSessionCharacter"
+            :options="characterOptions"
+            placeholder="选择关联的角色卡（可选）"
+            clearable
+          />
+        </NFormItem>
+
+        <NFormItem label="世界书">
+          <NSelect
+            v-model:value="editSessionWorldbooks"
+            :options="worldbookOptions"
+            placeholder="选择要启用的世界书（可选，可多选）"
+            multiple
+            clearable
+          />
+        </NFormItem>
+
+        <NDivider style="margin: 12px 0" />
+
+        <NFormItem label="用户身份">
+          <NInput
+            v-model:value="editUserPersonaName"
+            placeholder="用户名称"
+            :maxlength="100"
+            clearable
+          />
+        </NFormItem>
+
+        <NFormItem label="身份描述">
+          <NInput
+            v-model:value="editUserPersonaDescription"
+            type="textarea"
+            placeholder="用户身份描述（可选）"
+            :autosize="{ minRows: 2, maxRows: 6 }"
+            clearable
+          />
+        </NFormItem>
+      </NForm>
+
+      <template #footer>
+        <div class="modal-actions">
+          <NButton @click="showEditModal = false">取消</NButton>
+          <NButton
+            type="primary"
+            :disabled="!editSessionName.trim()"
+            @click="handleEditSession"
+          >
+            保存
+          </NButton>
+        </div>
+      </template>
+    </NModal>
   </div>
 </template>
 
@@ -632,6 +774,15 @@ onBeforeUnmount(() => {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
+}
+
+.chat-title .session-title-clickable {
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.chat-title .session-title-clickable:hover {
+  color: var(--n-primary-color);
 }
 
 .chat-selectors {

@@ -182,6 +182,8 @@ const showCreateModal = ref(false)
 const newSessionName = ref('')
 const newSessionCharacter = ref<string | null>(null)
 const newSessionWorldbooks = ref<string[]>([])
+const newUserPersonaName = ref('')
+const newUserPersonaDescription = ref('')
 
 const worldbookOptions = computed(() =>
   worldbooksStore.worldbookList.map((w) => ({
@@ -194,6 +196,8 @@ function openCreateModal() {
   newSessionName.value = ''
   newSessionCharacter.value = null
   newSessionWorldbooks.value = []
+  newUserPersonaName.value = ''
+  newUserPersonaDescription.value = ''
   showCreateModal.value = true
 }
 
@@ -206,7 +210,11 @@ async function handleCreateSession() {
   try {
     await chatStore.createSession(
       name,
-      newSessionCharacter.value || undefined
+      newSessionCharacter.value || undefined,
+      {
+        name: newUserPersonaName.value.trim(),
+        description: newUserPersonaDescription.value.trim(),
+      }
     )
     const session = chatStore.currentSession
     if (session && newSessionWorldbooks.value.length > 0) {
@@ -214,7 +222,10 @@ async function handleCreateSession() {
         name: session.name,
         character_id: session.character_id ?? null,
         enabled_world_info: newSessionWorldbooks.value,
-        user_persona: { name: '', description: '' },
+        user_persona: {
+          name: newUserPersonaName.value.trim(),
+          description: newUserPersonaDescription.value.trim(),
+        },
       })
     }
     message.success('会话创建成功')
@@ -401,6 +412,27 @@ onMounted(async () => {
             :options="worldbookOptions"
             placeholder="选择要启用的世界书（可选，可多选）"
             multiple
+            clearable
+          />
+        </NFormItem>
+
+        <NDivider style="margin: 12px 0" />
+
+        <NFormItem label="用户身份">
+          <NInput
+            v-model:value="newUserPersonaName"
+            placeholder="用户名称"
+            :maxlength="100"
+            clearable
+          />
+        </NFormItem>
+
+        <NFormItem label="身份描述">
+          <NInput
+            v-model:value="newUserPersonaDescription"
+            type="textarea"
+            placeholder="用户身份描述（可选）"
+            :autosize="{ minRows: 2, maxRows: 6 }"
             clearable
           />
         </NFormItem>
