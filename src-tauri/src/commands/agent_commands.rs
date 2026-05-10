@@ -953,6 +953,30 @@ pub async fn delete_agent_session_turn(
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteAgentSessionInput {
+    pub world_id: String,
+    pub session_id: String,
+}
+
+/// 删除 Agent 会话及其所有回合记录。
+#[tauri::command]
+pub async fn delete_agent_session(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    input: DeleteAgentSessionInput,
+) -> Result<(), String> {
+    let store = get_agent_store(&app, state.inner(), &input.world_id).await?;
+    let session = store
+        .get_session(&input.session_id)
+        .await?
+        .ok_or_else(|| "Session not found".to_string())?;
+    if session.world_id != input.world_id {
+        return Err("Session does not belong to requested world".to_string());
+    }
+    store.delete_session(&input.session_id).await
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessAgentTurnInput {
     pub world_id: String,
     pub session_id: String,

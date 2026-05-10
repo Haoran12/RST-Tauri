@@ -12,6 +12,7 @@ import {
   NModal,
   NSpace,
   NTag,
+  useDialog,
   useMessage,
 } from 'naive-ui'
 import {
@@ -22,10 +23,12 @@ import {
   PlayOutline,
   SettingsOutline,
   TimerOutline,
+  TrashOutline,
 } from '@vicons/ionicons5'
 import { useAgentStore } from '@/stores/agent'
 import { useSettingsStore } from '@/stores/settings'
 import { useAppShellStore } from '@/stores/appShell'
+import type { AgentSession } from '@/types/agent/session'
 import { modalSizeStyles } from '@/composables/useModalSize'
 
 const router = useRouter()
@@ -33,6 +36,7 @@ const agentStore = useAgentStore()
 const settingsStore = useSettingsStore()
 const appShell = useAppShellStore()
 const message = useMessage()
+const dialog = useDialog()
 
 const worldId = computed(() => agentStore.currentWorldId)
 const currentWorld = computed(() => agentStore.currentWorld)
@@ -124,6 +128,23 @@ function formatTime(value: string | null | undefined) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString()
+}
+
+function confirmDeleteAgentSession(session: AgentSession) {
+  dialog.warning({
+    title: '删除会话',
+    content: `确定删除会话 "${session.title}"？此操作不可恢复。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await agentStore.deleteSession(session.world_id, session.session_id)
+        message.success('会话已删除')
+      } catch (e) {
+        message.error(`删除失败: ${String(e)}`)
+      }
+    },
+  })
 }
 
 onMounted(async () => {
@@ -243,22 +264,29 @@ onMounted(async () => {
 
     <div class="section-grid">
       <NCard size="small" title="最近 Agent 会话">
-        <NList v-if="recentSessions.length" hoverable clickable>
+        <NList v-if="recentSessions.length" hoverable>
           <NListItem
             v-for="session in recentSessions"
             :key="session.session_id"
-            @click="openSession(session.session_id, session.world_id)"
           >
             <div class="session-row">
               <div>
                 <div class="session-name">{{ session.title }}</div>
                 <div class="session-meta">
-                  {{ session.period_anchor.display_text }} · {{ session.player_mode }}
+                  {{ session.period_anchor.display_text }} · {{ session.player_mode }} · {{ formatTime(session.updated_at) }}
                 </div>
               </div>
-              <NTag size="small" :type="session.status === 'Active' ? 'success' : 'default'">
-                {{ session.session_kind }}
-              </NTag>
+              <NSpace>
+                <NButton size="small" secondary @click="openSession(session.session_id, session.world_id)">
+                  打开
+                </NButton>
+                <NButton size="small" type="error" secondary @click="confirmDeleteAgentSession(session)">
+                  <template #icon>
+                    <NIcon><TrashOutline /></NIcon>
+                  </template>
+                  删除
+                </NButton>
+              </NSpace>
             </div>
           </NListItem>
         </NList>

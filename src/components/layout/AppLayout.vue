@@ -36,8 +36,6 @@ const isAgentMode = computed(() => route.path.startsWith('/agent'))
 const showContextList = computed(() => {
   const contextPages = [
     'st-home',
-    'st-chat',
-    'agent-chat',
     'resources-characters',
     'resources-worldbooks',
     'resources-presets',

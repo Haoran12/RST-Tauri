@@ -368,6 +368,49 @@ impl AgentStore {
 
         Ok(())
     }
+
+    /// Delete a session and all its turns
+    pub async fn delete_session(&self, session_id: &str) -> Result<(), String> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| format!("Failed to begin session delete: {}", e))?;
+
+        // Delete all session turns first
+        sqlx::query(
+            r#"
+            DELETE FROM session_turns
+            WHERE session_id = ?
+            "#,
+        )
+        .bind(session_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("Failed to delete session turns: {}", e))?;
+
+        // Delete the session
+        let result = sqlx::query(
+            r#"
+            DELETE FROM agent_sessions
+            WHERE session_id = ?
+            "#,
+        )
+        .bind(session_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("Failed to delete session: {}", e))?;
+
+        if result.rows_affected() == 0 {
+            return Err("Session not found".to_string());
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| format!("Failed to commit session delete: {}", e))?;
+
+        Ok(())
+    }
 }
 
 // ===== SessionTurn operations =====

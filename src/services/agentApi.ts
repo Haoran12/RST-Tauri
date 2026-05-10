@@ -84,6 +84,15 @@ export async function deleteAgentSessionTurn(input: DeleteAgentSessionTurnInput)
   return await invoke<void>('delete_agent_session_turn', { input })
 }
 
+export interface DeleteAgentSessionInput {
+  world_id: string
+  session_id: string
+}
+
+export async function deleteAgentSession(input: DeleteAgentSessionInput): Promise<void> {
+  return await invoke<void>('delete_agent_session', { input })
+}
+
 export interface AgentTurnResult {
   scene_turn_id: string
   narrative_text: string

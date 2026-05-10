@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NCard, NGrid, NGi, NIcon, NList, NListItem, NSpace, NTag } from 'naive-ui'
-import { AlertCircleOutline, BookOutline, ChatbubbleOutline, KeyOutline, PersonOutline, SettingsOutline } from '@vicons/ionicons5'
+import { NButton, NCard, NGrid, NGi, NIcon, NList, NListItem, NSpace, NTag, useDialog, useMessage } from 'naive-ui'
+import { AlertCircleOutline, BookOutline, ChatbubbleOutline, KeyOutline, PersonOutline, SettingsOutline, TrashOutline } from '@vicons/ionicons5'
 import { useSettingsStore } from '@/stores/settings'
 import { useRuntimeStore } from '@/stores/runtime'
 import { useChatStore } from '@/stores/chat'
@@ -19,6 +19,8 @@ const charactersStore = useCharactersStore()
 const worldbooksStore = useWorldbooksStore()
 const presetsStore = usePresetsStore()
 const appShell = useAppShellStore()
+const dialog = useDialog()
+const message = useMessage()
 
 const recentSessions = computed(() =>
   [...chatStore.sessions]
@@ -127,6 +129,23 @@ function formatTime(value: string) {
   return new Date(value).toLocaleString()
 }
 
+function confirmDeleteStSession(session: { id: string; name: string }) {
+  dialog.warning({
+    title: '删除会话',
+    content: `确定删除会话 "${session.name}"？此操作不可恢复。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await chatStore.deleteSession(session.id)
+        message.success('会话已删除')
+      } catch (e) {
+        message.error(`删除失败: ${String(e)}`)
+      }
+    },
+  })
+}
+
 onMounted(async () => {
   try {
     await hydrate()
@@ -231,18 +250,27 @@ onMounted(async () => {
         </NCard>
 
         <NCard size="small" title="最近 ST 会话">
-          <NList v-if="recentSessions.length" hoverable clickable>
+          <NList v-if="recentSessions.length" hoverable>
             <NListItem
               v-for="session in recentSessions"
               :key="session.id"
-              @click="router.push({ name: 'st-chat', params: { sessionId: session.id } })"
             >
               <div class="session-row">
                 <div>
                   <div class="session-name">{{ session.name }}</div>
                   <div class="session-meta">{{ formatTime(session.updated_at) }}</div>
                 </div>
-                <NTag size="small" :bordered="false">ST</NTag>
+                <NSpace>
+                  <NButton size="small" secondary @click="router.push({ name: 'st-chat', params: { sessionId: session.id } })">
+                    打开
+                  </NButton>
+                  <NButton size="small" type="error" secondary @click="confirmDeleteStSession(session)">
+                    <template #icon>
+                      <NIcon><TrashOutline /></NIcon>
+                    </template>
+                    删除
+                  </NButton>
+                </NSpace>
               </div>
             </NListItem>
           </NList>
@@ -290,6 +318,21 @@ onMounted(async () => {
 .stat-card,
 .status-card {
   border-radius: 10px;
+}
+
+.stat-card {
+  height: 100%;
+}
+
+.stat-card :deep(.n-card__content) {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.stat-card p {
+  flex: 1;
+  margin: 0;
 }
 
 .stat-head {
