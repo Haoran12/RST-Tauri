@@ -370,6 +370,8 @@ async function syncRouteSession() {
     )[0]
     try {
       await chatStore.loadSession(latest.id)
+      // 更新 URL 以反映当前会话
+      router.replace({ name: 'st-chat', params: { sessionId: latest.id } })
       scrollToBottom()
     } catch (e) {
       console.error('Failed to load latest session:', e)
