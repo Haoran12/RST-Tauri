@@ -243,8 +243,8 @@ onMounted(async () => {
             当前前端已经有 Agent 工作区、Session Launcher 和 World Editor 入口；跨 World 容量摘要后续继续接入日志 / Trace 视图。
           </div>
           <div class="status-actions">
-            <NButton size="small" secondary @click="router.push({ name: 'agent-worlds' })">
-              打开 Agent 工作区
+            <NButton size="small" secondary @click="router.push({ name: 'agent-home' })">
+              打开 Agent 首页
             </NButton>
           </div>
         </NCard>
@@ -258,10 +258,10 @@ onMounted(async () => {
               <strong>新建 ST 会话</strong>
               <span>保持当前资源与预设选择，直接进入聊天工作流。</span>
             </button>
-            <button class="action-tile" type="button" @click="router.push({ name: 'agent-worlds' })">
+            <button class="action-tile" type="button" @click="router.push({ name: 'agent-home' })">
               <NIcon :size="22"><LayersOutline /></NIcon>
-              <strong>打开 Agent World</strong>
-              <span>进入多时期会话与 World Editor 工作区。</span>
+              <strong>打开 Agent 首页</strong>
+              <span>进入 Agent 模式的 World 管理与会话入口。</span>
             </button>
             <button class="action-tile" type="button" @click="router.push({ name: 'resources-characters' })">
               <NIcon :size="22"><PersonOutline /></NIcon>

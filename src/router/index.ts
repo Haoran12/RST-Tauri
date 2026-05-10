@@ -84,12 +84,6 @@ const router = createRouter({
       meta: { title: 'Agent 首页' },
     },
     {
-      path: '/agent/worlds/:worldId?',
-      name: 'agent-worlds',
-      component: () => import('@/views/AgentWorldView.vue'),
-      meta: { title: '工作区' },
-    },
-    {
       path: '/agent/locations',
       name: 'agent-locations',
       component: () => import('@/views/AgentLocationsView.vue'),

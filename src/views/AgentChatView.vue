@@ -197,7 +197,7 @@ onMounted(loadSession)
   <div class="agent-chat-view">
     <header class="chat-header">
       <div class="chat-title">
-        <NButton quaternary circle @click="router.push({ name: 'agent-worlds', params: { worldId } })">
+        <NButton quaternary circle @click="router.push({ name: 'agent-sessions' })">
           <template #icon>
             <NIcon :component="ArrowBackOutline" />
           </template>

@@ -102,7 +102,7 @@ async function submitCreateWorld() {
     const world = await agentStore.createWorld({ name })
     showCreateWorldModal.value = false
     message.success(`已创建 World：${world.world_id}`)
-    router.push({ name: 'agent-worlds', params: { worldId: world.world_id } })
+    router.push({ name: 'agent-home' })
   } catch (error) {
     message.error(`创建 World 失败: ${String(error)}`)
   } finally {
@@ -112,7 +112,7 @@ async function submitCreateWorld() {
 
 function openCurrentWorld() {
   if (!worldId.value) return
-  router.push({ name: 'agent-worlds', params: { worldId: worldId.value } })
+  router.push({ name: 'agent-sessions' })
 }
 
 function openSession(sessionId: string, sessionWorldId: string) {
@@ -189,7 +189,7 @@ onMounted(async () => {
               <NButton
                 size="small"
                 secondary
-                @click.stop="router.push({ name: 'agent-worlds', params: { worldId: world.world_id } })"
+                @click.stop="router.push({ name: 'agent-home' })"
               >
                 进入
               </NButton>
@@ -228,14 +228,14 @@ onMounted(async () => {
         </div>
         <div v-else class="empty-inline">当前未选择 World</div>
         <div class="card-actions">
-          <NButton size="small" type="primary" :disabled="!worldId" @click="openCurrentWorld">进入工作区</NButton>
+          <NButton size="small" type="primary" :disabled="!worldId" @click="openCurrentWorld">进入会话</NButton>
           <NButton
             size="small"
             secondary
             :disabled="!worldId"
-            @click="router.push({ name: 'agent-world-editor', params: { worldId } })"
+            @click="router.push({ name: 'agent-knowledge' })"
           >
-            World Editor
+            打开编辑器
           </NButton>
         </div>
       </NCard>
@@ -297,9 +297,9 @@ onMounted(async () => {
       <NCard size="small" title="快捷入口">
         <div class="quick-list">
           <button class="action-tile" type="button" :disabled="!worldId" @click="openCurrentWorld">
-            <NIcon :size="22"><MapOutline /></NIcon>
-            <strong>打开 World</strong>
-            <span>进入当前选中 World 的会话、时间线和运行状态入口。</span>
+            <NIcon :size="22"><PlayOutline /></NIcon>
+            <strong>进入会话</strong>
+            <span>打开当前 World 的会话列表并运行。</span>
           </button>
           <button class="action-tile" type="button" @click="openCreateWorldModal">
             <NIcon :size="22"><AddOutline /></NIcon>
@@ -310,10 +310,10 @@ onMounted(async () => {
             class="action-tile"
             type="button"
             :disabled="!worldId"
-            @click="router.push({ name: 'agent-world-editor', params: { worldId } })"
+            @click="router.push({ name: 'agent-knowledge' })"
           >
             <NIcon :size="22"><GitBranchOutline /></NIcon>
-            <strong>World Editor</strong>
+            <strong>打开编辑器</strong>
             <span>进入结构化编辑器与提交边界。</span>
           </button>
           <button class="action-tile" type="button" @click="router.push({ name: 'logs' })">

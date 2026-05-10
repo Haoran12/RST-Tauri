@@ -14,9 +14,12 @@ const settingsStore = useSettingsStore()
 
 const panelTitle = computed(() => {
   switch (route.name) {
-    case 'agent-worlds':
+    case 'agent-home':
       return 'Agent 摘要'
-    case 'agent-world-editor':
+    case 'agent-knowledge':
+    case 'agent-locations':
+    case 'agent-characters':
+    case 'agent-rules':
       return 'Editor 摘要'
     default:
       return 'Agent 面板'
@@ -62,10 +65,10 @@ const apiSummaryItems = computed(() => [
 ])
 
 const tipText = computed(() => {
-  if (route.name === 'agent-world-editor') {
+  if (route.name === 'agent-knowledge' || route.name === 'agent-locations' || route.name === 'agent-characters' || route.name === 'agent-rules') {
     return 'World Editor 提交遵守 paused-only 边界；右侧只读摘要不参与 validation 或提交。'
   }
-  return 'Agent 工作区只展示入口和只读摘要；结构化 Truth 编辑仍需进入 World Editor。'
+  return 'Agent 首页展示 World 概览和入口；结构化 Truth 编辑进入各模块页面。'
 })
 </script>
 
@@ -82,7 +85,7 @@ const tipText = computed(() => {
 
     <div class="panel-content">
       <NEmpty
-        v-if="route.name !== 'agent-worlds' && route.name !== 'agent-world-editor'"
+        v-if="!route.name?.toString().startsWith('agent-')"
         description="当前页面没有可展示的 Agent 摘要"
       />
 
@@ -93,7 +96,7 @@ const tipText = computed(() => {
               <NIcon :size="18"><LayersOutline /></NIcon>
               <span>{{ panelTitle }}</span>
             </div>
-            <NTag :type="route.name === 'agent-world-editor' ? 'warning' : 'info'">只读</NTag>
+            <NTag :type="route.name === 'agent-knowledge' || route.name === 'agent-locations' || route.name === 'agent-characters' || route.name === 'agent-rules' ? 'warning' : 'info'">只读</NTag>
           </div>
           <p class="tip-text">{{ tipText }}</p>
           <div class="summary-list">
@@ -113,7 +116,7 @@ const tipText = computed(() => {
           </div>
         </NCard>
 
-        <NCard v-if="route.name === 'agent-world-editor'" size="small" title="结构边界" class="summary-card">
+        <NCard v-if="route.name === 'agent-knowledge' || route.name === 'agent-locations' || route.name === 'agent-characters' || route.name === 'agent-rules'" size="small" title="结构边界" class="summary-card">
           <div class="summary-list">
             <div class="summary-row">
               <span>Truth 编辑</span>

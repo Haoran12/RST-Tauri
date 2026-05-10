@@ -48,7 +48,6 @@ const stSections: NavItem[][] = [
 const agentSections: NavItem[][] = [
   [
     { label: 'Agent 首页', key: 'agent-home', icon: HomeOutline },
-    { label: '工作区', key: 'agent-worlds', icon: MapOutline },
   ],
   [
     { label: '地点', key: 'agent-locations', icon: LocationOutline },

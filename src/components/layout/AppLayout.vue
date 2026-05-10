@@ -47,7 +47,7 @@ const showContextList = computed(() => {
 })
 
 const showInspectPanel = computed(() => {
-  const inspectPages = ['st-chat', 'agent-worlds']
+  const inspectPages = ['st-chat']
   return inspectPages.includes(route.name as string) && appShell.inspectPanelOpen
 })
 

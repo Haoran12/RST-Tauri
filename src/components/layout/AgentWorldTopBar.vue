@@ -21,8 +21,8 @@ const currentWorld = computed(() =>
 function switchWorld(worldId: string) {
   if (!worldId || worldId === agentStore.currentWorldId) return
   agentStore.loadWorld(worldId)
-  // 切换到工作区
-  router.push({ name: 'agent-worlds', params: { worldId } })
+  // 切换到 Agent 首页
+  router.push({ name: 'agent-home' })
 }
 </script>
 
