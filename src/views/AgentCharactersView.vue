@@ -77,7 +77,8 @@ async function handleValidate() {
     if (result.blockers.length === 0) {
       message.success('校验通过')
     } else {
-      message.error(`校验发现 ${result.blockers.length} 个阻断问题`)
+      const msgs = result.blockers.map((b, i) => `${i + 1}. ${b.message}`).join('\n')
+      message.error(`校验发现 ${result.blockers.length} 个阻断问题:\n${msgs}`)
     }
   } catch (e) {
     message.error(`校验失败: ${String(e)}`)
