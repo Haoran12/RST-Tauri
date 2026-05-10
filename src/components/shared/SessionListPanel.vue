@@ -169,20 +169,22 @@ function openSession(session: ChatSession) {
 .session-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 10px;
+  gap: 12px;
   align-content: start;
 }
 
 .session-card {
   cursor: pointer;
   transition: box-shadow 0.2s, transform 0.2s, border-color 0.2s;
-  border: 1px solid transparent;
+  border: 1px solid var(--n-border-color);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  background: var(--n-card-color);
 }
 
 .session-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  transform: translateY(-1px);
-  border-color: color-mix(in srgb, var(--n-primary-color) 20%, transparent);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--n-primary-color) 30%, transparent);
 }
 
 .session-card-content {
