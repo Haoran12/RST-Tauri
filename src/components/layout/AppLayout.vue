@@ -4,7 +4,6 @@ import { computed, defineAsyncComponent } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppShellStore } from '@/stores/appShell'
 import AppNav from './AppNav.vue'
-import AgentModuleNav from './AgentModuleNav.vue'
 import AgentWorldTopBar from './AgentWorldTopBar.vue'
 import PanelLoading from './PanelLoading.vue'
 import RouteErrorBoundary from '@/components/shared/RouteErrorBoundary.vue'
@@ -86,9 +85,6 @@ const mainContentStyle = {
   <div class="app-shell">
     <!-- Primary Navigation -->
     <AppNav />
-
-    <!-- Agent Module Navigation -->
-    <AgentModuleNav v-if="isAgentMode" />
 
     <!-- Main Layout Area -->
     <NLayout

@@ -12,6 +12,9 @@ import {
   MapOutline,
   PersonOutline,
   CodeSlashOutline,
+  LocationOutline,
+  PeopleOutline,
+  LinkOutline,
 } from '@vicons/ionicons5'
 import { useAppShellStore, type AppMode } from '@/stores/appShell'
 
@@ -45,7 +48,15 @@ const stSections: NavItem[][] = [
 const agentSections: NavItem[][] = [
   [
     { label: 'Agent 首页', key: 'agent-home', icon: HomeOutline },
-    { label: 'Agent World', key: 'agent-worlds', icon: MapOutline },
+    { label: '工作区', key: 'agent-worlds', icon: MapOutline },
+  ],
+  [
+    { label: '地点', key: 'agent-locations', icon: LocationOutline },
+    { label: 'Knowledge', key: 'agent-knowledge', icon: BookOutline },
+    { label: '人物', key: 'agent-characters', icon: PeopleOutline },
+    { label: '关系', key: 'agent-relationships', icon: LinkOutline },
+    { label: '世界规则', key: 'agent-rules', icon: SettingsOutline },
+    { label: '会话', key: 'agent-sessions', icon: ChatbubbleOutline },
   ],
   [
     { label: 'API 配置', key: 'api-configs', icon: KeyOutline },
@@ -63,7 +74,7 @@ const navSections = computed(() => displayMode.value === 'agent' ? agentSections
 
 const activeKey = computed(() => {
   const name = route.name as string
-  if (name === 'agent-chat') return 'agent-worlds'
+  if (name === 'agent-chat') return 'agent-sessions'
   if (name === 'mode-select') return ''
   return name
 })
