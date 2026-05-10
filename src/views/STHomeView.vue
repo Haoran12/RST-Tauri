@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NCard, NGrid, NGi, NIcon, NSpace, NTag, useDialog, useMessage } from 'naive-ui'
+import { NButton, NCard, NGrid, NGi, NIcon, NPagination, NSelect, NSpace, NTag, useDialog, useMessage } from 'naive-ui'
 import { AlertCircleOutline, BookOutline, ChatbubbleOutline, KeyOutline, PersonOutline, SettingsOutline, TrashOutline } from '@vicons/ionicons5'
 import { useSettingsStore } from '@/stores/settings'
 import { useRuntimeStore } from '@/stores/runtime'
@@ -26,6 +26,29 @@ const recentSessions = computed(() =>
   [...chatStore.sessions]
     .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()),
 )
+
+// Pagination & character filter for sessions
+const page = ref(1)
+const pageSize = ref(12)
+const selectedCharacterFilter = ref('')
+
+const characterFilterOptions = computed(() => [
+  { label: '全部角色', value: '' },
+  ...charactersStore.characters.map((item) => ({
+    label: item.character.data.name || '未命名角色',
+    value: item.id,
+  })),
+])
+
+const filteredSessions = computed(() => {
+  if (!selectedCharacterFilter.value) return recentSessions.value
+  return recentSessions.value.filter((s) => s.character_id === selectedCharacterFilter.value)
+})
+
+const paginatedSessions = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return filteredSessions.value.slice(start, start + pageSize.value)
+})
 
 const activeConfig = computed(() => settingsStore.activeApiConfig)
 const activePreset = computed(() => runtimeStore.globalState.active_preset || 'Default')
@@ -142,6 +165,11 @@ function confirmDeleteStSession(session: { id: string; name: string }) {
       try {
         await chatStore.deleteSession(session.id)
         message.success('会话已删除')
+        // Adjust page if current page becomes empty
+        const totalPages = Math.ceil(filteredSessions.value.length / pageSize.value)
+        if (page.value > totalPages && page.value > 1) {
+          page.value = totalPages || 1
+        }
       } catch (e) {
         message.error(`删除失败: ${String(e)}`)
       }
@@ -227,9 +255,20 @@ onMounted(async () => {
       </div>
 
       <NCard size="small" title="ST 会话">
-        <div v-if="recentSessions.length" class="session-grid">
+        <template #header-extra>
+          <NSelect
+            v-model:value="selectedCharacterFilter"
+            :options="characterFilterOptions"
+            placeholder="按角色卡筛选"
+            size="small"
+            style="width: 180px"
+            @update:value="page = 1"
+          />
+        </template>
+
+        <div v-if="paginatedSessions.length" class="session-grid">
           <NCard
-            v-for="session in recentSessions"
+            v-for="session in paginatedSessions"
             :key="session.id"
             size="small"
             class="session-card"
@@ -255,6 +294,15 @@ onMounted(async () => {
           </NCard>
         </div>
         <div v-else class="empty-inline">暂无 ST 会话</div>
+
+        <div v-if="filteredSessions.length > pageSize" class="session-pagination">
+          <NPagination
+            v-model:page="page"
+            :page-size="pageSize"
+            :item-count="filteredSessions.length"
+            size="small"
+          />
+        </div>
       </NCard>
     </div>
   </div>
@@ -405,5 +453,11 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: center;
   gap: 10px;
+}
+
+.session-pagination {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
 }
 </style>
