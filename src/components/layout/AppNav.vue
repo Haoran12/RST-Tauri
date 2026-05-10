@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NButton, NButtonGroup, NIcon } from 'naive-ui'
+import { NIcon } from 'naive-ui'
 import { computed, type Component } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
@@ -87,22 +87,28 @@ function switchMode(mode: AppMode) {
 <template>
   <div class="app-nav">
     <div class="nav-mode-switcher">
-      <NButtonGroup vertical>
-        <NButton
-          size="small"
-          :type="appShell.currentMode === 'st' ? 'primary' : 'default'"
+      <div class="mode-pill" role="group" aria-label="模式切换">
+        <button
+          class="mode-half"
+          :class="{ active: appShell.currentMode === 'st' }"
+          aria-label="SillyTavern 模式"
           @click="switchMode('st')"
         >
-          ST
-        </NButton>
-        <NButton
-          size="small"
-          :type="appShell.currentMode === 'agent' ? 'primary' : 'default'"
+          <NIcon :component="ChatbubbleOutline" />
+        </button>
+        <button
+          class="mode-half"
+          :class="{ active: appShell.currentMode === 'agent' }"
+          aria-label="Agent 模式"
           @click="switchMode('agent')"
         >
-          AG
-        </NButton>
-      </NButtonGroup>
+          <NIcon :component="PeopleOutline" />
+        </button>
+        <div
+          class="mode-slider"
+          :class="{ 'is-agent': appShell.currentMode === 'agent' }"
+        />
+      </div>
     </div>
 
     <nav class="nav-menu" aria-label="主导航">
@@ -183,16 +189,63 @@ function switchMode(mode: AppMode) {
 
 .nav-mode-switcher {
   width: 100%;
-  padding: 10px 8px 0;
+  padding: 12px 8px 16px;
   box-sizing: border-box;
 }
 
-.nav-mode-switcher :deep(.n-button-group) {
+.mode-pill {
+  position: relative;
   width: 100%;
+  height: 64px;
+  background: var(--color-bg-subtle, #f5f7fa);
+  border: 1px solid var(--color-border-subtle, #e0e0e6);
+  border-radius: 12px;
+  padding: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-sizing: border-box;
 }
 
-.nav-mode-switcher :deep(.n-button) {
-  width: 100%;
+.mode-half {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--color-text-secondary, #6b7280);
+  transition: color 0.2s ease;
+  padding: 0;
+  border-radius: 10px;
+}
+
+.mode-half.active {
+  color: #fff;
+}
+
+.mode-half:focus-visible {
+  outline: 2px solid var(--color-status-info);
+  outline-offset: -2px;
+}
+
+.mode-slider {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: 2px;
+  height: 29px;
+  background: var(--n-primary-color, #2080f0);
+  border-radius: 10px;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 1;
+}
+
+.mode-slider.is-agent {
+  transform: translateY(31px);
 }
 
 .nav-section {
