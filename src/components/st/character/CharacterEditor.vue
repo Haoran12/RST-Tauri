@@ -5,6 +5,8 @@ import {
   NFormItem,
   NInput,
   NButton,
+  NIcon,
+  NModal,
   NSpin,
   NSpace,
   NUpload,
@@ -15,12 +17,14 @@ import {
 import { useCharactersStore } from '@/stores/characters'
 import { getCharacter, saveCharacter } from '@/services/storage'
 import { logFrontendError } from '@/services/logs'
+import { modalSizeStyles } from '@/composables/useModalSize'
 import type { TavernCardV3 } from '@/types/st'
 import type {
   StructuredTextBinding,
   StructuredTextLanguageId,
 } from '@/types/structuredText'
 import StructuredTextEditor from '@/components/shared/structured-text-editor/StructuredTextEditor.vue'
+import { ExpandOutline } from '@vicons/ionicons5'
 
 const props = defineProps<{
   characterId: string
@@ -43,6 +47,12 @@ const isDirty = ref(false)
 const dirtyVersion = ref(0)
 const textModes = ref<Record<string, StructuredTextLanguageId>>({})
 const editorRefs = ref<Record<string, InstanceType<typeof StructuredTextEditor> | null>>({})
+const showExpandedEditor = ref(false)
+const expandedFieldKey = ref<CharacterTextFieldKey | null>(null)
+const expandedText = ref('')
+const expandedTextMode = ref<StructuredTextLanguageId>('plain')
+const expandedEditorRef = ref<InstanceType<typeof StructuredTextEditor> | null>(null)
+const isSavingExpandedEditor = ref(false)
 
 type CharacterTextFieldKey =
   | 'description'
@@ -70,6 +80,11 @@ const textFieldConfigs: CharacterTextFieldConfig[] = [
   { key: 'post_history_instructions', label: '后历史指令', rows: 2 },
   { key: 'creator_notes', label: '创作者备注', rows: 2 },
 ]
+
+const expandedFieldConfig = computed(() => {
+  if (!expandedFieldKey.value) return null
+  return textFieldConfigs.find(field => field.key === expandedFieldKey.value) ?? null
+})
 
 const stringBinding: StructuredTextBinding = {
   resourceKind: 'st_preset',
@@ -283,6 +298,40 @@ function setEditorRef(
 ) {
   editorRefs.value[key] = instance
 }
+
+function openExpandedTextEditor(field: CharacterTextFieldConfig) {
+  const state = editorRefs.value[field.key]?.getState()
+  expandedFieldKey.value = field.key
+  expandedText.value = String(state?.text ?? form.value?.data[field.key] ?? '')
+  expandedTextMode.value = state?.mode ?? textModes.value[field.key] ?? 'plain'
+  showExpandedEditor.value = true
+}
+
+function cancelExpandedTextEditor() {
+  showExpandedEditor.value = false
+}
+
+async function saveExpandedTextEditor() {
+  if (!expandedFieldKey.value) return
+
+  isSavingExpandedEditor.value = true
+  try {
+    const result = expandedEditorRef.value
+      ? await expandedEditorRef.value.validate()
+      : { text: expandedText.value, diagnostics: [] }
+
+    if (result.diagnostics.some(item => item.severity === 'blocker')) {
+      message.error(`字段“${expandedFieldConfig.value?.label ?? '文本'}”存在 blocker，修复后才能保存。`)
+      return
+    }
+
+    updateTextField(expandedFieldKey.value, String(result.text ?? expandedText.value))
+    textModes.value[expandedFieldKey.value] = expandedTextMode.value
+    showExpandedEditor.value = false
+  } finally {
+    isSavingExpandedEditor.value = false
+  }
+}
 </script>
 
 <template>
@@ -318,18 +367,30 @@ function setEditorRef(
         <NFormItem
           v-for="field in textFieldConfigs"
           :key="field.key"
-          :label="field.label"
         >
-          <StructuredTextEditor
-            :ref="(instance) => setEditorRef(field.key, instance as InstanceType<typeof StructuredTextEditor> | null)"
-            :model-value="form.data[field.key] ?? ''"
-            :mode="textModes[field.key] ?? 'plain'"
-            :binding="stringBinding"
-            :min-height="Math.max(180, field.rows * 30 + 60)"
-            :use-backend-validation="true"
-            @update:model-value="value => updateTextField(field.key, value)"
-            @update:mode="(mode) => { textModes[field.key] = mode }"
-          />
+          <template #label>
+            <div class="field-label-row">
+              <span>{{ field.label }}</span>
+              <NButton quaternary size="tiny" @click.stop="openExpandedTextEditor(field)">
+                <template #icon>
+                  <NIcon><ExpandOutline /></NIcon>
+                </template>
+                展开
+              </NButton>
+            </div>
+          </template>
+          <div class="text-editor-field">
+            <StructuredTextEditor
+              :ref="(instance) => setEditorRef(field.key, instance as InstanceType<typeof StructuredTextEditor> | null)"
+              :model-value="form.data[field.key] ?? ''"
+              :mode="textModes[field.key] ?? 'plain'"
+              :binding="stringBinding"
+              :min-height="Math.max(180, field.rows * 30 + 60)"
+              :use-backend-validation="true"
+              @update:model-value="value => updateTextField(field.key, value)"
+              @update:mode="(mode) => { textModes[field.key] = mode }"
+            />
+          </div>
         </NFormItem>
 
         <NFormItem label="标签">
@@ -377,6 +438,40 @@ function setEditorRef(
         <NText v-else>加载中...</NText>
       </div>
     </NSpin>
+
+    <NModal
+      v-model:show="showExpandedEditor"
+      preset="card"
+      :title="`编辑${expandedFieldConfig?.label ?? '文本'}`"
+      :style="modalSizeStyles.editor"
+      :mask-closable="false"
+    >
+      <div class="expanded-editor-modal">
+        <StructuredTextEditor
+          v-if="expandedFieldConfig"
+          ref="expandedEditorRef"
+          :model-value="expandedText"
+          :mode="expandedTextMode"
+          :binding="stringBinding"
+          :min-height="520"
+          :use-backend-validation="true"
+          @update:model-value="value => { expandedText = value }"
+          @update:mode="mode => { expandedTextMode = mode }"
+        />
+      </div>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="cancelExpandedTextEditor">取消</NButton>
+          <NButton
+            type="primary"
+            :loading="isSavingExpandedEditor"
+            @click="saveExpandedTextEditor"
+          >
+            保存
+          </NButton>
+        </NSpace>
+      </template>
+    </NModal>
   </div>
 </template>
 
@@ -409,6 +504,28 @@ function setEditorRef(
   display: flex;
   flex-direction: column;
   gap: 24px;
+}
+
+.editor-content :deep(.n-form-item-blank) {
+  min-width: 0;
+}
+
+.field-label-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.text-editor-field {
+  width: 100%;
+  min-width: 0;
+}
+
+.text-editor-field :deep(.structured-editor),
+.text-editor-field :deep(.cm-editor) {
+  width: 100%;
 }
 
 .avatar-section {
@@ -450,5 +567,9 @@ function setEditorRef(
 .editor-empty {
   padding: 24px;
   text-align: center;
+}
+
+.expanded-editor-modal {
+  min-height: 520px;
 }
 </style>

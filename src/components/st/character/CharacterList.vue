@@ -7,6 +7,7 @@ import {
   NSpin,
   NUpload,
   NModal,
+  NPopconfirm,
   NText,
   useMessage,
   type UploadFileInfo,
@@ -57,29 +58,6 @@ async function selectCharacter(id: string | null) {
 
 function openImportModal() {
   showImportModal.value = true
-}
-
-function nextCharacterName() {
-  const existingNames = new Set(
-    store.characters.map(item => item.character.data.name || '未命名角色'),
-  )
-  let index = store.characters.length + 1
-  let name = `新角色卡 ${index}`
-  while (existingNames.has(name)) {
-    index += 1
-    name = `新角色卡 ${index}`
-  }
-  return name
-}
-
-async function handleCreateCharacter() {
-  try {
-    const result = await store.createNewCharacter(nextCharacterName())
-    message.success(`角色卡 "${result.character.data.name}" 已创建`)
-    await selectCharacter(result.id)
-  } catch (e) {
-    message.error(`创建失败: ${e}`)
-  }
 }
 
 function handleImportPng(options: { file: UploadFileInfo }) {
@@ -205,17 +183,17 @@ async function handleDeleteCharacter(id: string) {
           >
             导入世界书
           </NButton>
-          <NButton
+          <NPopconfirm
             v-if="selectedCharacterId"
-            secondary
-            type="error"
-            @click="handleDeleteCharacter(selectedCharacterId)"
+            @positive-click="handleDeleteCharacter(selectedCharacterId)"
           >
-            删除
-          </NButton>
-          <NButton type="primary" @click="handleCreateCharacter">
-            创建角色卡
-          </NButton>
+            <template #trigger>
+              <NButton secondary type="error">
+                删除
+              </NButton>
+            </template>
+            确定删除此角色卡吗？此操作不可恢复。
+          </NPopconfirm>
           <NButton secondary type="primary" @click="showImportModal = true">
             导入角色卡
           </NButton>

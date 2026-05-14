@@ -92,6 +92,7 @@ const presetSectionLabels: Record<PresetSectionKey, string> = {
 // Computed page type
 const isWorldbooksPage = computed(() => route.name === 'resources-worldbooks')
 const isPresetsPage = computed(() => route.name === 'resources-presets')
+const isCharactersPage = computed(() => route.name === 'resources-characters')
 
 // Worldbook file options for selector
 const worldbookOptions = computed(() => {
@@ -293,6 +294,19 @@ async function createCharacterCard() {
     })
   } catch (err) {
     message.error(`创建角色卡失败: ${err}`)
+  }
+}
+
+async function deleteCharacterCard(id: string) {
+  try {
+    const character = charactersStore.characters.find(item => item.id === id)
+    await charactersStore.deleteCharacterById(id)
+    if (route.query.character === id) {
+      await router.replace({ name: 'resources-characters', query: {} })
+    }
+    message.success(`角色卡 "${character?.character.data.name || '未命名角色'}" 已删除`)
+  } catch (err) {
+    message.error(`删除角色卡失败: ${err}`)
   }
 }
 
@@ -1077,10 +1091,18 @@ watch(() => route.name, async (newName) => {
     <template v-else>
       <div class="list-header">
         <span class="list-title">{{ pageTitle }}</span>
-        <NButton v-if="showDefaultAddButton" quaternary size="small" @click="handleDefaultAdd">
+        <NButton
+          v-if="showDefaultAddButton"
+          :quaternary="!isCharactersPage"
+          :type="isCharactersPage ? 'primary' : 'default'"
+          size="small"
+          class="default-add-btn"
+          @click="handleDefaultAdd"
+        >
           <template #icon>
             <NIcon><AddOutline /></NIcon>
           </template>
+          <template v-if="isCharactersPage">创建角色卡</template>
         </NButton>
       </div>
 
@@ -1099,7 +1121,39 @@ watch(() => route.name, async (newName) => {
 
       <div class="list-content">
         <NSpin :show="isDefaultLoading">
-          <NList v-if="filteredItems.length > 0" hoverable clickable>
+          <div v-if="isCharactersPage && filteredItems.length > 0" class="entry-list">
+            <div
+              v-for="item in filteredItems"
+              :key="item.id"
+              class="entry-item"
+              :class="{ 'entry-selected': item.active }"
+            >
+              <div class="entry-info" @click="item.action()">
+                <div class="entry-header">
+                  <span class="entry-name">{{ item.name }}</span>
+                </div>
+              </div>
+
+              <NPopconfirm @positive-click="deleteCharacterCard(item.id)">
+                <template #trigger>
+                  <NButton
+                    quaternary
+                    circle
+                    size="tiny"
+                    type="error"
+                    class="delete-btn"
+                    @click.stop
+                  >
+                    <template #icon>
+                      <NIcon><TrashOutline /></NIcon>
+                    </template>
+                  </NButton>
+                </template>
+                确定删除此角色卡吗？此操作不可恢复。
+              </NPopconfirm>
+            </div>
+          </div>
+          <NList v-else-if="filteredItems.length > 0" hoverable clickable>
             <NListItem
               v-for="item in filteredItems"
               :key="item.id"

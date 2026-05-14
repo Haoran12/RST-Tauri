@@ -369,3 +369,4 @@
 | 2026-05-10 | 将 Agent World 规则文件从 `world_base.yaml` 重命名为 `world_argument.yaml`：补齐默认 schema、旧文件迁移兼容、World Editor 真实 YAML 读取/校验，以及运行时 `world_argument.yaml -> WorldRulesSnapshot` 编译链路；属性档位判断开始读取世界参数快照而不再固定硬编码阈值 |
 | 2026-05-10 | 修复 Agent World Editor 新建人物 / Knowledge 时的隐藏字段校验阻塞：Knowledge 默认草稿统一走完整工厂，补齐 `metadata` / `subject_awareness` / `access_policy` 默认值；前端加载旧 Knowledge 时自动归一化后端枚举 JSON 到编辑器友好形状；后端为 `AccessScope` / `AccessCondition` / `SubjectAwareness` 增加 World Editor 兼容反序列化并为 `KnowledgeMetadata` 缺省字段补默认值，避免 UI 未暴露字段把创建流程直接卡死 |
 | 2026-05-14 | 补齐 ST 角色卡创建入口：新增 `create_character` 后端命令生成 TavernCard V3 基础数据与默认 PNG 容器，角色卡页和左侧 ContextList 的 `+` 改为创建并选中新角色卡，导入保留为独立按钮 |
+| 2026-05-14 | 调整 ST 角色卡页面 UI：左侧角色卡列表改为世界书条目式卡片样式并加入删除确认；左侧创建入口改为绿色“+ 创建角色卡”；右侧移除重复创建按钮；角色详情 CodeMirror 字段默认铺满内容区并支持弹窗展开编辑 |
