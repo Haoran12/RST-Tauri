@@ -371,3 +371,5 @@
 | 2026-05-14 | 补齐 ST 角色卡创建入口：新增 `create_character` 后端命令生成 TavernCard V3 基础数据与默认 PNG 容器，角色卡页和左侧 ContextList 的 `+` 改为创建并选中新角色卡，导入保留为独立按钮 |
 | 2026-05-14 | 调整 ST 角色卡页面 UI：左侧角色卡列表改为世界书条目式卡片样式并加入删除确认；左侧创建入口改为绿色“+ 创建角色卡”；右侧移除重复创建按钮；角色详情 CodeMirror 字段默认铺满内容区并支持弹窗展开编辑 |
 | 2026-05-14 | 修复构建审查发现的后端缺陷：日志可读内容补 Anthropic 顶层 system 提取，Agent session 更新时间锚持久化，runtime 测试改用文件型 world 数据库，EffectValidator 补显式 cooldown / scope membership 校验入口，Batch log/trace writer 增加 SQLite journal 持久化路径 |
+| 2026-05-14 | 修复 ST 聊天世界书误报：角色世界书优先使用稳定 `rst_world_lore_id`，名称回退只读取世界书元数据，避免解析未启用世界书；世界书条目兼容 ST 导入中的 `null` 数值字段 |
+| 2026-05-14 | 修复 ST 聊天流式响应不显示：正常发送时助手消息占位状态改为未创建，首个非空 chunk 到达后追加 AI 气泡；continue 模式仍沿用原助手消息更新 |

@@ -301,7 +301,7 @@ export const useChatStore = defineStore('chat', () => {
     // Pre-create assistant message placeholder for efficient updates
     const assistantId = isContinueMode ? lastAssistantMessage!.id : crypto.randomUUID()
     const originalContent = isContinueMode ? lastAssistantMessage!.content : ''
-    let assistantAdded = !isContinueMode // In continue mode, message already exists
+    let assistantAdded = isContinueMode // In continue mode, message already exists
 
     try {
       await saveCurrentSession()
