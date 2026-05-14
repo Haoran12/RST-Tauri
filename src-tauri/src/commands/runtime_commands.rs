@@ -1704,6 +1704,9 @@ fn collect_world_info_sources(
 
     if let Some(character) = character {
         for lore_id in character_lore_ids(character, chat_metadata, settings, store)? {
+            if disabled_world_info.contains(lore_id.as_str()) {
+                continue;
+            }
             if !seen_lore_ids.insert(lore_id.clone()) {
                 continue;
             }
@@ -1740,6 +1743,13 @@ fn load_worldbook_by_id(store: &JsonStore, lore_id: &str) -> Result<Option<World
     Ok(Some(worldbook))
 }
 
+fn is_worldbook_disabled(chat_metadata: &STChatMetadata, lore_id: &str) -> bool {
+    chat_metadata
+        .disabled_world_info
+        .iter()
+        .any(|disabled| disabled == lore_id)
+}
+
 fn character_lore_ids(
     character: &TavernCardV3,
     chat_metadata: &STChatMetadata,
@@ -1748,18 +1758,26 @@ fn character_lore_ids(
 ) -> Result<Vec<String>, String> {
     let mut ids = Vec::new();
 
-    if let Some(world_name) = character
+    let stable_world_lore_id = character
+        .data
+        .extensions
+        .get("rst_world_lore_id")
+        .and_then(|v| v.as_str())
+        .filter(|lore_id| !lore_id.trim().is_empty());
+
+    if let Some(lore_id) = stable_world_lore_id {
+        if !is_worldbook_disabled(chat_metadata, lore_id) {
+            ids.push(lore_id.to_string());
+        }
+    } else if let Some(world_name) = character
         .data
         .extensions
         .get("world")
         .and_then(|v| v.as_str())
+        .filter(|world_name| !world_name.trim().is_empty())
     {
         if let Some(lore_id) = find_lore_id_by_name(store, world_name)? {
-            if !chat_metadata
-                .disabled_world_info
-                .iter()
-                .any(|disabled| disabled == &lore_id)
-            {
+            if !is_worldbook_disabled(chat_metadata, &lore_id) {
                 ids.push(lore_id);
             }
         }
@@ -1771,12 +1789,7 @@ fn character_lore_ids(
                 binding
                     .extra_books
                     .iter()
-                    .filter(|lore_id| {
-                        !chat_metadata
-                            .disabled_world_info
-                            .iter()
-                            .any(|disabled| disabled == *lore_id)
-                    })
+                    .filter(|lore_id| !is_worldbook_disabled(chat_metadata, lore_id))
                     .cloned(),
             );
         }
@@ -1792,9 +1805,7 @@ fn find_lore_id_by_name(store: &JsonStore, world_name: &str) -> Result<Option<St
         }
         let id = file.strip_suffix(".json").unwrap_or(&file);
         let value = store.read(&format!("lores/{}", file))?;
-        let worldbook = serde_json::from_value::<WorldInfoFile>(value)
-            .map_err(|e| format!("Failed to parse worldbook {}: {}", id, e))?;
-        if worldbook.name == world_name {
+        if value.get("name").and_then(|name| name.as_str()) == Some(world_name) {
             return Ok(Some(id.to_string()));
         }
     }
@@ -1844,6 +1855,15 @@ mod tests {
             },
             extra: serde_json::Map::new(),
         }
+    }
+
+    fn sample_character_with_stable_lore(world_name: &str, lore_id: &str) -> TavernCardV3 {
+        let mut character = sample_character(world_name);
+        character
+            .data
+            .extensions
+            .insert("rst_world_lore_id".to_string(), json!(lore_id));
+        character
     }
 
     fn sample_worldbook(name: &str, lore_id: &str) -> serde_json::Value {
@@ -1934,6 +1954,62 @@ mod tests {
     }
 
     #[test]
+    fn character_bound_worldbook_prefers_stable_id_without_scanning_other_lores() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let store = JsonStore::new(temp_dir.path().to_path_buf());
+        store
+            .write(
+                "lores/lore-1.json",
+                &sample_worldbook("Default World", "lore-1"),
+            )
+            .expect("write lore");
+        store
+            .write(
+                "lores/broken.json",
+                &json!({
+                    "name": "Broken World",
+                    "entries": []
+                }),
+            )
+            .expect("write broken lore");
+
+        let character = sample_character_with_stable_lore("Broken World", "lore-1");
+        let settings = STWorldInfoSettings::default();
+
+        let enabled = character_lore_ids(&character, &STChatMetadata::default(), &settings, &store)
+            .expect("stable character lore id");
+        assert_eq!(enabled, vec!["lore-1".to_string()]);
+    }
+
+    #[test]
+    fn character_world_name_lookup_ignores_malformed_unrelated_worldbooks() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let store = JsonStore::new(temp_dir.path().to_path_buf());
+        store
+            .write(
+                "lores/broken.json",
+                &json!({
+                    "name": "Broken World",
+                    "entries": []
+                }),
+            )
+            .expect("write broken lore");
+        store
+            .write(
+                "lores/lore-1.json",
+                &sample_worldbook("Default World", "lore-1"),
+            )
+            .expect("write lore");
+
+        let character = sample_character("Default World");
+        let settings = STWorldInfoSettings::default();
+
+        let enabled = character_lore_ids(&character, &STChatMetadata::default(), &settings, &store)
+            .expect("character lore ids");
+        assert_eq!(enabled, vec!["lore-1".to_string()]);
+    }
+
+    #[test]
     fn missing_worldbook_is_treated_as_absent_not_error() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let store = JsonStore::new(temp_dir.path().to_path_buf());
@@ -1941,6 +2017,41 @@ mod tests {
         let loaded =
             load_worldbook_by_id(&store, "missing-id").expect("missing lore should not error");
         assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn worldbook_entry_null_numeric_fields_use_defaults() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let store = JsonStore::new(temp_dir.path().to_path_buf());
+        store
+            .write(
+                "lores/lore-1.json",
+                &json!({
+                    "name": "Nullable World",
+                    "entries": {
+                        "1": {
+                            "uid": 1,
+                            "key": ["hero"],
+                            "content": "lore",
+                            "selective_logic": null,
+                            "order": null,
+                            "position": null,
+                            "depth": null,
+                            "role": null,
+                            "probability": null,
+                            "group_weight": null
+                        }
+                    }
+                }),
+            )
+            .expect("write nullable lore");
+
+        let loaded = load_worldbook_by_id(&store, "lore-1")
+            .expect("nullable lore should parse")
+            .expect("lore exists");
+        let entry = loaded.entries.get("1").expect("entry");
+        assert_eq!(entry.selective_logic, 0);
+        assert_eq!(entry.depth, 0);
     }
 
     #[test]
