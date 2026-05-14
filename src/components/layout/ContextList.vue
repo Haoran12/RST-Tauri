@@ -241,7 +241,7 @@ const defaultEmptyDescription = computed(() => {
     case 'st-chat':
       return '暂无会话，点击上方按钮创建'
     case 'resources-characters':
-      return '暂无角色卡，请导入'
+      return '暂无角色卡，点击上方按钮创建'
     case 'resources-presets':
       return '暂无预设'
     case 'resources-regex':
@@ -262,11 +262,37 @@ async function handleDefaultAdd() {
       break
     }
     case 'resources-characters':
-      window.dispatchEvent(new CustomEvent('open-character-import'))
+      await createCharacterCard()
       break
     case 'resources-presets':
       window.dispatchEvent(new CustomEvent('open-preset-create'))
       break
+  }
+}
+
+function nextCharacterName() {
+  const existingNames = new Set(
+    charactersStore.characters.map(item => item.character.data.name || '未命名角色'),
+  )
+  let index = charactersStore.characters.length + 1
+  let name = `新角色卡 ${index}`
+  while (existingNames.has(name)) {
+    index += 1
+    name = `新角色卡 ${index}`
+  }
+  return name
+}
+
+async function createCharacterCard() {
+  try {
+    const result = await charactersStore.createNewCharacter(nextCharacterName())
+    message.success(`角色卡 "${result.character.data.name}" 已创建`)
+    await router.replace({
+      name: 'resources-characters',
+      query: { character: result.id },
+    })
+  } catch (err) {
+    message.error(`创建角色卡失败: ${err}`)
   }
 }
 

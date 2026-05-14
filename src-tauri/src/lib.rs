@@ -144,6 +144,7 @@ pub fn run() {
             commands::get_character,
             commands::save_character,
             commands::delete_character,
+            commands::create_character,
             commands::import_character_from_png,
             commands::import_character_from_json,
             commands::export_character_as_png,

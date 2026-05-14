@@ -173,6 +173,63 @@ pub struct CharacterImportResult {
     pub avatar_filename: String,
 }
 
+/// 创建基础 TavernCard V3 角色卡。
+#[tauri::command]
+pub async fn create_character(
+    app: AppHandle,
+    name: Option<String>,
+) -> Result<CharacterImportResult, String> {
+    let id = Uuid::new_v4().to_string();
+    let character_name = name
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "新角色卡".to_string());
+
+    let character = TavernCardV3 {
+        spec: "chara_card_v3".to_string(),
+        spec_version: "3.0".to_string(),
+        data: CharacterData {
+            name: character_name.clone(),
+            description: String::new(),
+            personality: String::new(),
+            scenario: String::new(),
+            first_mes: String::new(),
+            mes_example: String::new(),
+            creator_notes: String::new(),
+            system_prompt: String::new(),
+            post_history_instructions: String::new(),
+            alternate_greetings: Vec::new(),
+            tags: Vec::new(),
+            creator: String::new(),
+            character_version: String::new(),
+            extensions: serde_json::Map::new(),
+            character_book: None,
+            extra: serde_json::Map::new(),
+        },
+        extra: serde_json::Map::new(),
+    };
+
+    let data_dir = get_data_dir(&app)?;
+    let store = JsonStore::new(data_dir.clone());
+    let value = serde_json::to_value(&character)
+        .map_err(|e| format!("Failed to serialize character: {}", e))?;
+    store.write(&format!("characters/{}.json", id), &value)?;
+
+    let avatar_filename = format!("{}.png", id);
+    let avatar_path = safe_join(&data_dir, &format!("characters/{}", avatar_filename))?;
+    let default_avatar = crate::st::character::create_default_avatar_png(&character_name)?;
+    let avatar_with_metadata = export_character_to_png(&default_avatar, &character)?;
+    std::fs::write(&avatar_path, &avatar_with_metadata)
+        .map_err(|e| format!("Failed to save default avatar: {}", e))?;
+
+    Ok(CharacterImportResult {
+        id,
+        character,
+        has_embedded_worldbook: false,
+        avatar_filename,
+    })
+}
+
 /// 从 PNG 数据导入角色卡
 #[tauri::command]
 pub async fn import_character_from_png(

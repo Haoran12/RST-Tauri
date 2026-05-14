@@ -59,6 +59,29 @@ function openImportModal() {
   showImportModal.value = true
 }
 
+function nextCharacterName() {
+  const existingNames = new Set(
+    store.characters.map(item => item.character.data.name || '未命名角色'),
+  )
+  let index = store.characters.length + 1
+  let name = `新角色卡 ${index}`
+  while (existingNames.has(name)) {
+    index += 1
+    name = `新角色卡 ${index}`
+  }
+  return name
+}
+
+async function handleCreateCharacter() {
+  try {
+    const result = await store.createNewCharacter(nextCharacterName())
+    message.success(`角色卡 "${result.character.data.name}" 已创建`)
+    await selectCharacter(result.id)
+  } catch (e) {
+    message.error(`创建失败: ${e}`)
+  }
+}
+
 function handleImportPng(options: { file: UploadFileInfo }) {
   const file = options.file.file
   if (!file) return
@@ -190,7 +213,10 @@ async function handleDeleteCharacter(id: string) {
           >
             删除
           </NButton>
-          <NButton type="primary" @click="showImportModal = true">
+          <NButton type="primary" @click="handleCreateCharacter">
+            创建角色卡
+          </NButton>
+          <NButton secondary type="primary" @click="showImportModal = true">
             导入角色卡
           </NButton>
         </div>
@@ -209,7 +235,7 @@ async function handleDeleteCharacter(id: string) {
         />
         <NEmpty
           v-else
-          description="暂无角色卡，请导入"
+          description="暂无角色卡，请创建或导入"
         />
       </div>
 

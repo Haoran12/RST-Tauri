@@ -6,6 +6,7 @@ import {
   getCharacter,
   saveCharacter,
   deleteCharacter,
+  createCharacter,
   importCharacterFromPng,
   importCharacterFromJson,
   exportCharacterAsPng,
@@ -91,6 +92,23 @@ export const useCharactersStore = defineStore('characters', () => {
       }
     } catch (e) {
       error.value = String(e)
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  async function createNewCharacter(name?: string): Promise<CharacterImportResult> {
+    isLoading.value = true
+    error.value = null
+
+    try {
+      const result = await createCharacter(name)
+      characters.value.push({ id: result.id, character: result.character })
+      currentCharacter.value = result.character
+      return result
+    } catch (e) {
+      error.value = String(e)
+      throw e
     } finally {
       isLoading.value = false
     }
@@ -262,6 +280,7 @@ export const useCharactersStore = defineStore('characters', () => {
     loadCharacter,
     saveCurrentCharacter,
     deleteCharacterById,
+    createNewCharacter,
     importFromPng,
     importFromJson,
     exportToPng,

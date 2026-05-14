@@ -84,6 +84,14 @@ export async function deleteCharacter(id: string): Promise<void> {
   return await invoke('delete_character', { id })
 }
 
+export async function createCharacter(
+  name?: string
+): Promise<CharacterImportResult> {
+  return await invoke<CharacterImportResult>('create_character', {
+    name: name ?? null,
+  })
+}
+
 export async function importCharacterFromPng(
   pngData: number[],
   filename: string
