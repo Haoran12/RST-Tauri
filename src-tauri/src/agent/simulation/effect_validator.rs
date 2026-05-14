@@ -3,6 +3,7 @@
 //! Validates skill effects against contracts and hard constraints.
 //! Ensures LLM-generated effects stay within declared bounds.
 
+use crate::agent::knowledge::access_resolver::CharacterScopeMembership;
 use crate::agent::models::{
     AccessPolicy, AccessScope, AttributeKind, CharacterRecord, CostProfile, EffectIntensityTier,
     EffectiveAttributeProfile, KnowledgeEntry, SceneModel, SkillEffect, SkillEffectContract,
@@ -215,6 +216,16 @@ impl EffectValidator {
         actor: &CharacterRecord,
         actor_attrs: &EffectiveAttributeProfile,
     ) -> CostValidationResult {
+        Self::validate_cost_for_ability(cost, actor, actor_attrs, None)
+    }
+
+    /// Validate a cost profile and, when available, the currently activated ability.
+    pub fn validate_cost_for_ability(
+        cost: &CostProfile,
+        actor: &CharacterRecord,
+        actor_attrs: &EffectiveAttributeProfile,
+        ability_id: Option<&str>,
+    ) -> CostValidationResult {
         let mut violations = Vec::new();
         let mut can_pay = true;
 
@@ -243,11 +254,17 @@ impl EffectValidator {
             }
         }
 
-        // Check cooldowns
-        if let Some(cooldown) = cost.cooldown_turns {
-            // Check if skill is already on cooldown
-            // This would require the skill_id, which we don't have here
-            // Placeholder for cooldown validation
+        // Check existing cooldowns when the caller can identify the ability.
+        if let Some(ability_id) = ability_id {
+            if actor
+                .temporary_state
+                .cooldowns
+                .iter()
+                .any(|cooldown| cooldown.ability_id == ability_id && cooldown.remaining_turns > 0)
+            {
+                violations.push(format!("技能仍在冷却中: {}", ability_id));
+                can_pay = false;
+            }
         }
 
         // Check required conditions
@@ -284,6 +301,19 @@ impl EffectValidator {
         actor_id: &str,
         target_ids: &[String],
     ) -> KnowledgeAccessValidation {
+        Self::validate_knowledge_access_with_memberships(knowledge, actor_id, target_ids, &[])
+    }
+
+    /// Validate knowledge access with explicit target scope memberships.
+    ///
+    /// Callers that need region/faction/realm/role/bloodline checks must provide
+    /// the same membership facts used by `KnowledgeAccessResolver`.
+    pub fn validate_knowledge_access_with_memberships(
+        knowledge: &KnowledgeEntry,
+        actor_id: &str,
+        target_ids: &[String],
+        target_memberships: &[CharacterScopeMembership],
+    ) -> KnowledgeAccessValidation {
         let mut violations = Vec::new();
         let mut allowed_targets = Vec::new();
         let mut blocked_targets = Vec::new();
@@ -313,7 +343,11 @@ impl EffectValidator {
                 allowed_targets.push(target_id.clone());
             } else {
                 // Can be revealed if scope allows
-                let scope_allows = Self::check_scope_access(&knowledge.access_policy, target_id);
+                let scope_allows = Self::check_scope_access(
+                    &knowledge.access_policy,
+                    target_id,
+                    target_memberships,
+                );
                 if scope_allows {
                     allowed_targets.push(target_id.clone());
                 } else {
@@ -333,22 +367,62 @@ impl EffectValidator {
     }
 
     /// Check if scope allows access for a target
-    fn check_scope_access(policy: &AccessPolicy, target_id: &str) -> bool {
+    fn check_scope_access(
+        policy: &AccessPolicy,
+        target_id: &str,
+        target_memberships: &[CharacterScopeMembership],
+    ) -> bool {
         for scope in &policy.scope {
             match scope {
                 AccessScope::Public => return true,
                 AccessScope::GodOnly => continue, // Already checked above
-                AccessScope::Region(_)
-                | AccessScope::Faction(_)
-                | AccessScope::Realm(_)
-                | AccessScope::Role(_)
-                | AccessScope::Bloodline(_) => {
-                    // TODO: Check character memberships
-                    // Placeholder for membership check
+                AccessScope::Region(region_id) => {
+                    if Self::target_has_scope(target_memberships, target_id, "region", region_id) {
+                        return true;
+                    }
+                }
+                AccessScope::Faction(faction_id) => {
+                    if Self::target_has_scope(target_memberships, target_id, "faction", faction_id)
+                    {
+                        return true;
+                    }
+                }
+                AccessScope::Realm(realm_id) => {
+                    if Self::target_has_scope(target_memberships, target_id, "realm", realm_id) {
+                        return true;
+                    }
+                }
+                AccessScope::Role(role_id) => {
+                    if Self::target_has_scope(target_memberships, target_id, "role", role_id) {
+                        return true;
+                    }
+                }
+                AccessScope::Bloodline(bloodline_id) => {
+                    if Self::target_has_scope(
+                        target_memberships,
+                        target_id,
+                        "bloodline",
+                        bloodline_id,
+                    ) {
+                        return true;
+                    }
                 }
             }
         }
         false
+    }
+
+    fn target_has_scope(
+        memberships: &[CharacterScopeMembership],
+        target_id: &str,
+        scope_type: &str,
+        scope_value: &str,
+    ) -> bool {
+        memberships.iter().any(|membership| {
+            membership.character_id == target_id
+                && membership.scope_type == scope_type
+                && membership.scope_value == scope_value
+        })
     }
 
     /// Validate state update plan
@@ -473,4 +547,108 @@ pub struct StateUpdateValidation {
     pub blocked_updates: Vec<String>,
     pub soft_updates: Vec<String>,
     pub cost_validation: CostValidationResult,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::models::*;
+    use chrono::Utc;
+    use std::collections::HashMap;
+
+    fn character(id: &str) -> CharacterRecord {
+        CharacterRecord {
+            character_id: id.to_string(),
+            base_attributes: BaseAttributes {
+                physical: 100.0,
+                agility: 100.0,
+                endurance: 100.0,
+                insight: 100.0,
+                mana_power: 100.0,
+                soul_strength: 100.0,
+            },
+            baseline_body_profile: BaselineBodyProfile {
+                species: "human".to_string(),
+                comfort_temperature_range: (18.0, 26.0),
+                mana_sense_baseline: ManaSenseBaseline {
+                    acuity: 0.4,
+                    overload_threshold: 1000.0,
+                    attribute_bias: None,
+                },
+                mana_attribute_affinity: Vec::new(),
+                size_class: SizeClass::Humanoid,
+            },
+            mana_expression_tendency: ManaExpressionTendency::Neutral,
+            mana_expression_tendency_factor_override: None,
+            mind_model_card_knowledge_id: format!("mind-{id}"),
+            temporary_state: TemporaryCharacterState::new(),
+            schema_version: "0.1".to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    fn attrs(id: &str) -> EffectiveAttributeProfile {
+        let mut values = HashMap::new();
+        values.insert(AttributeKind::ManaPower, 100.0);
+        EffectiveAttributeProfile {
+            character_id: id.to_string(),
+            values,
+            tiers: HashMap::new(),
+            descriptors: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn validates_existing_ability_cooldown_when_ability_id_is_known() {
+        let mut actor = character("actor");
+        actor.temporary_state.cooldowns.push(CooldownState {
+            ability_id: "skill-1".to_string(),
+            remaining_turns: 1,
+        });
+        let cost = CostProfile {
+            cooldown_turns: Some(2),
+            ..CostProfile::default()
+        };
+
+        let result = EffectValidator::validate_cost_for_ability(
+            &cost,
+            &actor,
+            &attrs("actor"),
+            Some("skill-1"),
+        );
+
+        assert!(!result.can_pay);
+        assert!(result
+            .violations
+            .iter()
+            .any(|violation| violation.contains("skill-1")));
+    }
+
+    #[test]
+    fn scoped_knowledge_access_requires_matching_target_membership() {
+        let policy = AccessPolicy {
+            known_by: Vec::new(),
+            scope: vec![AccessScope::Faction("sect-a".to_string())],
+            conditions: Vec::new(),
+        };
+        let target_id = "target-1";
+
+        assert!(!EffectValidator::check_scope_access(
+            &policy,
+            target_id,
+            &[]
+        ));
+
+        let memberships = vec![CharacterScopeMembership {
+            character_id: target_id.to_string(),
+            scope_type: "faction".to_string(),
+            scope_value: "sect-a".to_string(),
+        }];
+        assert!(EffectValidator::check_scope_access(
+            &policy,
+            target_id,
+            &memberships
+        ));
+    }
 }

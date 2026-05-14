@@ -2407,16 +2407,24 @@ fn user_message_to_text(user_message: &serde_json::Value) -> Result<String, Stri
 mod tests {
     use super::*;
     use crate::agent::knowledge::KnowledgeStore;
+    use crate::config::world_argument::ensure_world_argument_file;
     use chrono::Utc;
-    use sqlx::sqlite::SqlitePoolOptions;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
     #[tokio::test]
     async fn process_turn_persists_commit_and_trace() {
+        let temp_dir = tempfile::tempdir().expect("temp world dir");
+        ensure_world_argument_file(temp_dir.path(), "Runtime smoke test")
+            .expect("world argument file");
+        let db_path = temp_dir.path().join("world.sqlite");
+        let connect_options = SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true);
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
-            .connect("sqlite::memory:")
+            .connect_with(connect_options)
             .await
-            .expect("in-memory sqlite pool");
+            .expect("file sqlite pool");
         let store = AgentStore::new(pool.clone(), "world_runtime_test".to_string())
             .await
             .expect("agent store");

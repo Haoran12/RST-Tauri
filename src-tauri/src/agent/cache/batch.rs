@@ -113,6 +113,51 @@ impl BatchLogWriter {
         Self { sender, config }
     }
 
+    /// Create a batch log writer that persists flushed batches to SQLite.
+    pub fn new_with_pool(config: BatchConfig, pool: SqlitePool) -> Self {
+        let (sender, mut receiver) = mpsc::channel::<LogEntry>(config.queue_capacity);
+        let config_clone = config.clone();
+
+        tokio::spawn(async move {
+            let mut batch: Vec<LogEntry> = Vec::with_capacity(config_clone.max_batch_size);
+            let mut last_flush = Instant::now();
+            let flush_interval = Duration::from_millis(config_clone.max_batch_delay_ms);
+
+            loop {
+                let delay = flush_interval.saturating_sub(last_flush.elapsed());
+
+                tokio::select! {
+                    entry = receiver.recv() => {
+                        match entry {
+                            Some(entry) => {
+                                batch.push(entry);
+                                if batch.len() >= config_clone.max_batch_size {
+                                    let _ = Self::flush_batch_with_pool(&pool, &mut batch).await;
+                                    last_flush = Instant::now();
+                                }
+                            }
+                            None => {
+                                if !batch.is_empty() {
+                                    let _ = Self::flush_batch_with_pool(&pool, &mut batch).await;
+                                }
+                                break;
+                            }
+                        }
+                    }
+
+                    _ = tokio::time::sleep(delay) => {
+                        if !batch.is_empty() {
+                            let _ = Self::flush_batch_with_pool(&pool, &mut batch).await;
+                            last_flush = Instant::now();
+                        }
+                    }
+                }
+            }
+        });
+
+        Self { sender, config }
+    }
+
     /// Add a log entry to the batch
     pub async fn log(&self, entry: LogEntry) -> Result<(), String> {
         self.sender
@@ -141,9 +186,68 @@ impl BatchLogWriter {
         batch.clear();
     }
 
+    async fn flush_batch_with_pool(
+        pool: &SqlitePool,
+        batch: &mut Vec<LogEntry>,
+    ) -> Result<(), String> {
+        if batch.is_empty() {
+            return Ok(());
+        }
+
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|e| format!("Failed to begin batch log transaction: {}", e))?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS batch_log_entry_journal (
+                log_id TEXT PRIMARY KEY,
+                log_type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            "#,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("Failed to initialize batch log journal: {}", e))?;
+
+        for entry in batch.iter() {
+            let content = serde_json::to_string(&entry.content)
+                .map_err(|e| format!("Failed to serialize batch log content: {}", e))?;
+            sqlx::query(
+                r#"
+                INSERT OR REPLACE INTO batch_log_entry_journal
+                    (log_id, log_type, content, created_at)
+                VALUES (?, ?, ?, ?)
+                "#,
+            )
+            .bind(&entry.log_id)
+            .bind(&entry.log_type)
+            .bind(content)
+            .bind(&entry.created_at)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("Failed to insert batch log journal row: {}", e))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| format!("Failed to commit batch log transaction: {}", e))?;
+
+        batch.clear();
+        Ok(())
+    }
+
     /// Get current queue size (approximate)
     pub fn queue_size(&self) -> usize {
-        self.sender.capacity() - self.sender.max_capacity()
+        self.sender.max_capacity() - self.sender.capacity()
+    }
+
+    /// Maximum configured batch size.
+    pub fn max_batch_size(&self) -> usize {
+        self.config.max_batch_size
     }
 }
 
@@ -231,6 +335,62 @@ impl BatchTraceWriter {
 
         // TODO: Implement actual batch write to SQLite
         // For now, just return the count
+
+        Ok(count)
+    }
+
+    /// Flush pending traces into a durable SQLite journal.
+    pub async fn flush_with_pool(&self, pool: &SqlitePool) -> Result<usize, String> {
+        let batch = self.take_batch();
+        let count = batch.len();
+
+        if count == 0 {
+            return Ok(0);
+        }
+
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|e| format!("Failed to begin batch trace transaction: {}", e))?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS batch_trace_entry_journal (
+                trace_id TEXT PRIMARY KEY,
+                scene_turn_id TEXT NOT NULL,
+                step_kind TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            "#,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("Failed to initialize batch trace journal: {}", e))?;
+
+        for entry in &batch {
+            let content = serde_json::to_string(&entry.content)
+                .map_err(|e| format!("Failed to serialize batch trace content: {}", e))?;
+            sqlx::query(
+                r#"
+                INSERT OR REPLACE INTO batch_trace_entry_journal
+                    (trace_id, scene_turn_id, step_kind, content, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(&entry.trace_id)
+            .bind(&entry.scene_turn_id)
+            .bind(&entry.step_kind)
+            .bind(content)
+            .bind(&entry.created_at)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("Failed to insert batch trace journal row: {}", e))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| format!("Failed to commit batch trace transaction: {}", e))?;
 
         Ok(count)
     }
@@ -624,5 +784,59 @@ mod tests {
 
         assert_eq!(result.total_operations, 2);
         assert_eq!(row_count, 2);
+    }
+
+    #[tokio::test]
+    async fn batch_log_writer_flush_persists_journal_rows() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("memory db");
+        let mut batch = vec![LogEntry {
+            log_id: "log-1".to_string(),
+            log_type: "test".to_string(),
+            content: serde_json::json!({ "ok": true }),
+            created_at: "now".to_string(),
+        }];
+
+        BatchLogWriter::flush_batch_with_pool(&pool, &mut batch)
+            .await
+            .expect("flush logs");
+
+        let row_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM batch_log_entry_journal")
+            .fetch_one(&pool)
+            .await
+            .expect("count rows");
+        assert!(batch.is_empty());
+        assert_eq!(row_count, 1);
+    }
+
+    #[tokio::test]
+    async fn batch_trace_writer_flush_persists_journal_rows() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("memory db");
+        let writer = BatchTraceWriter::new(BatchConfig::default());
+        writer
+            .add_trace(TraceEntry {
+                trace_id: "trace-1".to_string(),
+                scene_turn_id: "turn-1".to_string(),
+                step_kind: "step".to_string(),
+                content: serde_json::json!({ "ok": true }),
+                created_at: "now".to_string(),
+            })
+            .expect("queue trace");
+
+        let flushed = writer.flush_with_pool(&pool).await.expect("flush traces");
+
+        let row_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM batch_trace_entry_journal")
+            .fetch_one(&pool)
+            .await
+            .expect("count rows");
+        assert_eq!(flushed, 1);
+        assert_eq!(row_count, 1);
     }
 }

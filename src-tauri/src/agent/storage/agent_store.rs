@@ -345,6 +345,7 @@ impl AgentStore {
             r#"
             UPDATE agent_sessions SET
                 title = ?,
+                period_anchor = ?,
                 player_mode = ?,
                 player_character_id = ?,
                 canon_status = ?,
@@ -355,6 +356,7 @@ impl AgentStore {
             "#,
         )
         .bind(&session.title)
+        .bind(&period_anchor_json)
         .bind(player_mode_to_str(&session.player_mode))
         .bind(&session.player_character_id)
         .bind(canon_status_to_str(&session.canon_status))
@@ -1229,5 +1231,50 @@ mod tests {
         assert_eq!(turns[1].local_index, 1);
         assert_eq!(turns[0].role, TurnRole::User);
         assert_eq!(turns[1].message_json["content"], "已开始");
+    }
+
+    #[tokio::test]
+    async fn update_session_persists_period_anchor() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("memory db");
+        let store = AgentStore::new(pool, "world_session_update".to_string())
+            .await
+            .expect("agent store");
+        let mut session = AgentSession::new_with_mode(
+            "world_session_update".to_string(),
+            "测试会话".to_string(),
+            AgentSessionKind::Mainline,
+            TimeAnchor {
+                calendar_id: "default".to_string(),
+                ordinal: 1,
+                precision: TimePrecision::Exact,
+                display_text: "第一回合".to_string(),
+            },
+            PlayerMode::Director,
+            None,
+        )
+        .expect("session");
+        store
+            .create_session(&session)
+            .await
+            .expect("create session");
+
+        session.period_anchor.ordinal = 2;
+        session.period_anchor.display_text = "第二回合".to_string();
+        store
+            .update_session(&session)
+            .await
+            .expect("update session");
+
+        let loaded = store
+            .get_session(&session.session_id)
+            .await
+            .expect("load session")
+            .expect("session exists");
+        assert_eq!(loaded.period_anchor.ordinal, 2);
+        assert_eq!(loaded.period_anchor.display_text, "第二回合");
     }
 }

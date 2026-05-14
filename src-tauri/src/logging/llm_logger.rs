@@ -646,13 +646,10 @@ pub fn generate_readable_content_structured(
         }
     });
 
-    // First get the body object (request_json is wrapped with headers)
-    let request_body = request_json
-        .get("body")
-        .unwrap_or(request_json);
+    let request_body = request_body_json(request_json);
 
     // Extract system prompt if present (for providers that use separate system field)
-    if let Some(system) = request_body.get("system") {
+    if let Some(system) = request_system_json(request_json, request_body) {
         let system_text = extract_text_value(system);
         if !system_text.trim().is_empty() {
             messages.push(ReadableMessage {
@@ -842,13 +839,10 @@ fn assemble_readable_text(
 ) -> Option<String> {
     let mut parts = Vec::new();
 
-    // First get the body object (request is wrapped with headers)
-    let request_body = request
-        .get("body")
-        .unwrap_or(request);
+    let request_body = request_body_json(request);
 
     // Extract system prompt if present (for providers that use separate system field)
-    if let Some(system) = request_body.get("system") {
+    if let Some(system) = request_system_json(request, request_body) {
         let system_text = extract_text_value(system);
         if !system_text.trim().is_empty() {
             parts.push(format!("SYSTEM >\n{}", format_readable_content(&system_text)));
@@ -894,6 +888,19 @@ fn assemble_readable_text(
     } else {
         Some(parts.join("\n\n---\n\n"))
     }
+}
+
+fn request_body_json(request: &serde_json::Value) -> &serde_json::Value {
+    request.get("body").unwrap_or(request)
+}
+
+fn request_system_json<'a>(
+    request: &'a serde_json::Value,
+    request_body: &'a serde_json::Value,
+) -> Option<&'a serde_json::Value> {
+    request_body
+        .get("system")
+        .or_else(|| request.get("system"))
 }
 
 /// Extract text from a content field (string or array of content parts)
@@ -973,13 +980,10 @@ fn build_readable_text_from_content(
         }
     }
 
-    // First get the body object (request is wrapped with headers)
-    let request_body = request
-        .get("body")
-        .unwrap_or(request);
+    let request_body = request_body_json(request);
 
     // Extract system prompt if present (for providers that use separate system field)
-    if let Some(system) = request_body.get("system") {
+    if let Some(system) = request_system_json(request, request_body) {
         let system_text = extract_text_value(system);
         if !system_text.trim().is_empty() {
             parts.push(format!("SYSTEM >\n{}", format_readable_content(&system_text)));
