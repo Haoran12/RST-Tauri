@@ -5,8 +5,36 @@
 //! - 外部世界书 entries 使用 Record<string, WorldInfoEntry> 对象形式
 //! - CharacterBook entries 使用数组形式
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
+
+fn default_i32_from_null<'de, D>(deserializer: D) -> Result<i32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<i32>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+fn default_bool_from_null<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<bool>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+fn default_string_from_null<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+fn default_vec_string_from_null<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<Vec<String>>::deserialize(deserializer)?.unwrap_or_default())
+}
 
 // ============================================================================
 // TavernCard V3 - 角色卡
@@ -177,70 +205,71 @@ pub struct WorldInfoFile {
 /// 字段名使用 camelCase，与 ST newWorldInfoEntryTemplate 一致。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorldInfoEntry {
+    #[serde(default, deserialize_with = "default_i32_from_null")]
     pub uid: i32,
 
     // 匹配
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_vec_string_from_null")]
     pub key: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_vec_string_from_null")]
     pub keysecondary: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_bool_from_null")]
     pub selective: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_i32_from_null")]
     pub selective_logic: i32,
 
     // 内容
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_string_from_null")]
     pub comment: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_string_from_null")]
     pub content: String,
 
     // 状态
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_bool_from_null")]
     pub constant: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_bool_from_null")]
     pub vectorized: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_bool_from_null")]
     pub disable: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_bool_from_null")]
     pub add_memo: bool,
 
     // 排序与位置
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_i32_from_null")]
     pub order: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_i32_from_null")]
     pub position: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_i32_from_null")]
     pub depth: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_i32_from_null")]
     pub role: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_string_from_null")]
     pub outlet_name: String,
 
     // 预算
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_bool_from_null")]
     pub ignore_budget: bool,
 
     // 递归
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_bool_from_null")]
     pub exclude_recursion: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_bool_from_null")]
     pub prevent_recursion: bool,
     #[serde(default)]
     pub delay_until_recursion: serde_json::Value, // number | boolean
 
     // 概率
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_i32_from_null")]
     pub probability: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_bool_from_null")]
     pub use_probability: bool,
 
     // 分组
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_string_from_null")]
     pub group: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_bool_from_null")]
     pub group_override: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_i32_from_null")]
     pub group_weight: i32,
     #[serde(default)]
     pub use_group_scoring: Option<bool>,
@@ -262,23 +291,23 @@ pub struct WorldInfoEntry {
     pub delay: Option<i32>,
 
     // 匹配目标扩展
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_bool_from_null")]
     pub match_persona_description: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_bool_from_null")]
     pub match_character_description: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_bool_from_null")]
     pub match_character_personality: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_bool_from_null")]
     pub match_character_depth_prompt: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_bool_from_null")]
     pub match_scenario: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_bool_from_null")]
     pub match_creator_notes: bool,
 
     // 自动化
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_string_from_null")]
     pub automation_id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_vec_string_from_null")]
     pub triggers: Vec<String>,
     #[serde(default)]
     pub display_index: Option<i32>,
