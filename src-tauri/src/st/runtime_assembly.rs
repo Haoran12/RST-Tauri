@@ -447,8 +447,14 @@ impl RequestAssembler {
             messages.push(prompt);
         }
 
+        let depth_injections = Self::build_depth_injections(context);
+
         // 转换聊天历史
-        for msg in &context.session.messages {
+        for (message_index, msg) in context.session.messages.iter().enumerate() {
+            if let Some(injections) = depth_injections.get(&message_index) {
+                messages.extend(injections.iter().cloned());
+            }
+
             let role = match msg.role.as_str() {
                 "user" => "user",
                 "assistant" => "assistant",
@@ -467,6 +473,10 @@ impl RequestAssembler {
                     .map(to_assembled_attachment)
                     .collect(),
                 });
+        }
+
+        if let Some(injections) = depth_injections.get(&context.session.messages.len()) {
+            messages.extend(injections.iter().cloned());
         }
 
         if let Some(prompt_preset) = &context.prompt_preset {
@@ -497,6 +507,41 @@ impl RequestAssembler {
         }
 
         messages
+    }
+
+    fn build_depth_injections(context: &RuntimeContext) -> HashMap<usize, Vec<AssembledMessage>> {
+        let mut result: HashMap<usize, Vec<AssembledMessage>> = HashMap::new();
+        let Some(world_info) = context.world_info_result.as_ref() else {
+            return result;
+        };
+
+        for (depth, role_map) in &world_info.world_info_depth {
+            let insertion_index = if *depth <= 0 {
+                context.session.messages.len()
+            } else {
+                context.session.messages.len().saturating_sub(*depth as usize)
+            };
+
+            let mut contents: Vec<(&i32, &String)> = role_map.iter().collect();
+            contents.sort_by_key(|(role, _)| **role);
+
+            for (role, content) in contents {
+                if content.trim().is_empty() {
+                    continue;
+                }
+
+                result
+                    .entry(insertion_index)
+                    .or_default()
+                    .push(AssembledMessage {
+                        role: Self::map_extension_prompt_role(*role).to_string(),
+                        content: Self::format_world_info(context, content),
+                        attachments: Vec::new(),
+                    });
+            }
+        }
+
+        result
     }
 
     fn format_world_info(context: &RuntimeContext, content: &str) -> String {
@@ -664,6 +709,14 @@ impl RequestAssembler {
                 "system" => "system".to_string(),
                 _ => "user".to_string(),
             }
+        }
+    }
+
+    fn map_extension_prompt_role(role: i32) -> &'static str {
+        match role {
+            1 => "user",
+            2 => "assistant",
+            _ => "system",
         }
     }
 
@@ -1293,5 +1346,55 @@ mod tests {
         assert!(prompt.contains("Lore before"));
         assert!(prompt.contains("Name: Alice\nDescription: A ranger"));
         assert!(prompt.contains("Knight of the north"));
+    }
+
+    #[test]
+    fn build_messages_inserts_at_depth_world_info_before_target_depth() {
+        let mut context = sample_context();
+        context.session.messages = vec![
+            STChatMessage {
+                id: "m1".to_string(),
+                role: "user".to_string(),
+                content: "older".to_string(),
+                created_at: String::new(),
+                name: None,
+                attachments: Vec::new(),
+            },
+            STChatMessage {
+                id: "m2".to_string(),
+                role: "assistant".to_string(),
+                content: "middle".to_string(),
+                created_at: String::new(),
+                name: None,
+                attachments: Vec::new(),
+            },
+            STChatMessage {
+                id: "m3".to_string(),
+                role: "user".to_string(),
+                content: "latest".to_string(),
+                created_at: String::new(),
+                name: None,
+                attachments: Vec::new(),
+            },
+        ];
+        context.world_info_result = Some(WorldInfoInjectionResult {
+            world_info_depth: HashMap::from([(
+                1,
+                HashMap::from([(0, "Depth lore".to_string())]),
+            )]),
+            ..Default::default()
+        });
+
+        let messages = RequestAssembler::build_messages(&context);
+        let depth_index = messages
+            .iter()
+            .position(|message| message.content == "Depth lore")
+            .expect("depth injection present");
+        let latest_index = messages
+            .iter()
+            .position(|message| message.content == "latest")
+            .expect("latest message present");
+
+        assert!(depth_index < latest_index);
     }
 }

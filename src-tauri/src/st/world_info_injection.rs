@@ -77,6 +77,24 @@ pub struct WorldInfoInjector {
     worldbook_cache: Arc<RwLock<HashMap<String, WorldInfoFile>>>,
 }
 
+#[derive(Debug, Clone)]
+struct SortedEntry {
+    entry: WorldInfoEntry,
+    source_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ActivationKey {
+    source_key: String,
+    uid: i32,
+}
+
+#[derive(Debug, Clone)]
+struct ScanCandidate {
+    entry: WorldInfoEntry,
+    activation_key: ActivationKey,
+}
+
 impl WorldInfoInjector {
     pub fn new() -> Self {
         Self {
@@ -134,8 +152,8 @@ impl WorldInfoInjector {
         sources: Vec<WorldInfoSource>,
         settings: &STWorldInfoSettings,
         macro_context: &MacroContext,
-    ) -> Vec<(WorldInfoEntry, String)> {
-        let mut all_entries: Vec<(WorldInfoEntry, String, i32)> = Vec::new();
+    ) -> Vec<SortedEntry> {
+        let mut all_entries: Vec<(SortedEntry, i32)> = Vec::new();
         let mut seen_worlds: HashSet<String> = HashSet::new();
 
         // 按 priority 排序来源
@@ -144,6 +162,11 @@ impl WorldInfoInjector {
 
         for source in sorted_sources {
             let world_name = source.file().name.clone();
+            let source_key = source
+                .file()
+                .rst_lore_id
+                .clone()
+                .unwrap_or_else(|| format!("{}:{}", source.source_name(), world_name));
 
             // 去重：如果同一世界书名称已在更高优先级来源中启用，跳过
             if seen_worlds.contains(&world_name) {
@@ -166,8 +189,10 @@ impl WorldInfoInjector {
                     .map(|key| substitute_params(key, macro_context))
                     .collect();
                 all_entries.push((
-                    entry,
-                    source.source_name().to_string(),
+                    SortedEntry {
+                        entry,
+                        source_key: source_key.clone(),
+                    },
                     source.priority(),
                 ));
             }
@@ -180,27 +205,26 @@ impl WorldInfoInjector {
         match settings.world_info_character_strategy {
             0 => {
                 // evenly: 全部合并后按 order 降序
-                all_entries.sort_by(|a, b| b.0.order.cmp(&a.0.order));
+                all_entries.sort_by(|a, b| b.0.entry.order.cmp(&a.0.entry.order));
             }
             1 => {
                 // character_first: Character 优先，然后 Global
-                all_entries.sort_by(|a, b| match a.2.cmp(&b.2) {
-                    std::cmp::Ordering::Equal => b.0.order.cmp(&a.0.order),
+                all_entries.sort_by(|a, b| match a.1.cmp(&b.1) {
+                    std::cmp::Ordering::Equal => b.0.entry.order.cmp(&a.0.entry.order),
                     other => other,
                 });
             }
             2 => {
                 // global_first: Global 优先，然后 Character
-                all_entries.sort_by(|a, b| match a.2.cmp(&b.2).reverse() {
-                    std::cmp::Ordering::Equal => b.0.order.cmp(&a.0.order),
+                all_entries.sort_by(|a, b| match a.1.cmp(&b.1).reverse() {
+                    std::cmp::Ordering::Equal => b.0.entry.order.cmp(&a.0.entry.order),
                     other => other,
                 });
             }
             _ => {}
         }
 
-        // 返回 (entry, source_name)
-        all_entries.into_iter().map(|(e, s, _)| (e, s)).collect()
+        all_entries.into_iter().map(|(entry, _)| entry).collect()
     }
 
     /// 计算 token 预算
@@ -243,7 +267,7 @@ impl WorldInfoInjector {
     /// 扫描词条
     async fn scan_entries(
         &mut self,
-        entries: &[(WorldInfoEntry, String)],
+        entries: &[SortedEntry],
         scan_text: &[String],
         budget: i32,
         settings: &STWorldInfoSettings,
@@ -251,7 +275,7 @@ impl WorldInfoInjector {
     ) -> ScanResult {
         let mut result = ScanResult::default();
         let mut used_budget = 0i32;
-        let mut activated_uids: HashSet<i32> = HashSet::new();
+        let mut activated_keys: HashSet<ActivationKey> = HashSet::new();
         let mut current_scan_text = scan_text.to_vec();
         let max_steps = if settings.world_info_recursive {
             settings.world_info_max_recursion_steps.max(0)
@@ -266,34 +290,34 @@ impl WorldInfoInjector {
                 recursion_depth,
                 settings,
                 global_scan_data,
-                &activated_uids,
+                &activated_keys,
             );
             let candidates = self.apply_group_pruning(candidates);
 
             let mut recursion_additions = Vec::new();
             let mut added_this_pass = 0usize;
-            for entry in candidates {
-                if activated_uids.contains(&entry.uid) {
+            for candidate in candidates {
+                if activated_keys.contains(&candidate.activation_key) {
                     continue;
                 }
-                if !self.passes_probability(&entry, &current_scan_text, recursion_depth) {
+                if !self.passes_probability(&candidate.entry, &current_scan_text, recursion_depth) {
                     continue;
                 }
 
-                let entry_tokens = self.estimate_tokens(&entry.content);
-                if !entry.ignore_budget && used_budget + entry_tokens > budget {
+                let entry_tokens = self.estimate_tokens(&candidate.entry.content);
+                if !candidate.entry.ignore_budget && used_budget + entry_tokens > budget {
                     continue;
                 }
 
                 used_budget += entry_tokens;
-                activated_uids.insert(entry.uid);
+                activated_keys.insert(candidate.activation_key);
                 if settings.world_info_recursive
-                    && !entry.prevent_recursion
-                    && !entry.content.is_empty()
+                    && !candidate.entry.prevent_recursion
+                    && !candidate.entry.content.is_empty()
                 {
-                    recursion_additions.push(entry.content.clone());
+                    recursion_additions.push(candidate.entry.content.clone());
                 }
-                result.activated_entries.push(entry);
+                result.activated_entries.push(candidate.entry);
                 added_this_pass += 1;
             }
 
@@ -320,17 +344,23 @@ impl WorldInfoInjector {
 
     fn scan_pass(
         &mut self,
-        entries: &[(WorldInfoEntry, String)],
+        entries: &[SortedEntry],
         scan_text: &[String],
         recursion_depth: i32,
         settings: &STWorldInfoSettings,
         global_scan_data: &GlobalScanData,
-        activated_uids: &HashSet<i32>,
-    ) -> Vec<WorldInfoEntry> {
+        activated_keys: &HashSet<ActivationKey>,
+    ) -> Vec<ScanCandidate> {
         let mut candidates = Vec::new();
 
-        for (entry, _source) in entries {
-            if entry.disable || activated_uids.contains(&entry.uid) {
+        for sorted_entry in entries {
+            let entry = &sorted_entry.entry;
+            let activation_key = ActivationKey {
+                source_key: sorted_entry.source_key.clone(),
+                uid: entry.uid,
+            };
+
+            if entry.disable || activated_keys.contains(&activation_key) {
                 continue;
             }
             if !Self::passes_recursion_gate(entry, recursion_depth) {
@@ -341,7 +371,10 @@ impl WorldInfoInjector {
             }
 
             if entry.constant {
-                candidates.push(entry.clone());
+                candidates.push(ScanCandidate {
+                    entry: entry.clone(),
+                    activation_key,
+                });
                 continue;
             }
 
@@ -362,7 +395,10 @@ impl WorldInfoInjector {
             };
 
             if self.matcher.match_entry(entry, &context).is_some() {
-                candidates.push(entry.clone());
+                candidates.push(ScanCandidate {
+                    entry: entry.clone(),
+                    activation_key,
+                });
             }
         }
 
@@ -391,28 +427,34 @@ impl WorldInfoInjector {
         }
     }
 
-    fn apply_group_pruning(&self, entries: Vec<WorldInfoEntry>) -> Vec<WorldInfoEntry> {
+    fn apply_group_pruning(&self, entries: Vec<ScanCandidate>) -> Vec<ScanCandidate> {
         let mut passthrough = Vec::new();
-        let mut grouped: HashMap<String, WorldInfoEntry> = HashMap::new();
+        let mut grouped: HashMap<String, ScanCandidate> = HashMap::new();
 
-        for entry in entries {
-            if entry.group.is_empty() || entry.group_override {
-                passthrough.push(entry);
+        for candidate in entries {
+            if candidate.entry.group.is_empty() || candidate.entry.group_override {
+                passthrough.push(candidate);
                 continue;
             }
 
             grouped
-                .entry(entry.group.clone())
+                .entry(candidate.entry.group.clone())
                 .and_modify(|existing| {
-                    if Self::group_rank(&entry) > Self::group_rank(existing) {
-                        *existing = entry.clone();
+                    if Self::group_rank(&candidate.entry) > Self::group_rank(&existing.entry) {
+                        *existing = candidate.clone();
                     }
                 })
-                .or_insert(entry);
+                .or_insert(candidate);
         }
 
         passthrough.extend(grouped.into_values());
-        passthrough.sort_by(|a, b| b.order.cmp(&a.order).then_with(|| a.uid.cmp(&b.uid)));
+        passthrough.sort_by(|a, b| {
+            b.entry
+                .order
+                .cmp(&a.entry.order)
+                .then_with(|| a.entry.uid.cmp(&b.entry.uid))
+                .then_with(|| a.activation_key.source_key.cmp(&b.activation_key.source_key))
+        });
         passthrough
     }
 
@@ -470,13 +512,16 @@ impl WorldInfoInjector {
                 p if p == WorldInfoPosition::AT_DEPTH => {
                     let depth = entry.depth;
                     let role = entry.role;
-                    result
+                    let slot = result
                         .world_info_depth
                         .entry(depth)
                         .or_insert_with(HashMap::new)
                         .entry(role)
-                        .or_insert_with(String::new)
-                        .push_str(&content);
+                        .or_insert_with(String::new);
+                    if !slot.is_empty() {
+                        slot.push('\n');
+                    }
+                    slot.push_str(&content);
                 }
                 p if p == WorldInfoPosition::EM_TOP => {
                     result.em_top.push_str(&content);
@@ -718,5 +763,57 @@ mod tests {
 
         assert_eq!(result.activated_entries, vec![1]);
         assert!(result.world_info_before.contains("Known as ally of Alice"));
+    }
+
+    #[tokio::test]
+    async fn check_world_info_keeps_entries_from_different_worldbooks_with_same_uid() {
+        let mut first_entries = HashMap::new();
+        let mut first = crate::storage::st_resources::WorldInfoEntry::new(1);
+        first.constant = true;
+        first.content = "First lore".to_string();
+        first_entries.insert("1".to_string(), first);
+
+        let mut second_entries = HashMap::new();
+        let mut second = crate::storage::st_resources::WorldInfoEntry::new(1);
+        second.constant = true;
+        second.content = "Second lore".to_string();
+        second_entries.insert("1".to_string(), second);
+
+        let sources = vec![
+            WorldInfoSource::ChatLore(WorldInfoFile {
+                entries: first_entries,
+                original_data: None,
+                rst_lore_id: Some("lore-a".to_string()),
+                name: "Lore A".to_string(),
+                description: String::new(),
+                extensions: serde_json::Map::new(),
+                extra: serde_json::Map::new(),
+            }),
+            WorldInfoSource::GlobalLore(WorldInfoFile {
+                entries: second_entries,
+                original_data: None,
+                rst_lore_id: Some("lore-b".to_string()),
+                name: "Lore B".to_string(),
+                description: String::new(),
+                extensions: serde_json::Map::new(),
+                extra: serde_json::Map::new(),
+            }),
+        ];
+
+        let mut injector = WorldInfoInjector::new();
+        let result = injector
+            .check_world_info(
+                &[],
+                4096,
+                &STWorldInfoSettings::default(),
+                sources,
+                &GlobalScanData::default(),
+                &MacroContext::default(),
+            )
+            .await;
+
+        assert!(result.world_info_before.contains("First lore"));
+        assert!(result.world_info_before.contains("Second lore"));
+        assert_eq!(result.activated_entries, vec![1, 1]);
     }
 }
