@@ -24,6 +24,8 @@ import type {
   PromptPreset,
 } from '@/types/preset';
 
+export const DEFAULT_ST_MAX_CONTEXT = 32768;
+
 // ============================================================================
 // 流式传输事件类型
 // ============================================================================
@@ -282,7 +284,7 @@ export async function buildCompleteChatRequest(
     world_info_settings: worldInfoSettings,
     chat_lore_id: options?.chatLoreId ?? null,
     global_lore_ids: options?.globalLoreIds ?? [],
-    max_context: options?.maxContext ?? 8192,
+    max_context: options?.maxContext ?? DEFAULT_ST_MAX_CONTEXT,
   };
 
   const assembleOutput = await assembleSTRequest(assembleInput);

@@ -35,6 +35,7 @@ import { useCharactersStore } from '@/stores/characters'
 import type { CharacterCard, ChatAttachmentRef, ChatMessage } from '@/types/st'
 import type { AssembleRequestInput } from '@/types/runtime'
 import { modalSizeStyles } from '@/composables/useModalSize'
+import { DEFAULT_ST_MAX_CONTEXT } from '@/services/runtime'
 import { getChatAttachmentBlob, loadPreset } from '@/services/storage'
 
 const route = useRoute()
@@ -378,7 +379,7 @@ const promptPreviewInput = computed<AssembleRequestInput | null>(() => {
     world_info_settings: runtimeStore.globalState.world_info_settings,
     chat_lore_id: null,
     global_lore_ids: [],
-    max_context: 8192,
+    max_context: DEFAULT_ST_MAX_CONTEXT,
   }
 })
 

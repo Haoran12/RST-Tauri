@@ -543,7 +543,7 @@ pub struct AssembleRequestOutput {
 }
 
 fn default_max_context() -> i32 {
-    8192
+    32768
 }
 
 /// 组装 ST 聊天请求

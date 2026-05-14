@@ -10,7 +10,12 @@ import type {
   STUserPersona,
 } from '@/types/st'
 import * as storage from '@/services/storage'
-import { sendAssembledSTChatMessage, startSTChatStream, type StreamController } from '@/services/runtime'
+import {
+  DEFAULT_ST_MAX_CONTEXT,
+  sendAssembledSTChatMessage,
+  startSTChatStream,
+  type StreamController,
+} from '@/services/runtime'
 import { useRuntimeStore } from '@/stores/runtime'
 
 const MAX_CHAT_ATTACHMENT_BYTES = 10 * 1024 * 1024
@@ -234,7 +239,7 @@ export const useChatStore = defineStore('chat', () => {
         world_info_settings: runtimeStore.globalState.world_info_settings,
         chat_lore_id: null,
         global_lore_ids: [],
-        max_context: 8192,
+        max_context: DEFAULT_ST_MAX_CONTEXT,
       })
 
       // Handle response based on generate type
@@ -326,7 +331,7 @@ export const useChatStore = defineStore('chat', () => {
           world_info_settings: runtimeStore.globalState.world_info_settings,
           chat_lore_id: null,
           global_lore_ids: [],
-          max_context: 8192,
+          max_context: DEFAULT_ST_MAX_CONTEXT,
         },
         {
           onStart: () => {

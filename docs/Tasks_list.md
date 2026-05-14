@@ -235,7 +235,7 @@
 | 8.12 | 内置预设提示词条目 | ✅ | 2026-05-06 | 改为直接采用 SillyTavern 风格默认 prompt 预设：`main/nsfw/dialogueExamples/jailbreak/worldInfoBefore/worldInfoAfter/charDescription/charPersonality/scenario/personaDescription/chatHistory`，默认预设与新建预设都带完整内容，运行时按 `prompt_order` 实际组装 |
 | 8.13 | Tauri 生产构建样式稳定性 | ✅ | 2026-05-06 | Vite 生产构建改为单入口 CSS，首屏 Naive UI provider 不再异步拆分，CSP 明确允许运行时 style 注入，避免 build 产物退化为近似浏览器原生控件 |
 | 8.14 | ST 会话级角色卡、世界书与 User Persona 设置 | ✅ | 2026-05-06 | 会话保存 `character_id`、`enabled_world_info` 多选与 `user_persona`；ST 会话侧栏三点菜单可编辑名称、角色卡、世界书和 Persona Description，运行时组装读取这些字段 |
-| 8.15 | ST 会话页预设 / 主 API 选择与契约参数适配 | ✅ | 2026-05-07 | 会话页页头新增紧凑预设和主 API 配置选择器；`stream_openai` 实际控制流式路径；运行时按 `llm_api_contract` 裁剪/映射采样参数并修复 provider stream 请求体 |
+| 8.15 | ST 会话页预设 / 主 API 选择与契约参数适配 | ✅ | 2026-05-07 | 会话页页头新增紧凑预设和主 API 配置选择器；`stream_openai` 实际控制流式路径；运行时按 `llm_api_contract` 裁剪/映射采样参数并修复 provider stream 请求体。2026-05-15 将 ST 请求组装默认 `max_context` 从 `8192` 提升到 `32768`，避免世界书预算过早受限。 |
 
 ---
 
